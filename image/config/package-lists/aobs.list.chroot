@@ -1,0 +1,37 @@
+# The 22-package floor (01-boot-layer.md §2), as direct dependencies — apt resolves the
+# closure, and `--apt-recommends false` keeps it from widening.
+#
+# This is the irreducible floor for any KMS GUI, not Slint's overhead: libinput, libseat,
+# libxkbcommon, freetype, fontconfig, fonts-dejavu and their closure, at 21 MiB. The
+# competing measurement was Tauri at 268 packages / 650 MiB
+# (docs/research/05-tauri-viability.md).
+#
+# The published package manifest (ADR-0012) is what makes this auditable without
+# building the image.
+
+# Slint on backend-linuxkms + renderer-software. No X server, no Wayland compositor, no
+# cage, no display manager, no GPU driver.
+libinput10
+libseat1
+libxkbcommon0
+libfontconfig1
+libfreetype6
+fonts-dejavu-core
+
+# seatd, 104 KiB, with LIBSEAT_BACKEND=seatd. greetd is rejected: its initial_session
+# runs exactly once per boot by design, which is the opposite of what a restarting kiosk
+# needs.
+seatd
+
+# Deliberately absent, each for a reason recorded in the spec:
+#
+#   network-manager   §3 — 7.6 MiB, and worthless as a guarantee on its own
+#   firmware-*        §3 — no network driver gets firmware because none is installed
+#   udisks2, gvfs     §4 — nothing exists to mount anything
+#   kdump-tools       §4 — no kernel crash dumps
+#   v4l-utils         §7 — the app talks V4L2 ioctls directly
+#   libv4l-0t64       §7 — same
+#   any terminal emulator, SSH server or getty
+#                     §2 — nothing here is meant to be driven from a shell, so one is
+#                          only a mistake surface, and it advertises a capability the
+#                          appliance does not offer

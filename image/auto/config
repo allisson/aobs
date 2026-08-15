@@ -1,0 +1,44 @@
+#!/bin/sh
+# live-build configuration for bitcoin-signer-amd64.iso (01-boot-layer.md §1).
+#
+# live-build, not mkosi, not debos, not hand-rolled debootstrap + xorriso: it is the only
+# candidate that emits an ISO, which the deliverable fixes, and it is ahead on
+# reproducibility rather than behind — SOURCE_DATE_EPOCH is already threaded through
+# xorriso --modification-date, the ESP volume ID, mtime normalisation and every chroot
+# command.
+#
+# Accepted downsides, recorded here so they are not rediscovered as defects: this is
+# shell scripts, config/ is stateful, and `lb build` needs root.
+set -e
+
+. ./cmdline.sh
+
+lb config noauto \
+    --mode debian \
+    --distribution trixie \
+    --architectures amd64 \
+    --archive-areas main \
+    --binary-images iso-hybrid \
+    --image-name bitcoin-signer \
+    --bootloaders grub-efi \
+    --iso-application "aobs" \
+    --iso-publisher "aobs; https://github.com/allisson/aobs" \
+    --iso-volume "aobs" \
+    --memtest none \
+    --debian-installer none \
+    --win32-loader false \
+    `# The 22-package floor is only a floor if apt is not allowed to widen it.` \
+    --apt-recommends false \
+    --apt-indices false \
+    --backports false \
+    `# §3: install no firmware-* package. A driver with no firmware is still a driver,` \
+    `# but the primary control deletes the drivers, and this keeps the closure honest.` \
+    --firmware-binary false \
+    --firmware-chroot false \
+    `# §6. The GRUB menu is written by config/hooks/normal/9000-aobs-grub-menu.hook.binary,` \
+    `# which reads the same cmdline.sh; this keeps anything else live-build generates` \
+    `# from disagreeing with it.` \
+    --bootappend-live "${AOBS_CMDLINE_TORAM}" \
+    `# §7 fixes the menu at exactly two entries, so live-build's extra fail-safe one goes.` \
+    --bootappend-live-failsafe none \
+    "${@}"

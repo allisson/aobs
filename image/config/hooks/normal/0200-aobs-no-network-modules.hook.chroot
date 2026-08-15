@@ -1,0 +1,49 @@
+#!/bin/sh
+# No network — enforced, not configured. 01-boot-layer.md §3, the primary control.
+#
+# Undoing this requires rebuilding the ISO: the rootfs is a read-only squashfs with a
+# tmpfs overlay, so there is no .ko on the medium to insmod, and the QR-only channel
+# gives no way to bring one in.
+#
+# "No network" here means no link layer to any physical interface, not "no network
+# stack". Loopback and AF_UNIX stay intact deliberately — systemd needs AF_UNIX, and
+# CONFIG_NET=n was rejected partly because net/unix/Kconfig is sourced from inside
+# `if NET … endif`, so AF_UNIX disappears with it.
+set -eu
+
+deleted=0
+for modules_dir in /lib/modules/*; do
+    [ -d "${modules_dir}" ] || continue
+
+    for target in \
+        "${modules_dir}/kernel/drivers/net" \
+        "${modules_dir}/kernel/drivers/bluetooth" \
+        "${modules_dir}/kernel/net"
+    do
+        if [ -d "${target}" ]; then
+            rm -rf "${target}"
+            deleted=$((deleted + 1))
+        fi
+    done
+
+    depmod -a "$(basename "${modules_dir}")"
+done
+
+if [ "${deleted}" -eq 0 ]; then
+    echo "0200-aobs-no-network-modules: found nothing to delete under /lib/modules." >&2
+    echo "The kernel layout changed, and the primary no-network control did nothing." >&2
+    exit 1
+fi
+
+# §3: "The initramfs must be stripped too" — initramfs-tools defaults to MODULES=most,
+# which bundles network drivers independently of the squashfs.
+#
+# §3 offers two ways: MODULES=dep, or prune the same paths. We take the pruning arm, and
+# it comes free: the modules are already gone from /lib/modules by the time this runs, so
+# MODULES=most has nothing to find. MODULES=dep was rejected on a product ground — `dep`
+# resolves against the BUILD machine's hardware, and this image has to boot whatever
+# UEFI machine the user has.
+update-initramfs -u -k all
+
+# The stated build check runs against the built artifact, in CI, not here
+# (05-testing-and-release.md §6.1): lsinitramfs shows no drivers/net entries.

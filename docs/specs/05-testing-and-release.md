@@ -147,7 +147,7 @@ path.
 |---|---|
 | **Entropy provenance** — trace the `getrandom` syscall during a seed generation and assert the wallet's entropy bytes are **byte-identical** to what the traced syscall returned; assert `crng init done` in `dmesg`; assert **zero opens of `/dev/urandom`**. | The linkage, not the intention. |
 | OVMF + virtio-gpu | The native KMS path. |
-| OVMF + `ramfb`, no GPU | **`simpledrm` specifically** — the fallback the entire display story leans on. |
+| OVMF + `ramfb`, no GPU | **`simpledrm` specifically** — the fallback the entire display story leans on. **This row cannot pass as written**: Debian builds no `simpledrm`, so there is no fallback to assert ([#40](https://github.com/allisson/aobs/issues/40)). Until that resolves it asserts the opposite — that a machine with no KMS driver reaches `AOBS-E02` and halts with the §9 diagnostic visible, rather than going dark. |
 | RAM at and below the floor | The low-memory GRUB entry degrades rather than bricks. |
 | No camera | The degraded-but-useful path. |
 | No keyboard | The "no input" screen appears. |

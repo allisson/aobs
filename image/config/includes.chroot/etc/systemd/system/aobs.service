@@ -1,0 +1,57 @@
+# The kiosk. 01-boot-layer.md §2.
+#
+# Crash behaviour is a stated product fact, not an incident: the app dies, systemd
+# restarts it, and the user gets a blank signer with no wallet. That is correct amnesic
+# behaviour — the in-memory wallet is gone and the seed is re-entered. Documented, not
+# engineered around.
+#
+# A *startup* failure is different and does not restart: the binary prints the §9
+# diagnostic and parks, so the only explanation the user is going to get stays on screen
+# instead of being scrolled away by the next attempt.
+
+[Unit]
+Description=aobs — amnesic offline Bitcoin signer
+Documentation=https://github.com/allisson/aobs
+Requires=seatd.service
+After=seatd.service systemd-user-sessions.service
+# There is no getty on tty1 (§2 leaves none anywhere), but claiming the VT is what makes
+# that structural rather than a matter of ordering.
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+Type=simple
+User=signer
+Group=signer
+# video for DRM master, input for libinput. §2 also says `_seatd`, but Debian has no such
+# group — its seatd runs as `seatd -g video`, so video is the seat group here too. The
+# membership is granted in 0100-aobs-signer-user.hook.chroot, which reads the group out of
+# seatd.service rather than trusting either name; these are supplementary to whatever the
+# user database already gives `signer`, not a replacement for it.
+#
+# dialout is for /dev/ttyS0, and it is the QEMU harness that needs it: without it the
+# readiness line never leaves the machine and 05-testing-and-release.md §6.2 has nothing
+# to assert on. It grants no exfiltration the appliance did not already have — this
+# process draws QR codes on a screen for a living — and the alternative was putting
+# `console=ttyS0` on a kernel command line §6 fixes verbatim.
+SupplementaryGroups=video input dialout
+Environment=LIBSEAT_BACKEND=seatd
+Environment=SLINT_BACKEND=linuxkms
+# §2 names /usr/bin/aobs; §9 names a wrapper. The wrapper execs it and covers the one
+# case the binary cannot report on — never having started.
+ExecStart=/usr/lib/aobs/launch
+Restart=always
+RestartSec=1s
+
+# The kernel console is the one channel that survives a GUI that never came up (§9), and
+# simpledrm guarantees it exists.
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=journal+console
+StandardError=journal+console
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+
+[Install]
+WantedBy=multi-user.target

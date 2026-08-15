@@ -1,0 +1,24 @@
+#!/bin/sh
+# No swap. 01-boot-layer.md §4.
+#
+# The primary control is already the kernel command line: live-boot's components/3020-swap
+# returns immediately unless a `swap` or `live-boot.swap=` parameter is present, and §6
+# puts neither there. This is the second line.
+#
+# There is no `noswap` kernel parameter. §4 says so; do not cargo-cult one onto the
+# cmdline later.
+set -eu
+
+# Neutered by replacement rather than by dpkg-divert: --rename would leave the working
+# binary on the image under another name.
+for tool in /usr/sbin/swapon /usr/sbin/swapoff; do
+    rm -f "${tool}"
+    ln -s /bin/false "${tool}"
+done
+
+systemctl mask swap.target
+
+# Auto-mount is handled by absence, not by configuration: no udisks2, no gvfs, no file
+# manager, no desktop environment (see config/package-lists/aobs.list.chroot). Nothing
+# exists to mount anything. Do NOT try to solve that by removing filesystem modules —
+# squashfs, overlay, isofs and vfat are needed to boot.

@@ -1,0 +1,33 @@
+#!/bin/sh
+# The wrapper 01-boot-layer.md §9 calls for, and the last line of the diagnostic path.
+#
+# /usr/bin/aobs reports its own startup failures: it knows the typed error variant, which
+# is what §9 asks to be printed, and it halts with the block visible rather than exiting.
+# So reaching the end of this script means the binary never got far enough to speak for
+# itself — a missing shared library, a wrong interpreter, an image built wrong. That is
+# precisely the case a wrapper exists to cover, and it is the failure a mis-built image
+# produces.
+#
+# Fixed strings only. No exit status, no linker message, no program state (§9).
+
+/usr/bin/aobs
+
+cat <<'EOF'
+
+========================================================================
+aobs could not start.
+
+  The signer program stopped before it could report anything itself.
+  This image is built wrong, or the medium it was written to is damaged.
+  Verify the download against its signature and write the medium again.
+
+  failure code AOBS-E00
+========================================================================
+This machine has halted. Power it off when you have read this.
+EOF
+
+# Halt with the text visible; do not power off (§9). Exiting would let the unit's
+# Restart=always scroll the only explanation the user is going to get off the screen.
+while true; do
+    sleep 3600
+done

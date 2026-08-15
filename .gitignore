@@ -19,3 +19,42 @@ target
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# The built appliance and what ships beside it
+*.iso
+*.iso.zsync
+*.packages
+
+# ci/build-binary.sh stages the compiled binary here for live-build to pick up.
+/image/config/includes.chroot/usr/bin/aobs
+
+.DS_Store
+
+# `lb config` GENERATES most of config/ from auto/config, and 01-boot-layer.md §1 records
+# that statefulness as an accepted downside of live-build. Only the files we author belong
+# in git — committing live-build's generated defaults would freeze one version's hook set
+# into the repo and make auto/config decorative.
+#
+# Our hooks share config/hooks/normal/ with live-build's own, so they carry an `aobs`
+# infix and everything else in that directory is ignored.
+/image/config/binary
+/image/config/bootstrap
+/image/config/chroot
+/image/config/common
+/image/config/source
+/image/config/hooks/live/
+/image/config/package-lists/live.list.chroot
+/image/config/hooks/normal/*
+!/image/config/hooks/normal/*aobs*
+
+# live-build scratch: `lb build` writes these into the config directory.
+/image/.build/
+/image/binary/
+/image/cache/
+/image/chroot/
+/image/chroot.files
+/image/local/
+/image/*.contents
+/image/*.files
+/image/*.packages
+/image/*.log

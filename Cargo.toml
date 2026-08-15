@@ -1,0 +1,22 @@
+[workspace]
+members = ["aobs-core", "aobs"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/allisson/aobs"
+
+# `panic = "unwind"`, never `abort` (01-boot-layer.md §10).
+#
+# The zeroization guarantee lives in `ZeroizeOnDrop`, and drop glue does not run on
+# abort. An aborting crash with a wallet loaded would leave key material in RAM until
+# the shutdown wipe. Stated here explicitly — rather than left to the default — because
+# CI checks for this literal (05-testing-and-release.md §6.1).
+[profile.release]
+panic = "unwind"
+
+# The `aobs` shell builds on x86_64 Linux only: Slint's linuxkms backend and the raw
+# getrandom syscall have no other target. On a dev machine that is not Linux, work the
+# core crate directly: `cargo test -p aobs-core`.

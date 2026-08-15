@@ -19,7 +19,8 @@ It exists for one reason, which decides every trade in the design:
 
 ## Status
 
-**The v1 implementation spec is closed. There is no product code yet, and no release.**
+**The v1 implementation spec is closed. Implementation has started at the walking skeleton, and
+there is no release.**
 
 Every design decision was worked as a ticket and recorded before any code was written. What the
 repo currently holds:
@@ -30,7 +31,12 @@ repo currently holds:
 | [`docs/adr/`](docs/adr/) | Fifteen architecture decision records — the *why* for the choices a newcomer would otherwise read as arbitrary. |
 | [`docs/research/`](docs/research/) | Research findings, one file per question, every claim carrying a source URL. |
 | [`docs/prototypes/`](docs/prototypes/) | Throwaway HTML prototypes built to settle specific UI questions. |
+| [`docs/qa-checklist.md`](docs/qa-checklist.md) | The claims CI cannot answer, which need a person and a machine. |
 | [`CONTEXT.md`](CONTEXT.md) | The glossary. |
+| `aobs-core/` | Wallet logic. No screen, no camera, no filesystem, no clock. Currently empty. |
+| `aobs/` | The appliance binary: Slint on KMS, and the raw `getrandom` syscall. |
+| [`image/`](image/) | The live-build configuration that emits `bitcoin-signer-amd64.iso`. |
+| [`ci/`](ci/) | The build environment and the gates that run against the built artifact. |
 
 The full argument behind each decision lives in its ticket's resolution comment, indexed one line
 each from [issue #1](https://github.com/allisson/aobs/issues/1).
@@ -39,6 +45,45 @@ Two things the spec deliberately leaves open, both listed under *What is still o
 [`docs/specs/00-overview.md`](docs/specs/00-overview.md): **eight measurements** owed on real
 hardware, and **three verification obligations**. None of them blocks implementation; all of them
 block a release.
+
+## Building
+
+Everything runs in one container, so CI and a developer's machine cannot resolve a different
+compiler or a different `live-build`. `lb build` chroots and mounts, which is why the image step
+is privileged.
+
+```sh
+docker build --platform linux/amd64 -f ci/build-env.Dockerfile -t aobs-build ci
+
+# Tests and the mechanical gates that read the tree.
+docker run --rm --platform linux/amd64 -v "$PWD:/src" -w /src aobs-build \
+    sh -c 'cargo test --workspace && ci/check-source.sh'
+
+# The ISO. Both steps, in this order.
+docker run --rm --platform linux/amd64 -v "$PWD:/src" -w /src aobs-build ci/build-binary.sh
+docker run --rm --platform linux/amd64 --privileged -v "$PWD:/src" -w /src aobs-build image/build.sh
+
+# The gates that run against the artifact, not the source.
+ci/check-image.sh bitcoin-signer-amd64.iso
+ci/qemu-boot.sh   bitcoin-signer-amd64.iso
+```
+
+The appliance targets x86_64 Linux and only builds there — Slint's linuxkms backend and the raw
+`getrandom` syscall have no other target. On a non-Linux host, `cargo test -p aobs-core` works
+directly; the rest needs the container.
+
+**On a macOS host, `lb build` cannot run on the bind-mounted source tree** — `debootstrap` extracts
+`.deb` archives preserving ownership and device nodes, which Docker Desktop's shared filesystem
+does not support, and it fails with `tar failed`. Build inside the container's own filesystem and
+copy the artifacts out:
+
+```sh
+docker run --rm --platform linux/amd64 --privileged -v "$PWD:/src" aobs-build sh -c '
+    set -eu
+    mkdir -p /build && cp -a /src/image /src/ci /build/
+    cd /build/image && sh build.sh
+    cp -f /build/bitcoin-signer-amd64.iso /build/bitcoin-signer-amd64.packages /src/'
+```
 
 ## Threat model, in brief
 
