@@ -142,9 +142,18 @@ it is an instrument for making the paper correct — so a failure is the feature
   makes an off-by-one visible as a *shift* rather than as a mystery rejection at word 20. The
   mnemonic itself is never re-shown, so the input still comes from paper.
 
-## 5. Passphrase prompt
+## 5. Wallet load — passphrase and network
 
-**One screen, always present, on every load path — created, imported or restored. Empty by default.**
+**One screen, always present, on every load path — created, imported or restored.** It carries the
+two parameters that enter at derivation rather than at generation: the passphrase and the network.
+
+**The network sits above the passphrase.** The confirm control's label is a function of whether the
+passphrase field is empty (§5.1), so the passphrase must be the last thing touched before confirming;
+a two-state selector below it would be reached after the label had already settled.
+
+### 5.1 Passphrase
+
+**Empty by default.**
 
 The rejected alternative is a menu branch ("load wallet" / "load wallet with passphrase"). A branch
 is where people take the wrong one, and it makes the passphrase feel like a mode rather than a field.
@@ -161,6 +170,27 @@ is where people take the wrong one, and it makes the passphrase feel like a mode
   the field is empty, **"Use this passphrase"** when it is not. An accidental empty confirm cannot
   pass as a deliberate one.
 - Printable ASCII only; a rejected keystroke says so.
+
+### 5.2 Network
+
+**A two-state selector — mainnet or testnet/signet — with mainnet preselected.** Two states, not
+three: nothing in a key, an address or a descriptor distinguishes testnet from signet
+(`02-core.md` §6).
+
+- **Created and typed-in seeds are asked. The restore path is not** — the header's bit0 already
+  holds the answer, so this screen **states** the network for a restore instead of offering it. That
+  asymmetry is the reason the control lives here rather than in GRUB or on the start menu: a control
+  answered before the device knows the path would set a value the header then discards.
+- **No forced pick.** The user can confirm straight through and get mainnet.
+- Copy states what the selection is for and nothing else: testnet/signet is for rehearsal, and coins
+  on it are not real. No advice, no confirmation step for choosing testnet.
+- **Nothing else about the session changes.** Same chrome, same colour scheme, no rehearsal livery —
+  a rehearsal has to look identical to the real thing or it is not a rehearsal, and a mode dressed as
+  a toy would teach the user to click through the exact ceremony we want rehearsed.
+
+The network is shown in the chrome and on the identity screen in **both** directions and is never
+encoded as an absence. The master fingerprint is identical on both networks (`02-core.md` §6), so
+unlike a passphrase typo there is no second signal — this line is the only one.
 
 ## 6. Import — word-by-word seed entry
 
@@ -186,16 +216,20 @@ adequate *here* despite being a hint-only value for derivation: there it faces a
 collisions, here it faces a typo, which cannot collide. For a freshly created wallet there is nothing
 to compare against and no screen can invent one.
 
+**The fingerprint says nothing about the network** — it is identical on both (`02-core.md` §6). It
+catches a passphrase typo and cannot catch a network mistake, so the network line stands alone and
+its copy carries that weight by itself.
+
 Actions:
 
 | Action | Placement |
 |---|---|
 | **Watch-only export** (§8) | Primary, permanently available, and the closing step of creation. |
-| **Sign a transaction** (§10) | Primary. Greyed with a stated reason when no camera. |
-| **Verify a receive address** (§11) | Primary. Greyed with a stated reason when no camera. |
-| **Re-display the signed transaction** | Appears once a transaction has been signed this session. |
+| **Sign a transaction** (§11) | Primary. Greyed with a stated reason when no camera. |
+| **Verify a receive address** (§12) | Primary. Greyed with a stated reason when no camera. |
+| **Re-display the most recently signed transaction** | Appears once a transaction has been signed this session. One slot, overwritten by each new signature — see `02-core.md` §12. |
 | **Export an encrypted backup** (§9) | **Secondary.** Its position is forced, not chosen: the passphrase-in-use bit rides in the AAD, so the backup cannot exist before the passphrase is known. |
-| **Restart / shut down** (§12) | Always. |
+| **Restart / shut down** (§13) | Always. |
 
 ## 8. Watch-only export
 
@@ -289,7 +323,9 @@ let the later screens state facts instead of generalities.
   the mirrored silent failure alive. An empty passphrase entry is never refused when the bit is set —
   the user knows whether they hold it and we do not.
 - **The network bit sets the network; no choice is offered.** The file already knows the answer, so a
-  prompt could only manufacture the mismatch the bit exists to prevent.
+  prompt could only manufacture the mismatch the bit exists to prevent. §5.2's selector therefore
+  *states* rather than asks on this path — and that requirement is what fixed where the selector
+  lives at all.
 
 ## 11. Signing
 
@@ -372,9 +408,17 @@ transaction.* No counter, no percentage. Nothing at all in the single-part case.
 
 **One "done", returning to the identity screen, with no confirmation prompt.** Asking *"did it
 scan?"* is a dismissal prompt in disguise, and we cannot check the answer. What makes the absent
-prompt safe is that **the signed transaction stays re-displayable from the identity screen for the
-rest of the session** — the alternative recovery is re-scanning, re-reviewing and re-signing, and
-deterministic nonces make a re-sign byte-identical anyway.
+prompt safe is that **the most recently signed transaction stays re-displayable from the identity
+screen for the rest of the session** — the alternative recovery is re-scanning, re-reviewing and
+re-signing, and deterministic nonces make a re-sign byte-identical anyway.
+
+**There is no second exit from this screen. No "sign another".** The action lives on the identity
+screen one keystroke away, and a second control here is a second thing to press by accident at the
+moment the user should be holding the device still.
+
+The word *most recently* is load-bearing and the net is narrower than it looks: signing again
+replaces what this slot holds, so a user who signs A, fails to hand it over, then signs B pays a
+re-scan, re-review and re-sign for A. `02-core.md` §12 carries the reasoning and the cost.
 
 ## 12. Verify a receive address
 

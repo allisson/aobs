@@ -71,6 +71,7 @@ the shell or is deleted.
 | **Address verification** | Derived addresses across all four families matched in both lowercase and uppercase QR forms. |
 | **The fee warning** | Fee exactly equal to the payment total (the boundary — the rule is `≥`), a consolidation with no non-change outputs (undefined, silent), change plus a one-satoshi payment, and a legitimate high-congestion transaction well under the ratio that **must stay silent**. |
 | **Passphrase** | Idempotence `nfkd(nfkd(x)) == nfkd(x)`; no-trim — `"a"`, `" a"` and `"a "` derive three distinct seeds; 128 bytes accepted and 129 refused at the shell. |
+| **Network, authored by us** | **The master fingerprint of one seed is byte-identical on mainnet and testnet** — the identity screen's only network signal rests on this and it is read from the BIP-32 text rather than measured, so the assertion is the alarm if it ever stops holding. Plus: the same seed derives different account xpubs and different addresses across the two; a testnet PSBT against a mainnet-loaded wallet lands on the "no input is ours" refusal carrying the coin-type-disagreement variant. |
 
 ## 3. Property tests
 

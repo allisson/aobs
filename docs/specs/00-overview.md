@@ -36,7 +36,7 @@ The product exists for one reason, and it decides every trade in this spec:
 | `04-screens.md` | Every screen and the flow between them, in the shell. |
 | `05-testing-and-release.md` | Coverage bar, vectors, fuzz targets, adversarial corpus, CI gates, release gates, signing and distribution. |
 
-ADRs in `docs/adr/` carry the *why* for the thirteen decisions a newcomer would otherwise read as
+ADRs in `docs/adr/` carry the *why* for the fourteen decisions a newcomer would otherwise read as
 arbitrary. `CONTEXT.md` is the glossary.
 
 ## Architecture
@@ -138,27 +138,15 @@ None of these blocks implementation. All of them block the release gate
 | That a phone camera reads our v27 output at arm's length (v40 is the documented fallback). | [#30](https://github.com/allisson/aobs/issues/30) |
 | The capture-resolution floor for reading an inbound v40 symbol. | [#31](https://github.com/allisson/aobs/issues/31) |
 
-Two verification obligations, distinct from measurements:
+Three verification obligations, distinct from measurements:
 
 - **Pin whether BIP-174 explicitly forbids a Signer removing fields**, rather than resting on the
   role separation alone ([#30](https://github.com/allisson/aobs/issues/30)).
 - **Nunchuk's `crypto-account` support is unverified**, not assumed
   ([#27](https://github.com/allisson/aobs/issues/27)).
-
-**Two decisions the spec cannot make for itself.** These are not measurements and not fog — they are
-open questions an implementer would otherwise have to answer alone, so they are tickets. Both were
-surfaced by checking this spec against the destination, and
-[#11](https://github.com/allisson/aobs/issues/11) stays open until it folds their answers in.
-
-- **[#34 — Network selection for a created or imported wallet](https://github.com/allisson/aobs/issues/34).**
-  Restore reads the network from the backup header. Nothing settles it for a created or typed-in
-  seed, and nothing infers it — yet the identity screen states it, the watch-only export encodes it,
-  and the four accounts that define *ours* are network-specific.
-- **[#35 — Signing more than once in a session](https://github.com/allisson/aobs/issues/35).**
-  Signing repeatedly is clearly permitted; what a second signature does to the first is undecided,
-  and the outbound screen's "no confirmation prompt" rests on the answer.
-
-Until they close, an implementer building those paths should stop rather than choose.
+- **That the master fingerprint is identical on every network** is read from the BIP-32 text, not
+  measured against `bitcoin` 0.32.x. The identity screen's only network signal rests on it, so it
+  carries an assertion in the suite ([#34](https://github.com/allisson/aobs/issues/34)).
 
 Two recorded revisit triggers, which are not v1 work:
 

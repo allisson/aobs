@@ -86,6 +86,14 @@ a different wallet, not a variant of the same one.
 **The four accounts** — BIP44, BIP49, BIP84 and BIP86 key-path, all at **account 0**, on the loaded
 network. They are the definition of *ours*.
 
+**The network** — mainnet or testnet/signet, two states and not three, since nothing in a key, an
+address or a descriptor tells testnet from signet. It is a **load parameter**, not a property of a
+seed: the same words are a valid wallet on either. Chosen on the load screen, or read from the header
+on a restore.
+
+**Rehearsal** — a testnet/signet session. It looks identical to a mainnet one by design; there is no
+distinct mode, livery or reduced ceremony.
+
 **Branch** — the second-to-last derivation element: `0` receive, `1` change. Both branches count as
 ours.
 
@@ -183,6 +191,11 @@ and without a warning.**
 
 **The identity screen** — shown after every load and reachable all session: fingerprint, network,
 script type, whether a passphrase is in use. The hub the other actions hang off.
+
+**The re-display slot** — holds **one** signed transaction, the most recent, for the rest of the
+session. A new signature overwrites it. It is what makes the outbound screen safe to leave without a
+*did it scan?* prompt, and it is deliberately singular: a list of transactions the user cannot tell
+apart is a substitution risk in their own hands.
 
 **The scanning screen** — one component, three configurations, with a live greyscale preview of
 exactly what the decoder sees.
