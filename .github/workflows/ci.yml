@@ -1,0 +1,93 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Everything runs in the one build environment, so CI and a developer's machine cannot
+  # resolve different compilers or a different live-build.
+  BUILD_IMAGE: aobs-build
+
+jobs:
+  source:
+    name: source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the build environment
+        run: docker build -f ci/build-env.Dockerfile -t "$BUILD_IMAGE" ci
+
+      - name: Format
+        run: docker run --rm -v "$PWD:/src" -w /src "$BUILD_IMAGE" cargo fmt --all --check
+
+      - name: Clippy
+        run: >
+          docker run --rm -v "$PWD:/src" -w /src "$BUILD_IMAGE"
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: docker run --rm -v "$PWD:/src" -w /src "$BUILD_IMAGE" cargo test --workspace --locked
+
+      # 05-testing-and-release.md §6.1, the checks that read the tree.
+      - name: Mechanical checks
+        run: docker run --rm -v "$PWD:/src" -w /src "$BUILD_IMAGE" ci/check-source.sh
+
+  image:
+    name: image
+    runs-on: ubuntu-latest
+    needs: source
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the build environment
+        run: docker build -f ci/build-env.Dockerfile -t "$BUILD_IMAGE" ci
+
+      - name: Build /usr/bin/aobs
+        run: >
+          docker run --rm -v "$PWD:/src" -w /src "$BUILD_IMAGE"
+          ci/build-binary.sh
+
+      # `lb build` chroots and mounts, so it needs both root and --privileged.
+      - name: Build bitcoin-signer-amd64.iso
+        run: >
+          docker run --rm --privileged -v "$PWD:/src" -w /src "$BUILD_IMAGE"
+          image/build.sh
+
+      # 05-testing-and-release.md §6.1, the check that needs the artifact.
+      - name: Mechanical checks against the image
+        run: >
+          docker run --rm -v "$PWD:/src" -w /src "$BUILD_IMAGE"
+          ci/check-image.sh bitcoin-signer-amd64.iso
+
+      - name: Install QEMU and OVMF
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf
+
+      # 05-testing-and-release.md §6.2. OVMF + ramfb, no GPU: simpledrm specifically.
+      - name: Boot it
+        run: ci/qemu-boot.sh bitcoin-signer-amd64.iso 4096 900
+
+      # §7 requires the low-memory GRUB entry to degrade rather than brick. The floor is
+      # provisional at 2 GiB until measured against the built image (00-overview.md), so
+      # this run is what produces the number rather than asserting one.
+      - name: Boot it at the provisional RAM floor
+        continue-on-error: true
+        run: ci/qemu-boot.sh bitcoin-signer-amd64.iso 2048 900
+
+      # ADR-0012 and §7.4: the package manifest is published because §3's
+      # stripped-network claim is otherwise uncheckable without building the image.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bitcoin-signer-amd64
+          path: |
+            bitcoin-signer-amd64.iso
+            bitcoin-signer-amd64.packages
+          retention-days: 14

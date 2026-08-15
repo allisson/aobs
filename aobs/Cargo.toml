@@ -1,0 +1,23 @@
+[package]
+name = "aobs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The aobs appliance: Slint on KMS, the camera loop, and the raw getrandom syscall."
+
+[dependencies]
+aobs-core = { path = "../aobs-core" }
+
+# Slint on backend-linuxkms + renderer-software, rendering straight to KMS/DRM
+# (01-boot-layer.md §2, ADR-0002). No X server, no Wayland compositor, no display
+# manager, no GPU driver requirement. `default-features = false` is what keeps
+# `backend-default` — and with it winit, and a windowing stack this appliance has no use
+# for — out of the closure.
+[dependencies.slint]
+version = "1.17"
+default-features = false
+features = ["compat-1-2", "std", "backend-linuxkms", "renderer-software"]
+
+[build-dependencies]
+slint-build = "1.17"

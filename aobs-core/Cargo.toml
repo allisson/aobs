@@ -1,0 +1,14 @@
+# ADR-0004: the crate boundary is one question — does this touch hardware.
+#
+# This manifest naming neither `slint` nor `v4l` IS the enforcement, and CI checks it
+# mechanically (05-testing-and-release.md §6.1). Nothing here may depend on a screen, a
+# camera, a filesystem, a clock, or `getrandom`.
+[package]
+name = "aobs-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Wallet logic for aobs: no hardware, no I/O, no clock."
+
+[dependencies]

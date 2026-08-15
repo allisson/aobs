@@ -1,0 +1,94 @@
+// The walking skeleton's one screen (#39).
+//
+// Light, one scheme throughout, no toggle (ADR-0011) — the tokens below are the
+// prototype's palette, which the ADR calls a starting point rather than a mandate. There
+// is no dark token set and no theme switch: **absent, not defaulted off.**
+//
+// Chrome does not vanish for any screen (04-screens.md §0), so the status bar is here on
+// the emptiest screen the appliance will ever draw.
+
+export component AppWindow inherits Window {
+    in property <string> version;
+    in property <string> build-date;
+
+    property <color> ground: #eef1f5;
+    property <color> panel: #ffffff;
+    property <color> line-soft: #dfe5ec;
+    property <color> ink: #0f151c;
+    property <color> ink-mid: #414d5c;
+    property <color> ink-dim: #66717f;
+
+    title: "aobs";
+    background: root.panel;
+    // fonts-dejavu is in the 22-package floor (01-boot-layer.md §2); naming it means the
+    // appliance renders the same on every machine rather than taking fontconfig's pick.
+    default-font-family: "DejaVu Sans";
+    default-font-size: 15px;
+
+    VerticalLayout {
+        Rectangle {
+            height: 44px;
+            background: root.ground;
+
+            HorizontalLayout {
+                padding-left: 24px;
+                padding-right: 24px;
+                alignment: space-between;
+
+                Text {
+                    text: "AOBS";
+                    color: root.ink-dim;
+                    font-size: 12px;
+                    letter-spacing: 1.7px;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: "WALKING SKELETON";
+                    color: root.ink-dim;
+                    font-size: 12px;
+                    letter-spacing: 1.7px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: root.line-soft;
+        }
+
+        Rectangle {
+            background: root.panel;
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 14px;
+
+                Text {
+                    text: "aobs";
+                    color: root.ink;
+                    font-size: 46px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                }
+
+                // Standing rule 8: state the fact, invent nothing. This build signs
+                // nothing and holds no wallet, and says so rather than looking ready.
+                Text {
+                    text: "This build draws one screen and does nothing else.";
+                    color: root.ink-mid;
+                    horizontal-alignment: center;
+                }
+
+                Text {
+                    text: "version " + root.version + "    build " + root.build-date;
+                    color: root.ink-dim;
+                    font-family: "DejaVu Sans Mono";
+                    font-size: 13px;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+    }
+}
