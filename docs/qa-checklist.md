@@ -32,10 +32,8 @@ Observed end to end against the built ISO under OVMF + `ramfb`: the appliance st
 entropy, finds no DRM device, prints the §9 diagnostic and halts with it visible — the failure path
 works, on the artifact. What does not work is the assumption underneath it.
 
-**This is a ticket, not something to improvise.** Each way out — a custom kernel (abandoning
-Debian's signed kernel, which §3 valued), accepting native-KMS-only with no fallback (reopening
-ADR-0009's "deletes the worst failure" argument), or a non-DRM render path (reopening ADR-0002) —
-reverses a settled decision.
+**This is a ticket, not something to improvise** — [#40](https://github.com/allisson/aobs/issues/40),
+which carries the evidence and the options. Each way out reverses a settled decision.
 
 ### The claim the whole slice exists to retire
 

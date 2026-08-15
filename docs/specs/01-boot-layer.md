@@ -40,7 +40,13 @@ The 22 packages this needs are `libinput`, `libseat`, `libxkbcommon`, `freetype`
 `fonts-dejavu` and their closure — 21 MiB. That is the irreducible floor for any KMS GUI, not
 Slint's overhead.
 
-- Unprivileged user `signer`, in `_seatd`, `video` and `input`.
+- Unprivileged user `signer`, in `video`, `input`, and **whatever group `seatd.service` names**.
+  This last one was written as `_seatd`, which is the upstream and Arch convention; **Debian has no
+  such group** and runs `ExecStart=seatd -g video`, so on this distribution the seat group and the
+  DRM group are the same one. Following the literal text fails the build with `216/GROUP`. The build
+  hook therefore reads the group out of the unit rather than hardcoding either name, so a Debian
+  that later switches to a dedicated group fails the build instead of shipping an appliance that
+  cannot open a seat.
 - `seatd` (104 KiB) with `LIBSEAT_BACKEND=seatd`.
 - A systemd unit, `ExecStart=/usr/bin/aobs`, `Restart=always`.
 - `greetd` is rejected: its `initial_session` runs exactly once per boot by design, which is the
@@ -152,6 +158,13 @@ random.trust_cpu=off vt.global_cursor_default=0 toram
 
 ### UEFI is required because it deletes the worst failure rather than handling it
 
+> **Falsified by the walking skeleton. Do not build on this section until
+> [#40](https://github.com/allisson/aobs/issues/40) resolves.** Debian 13 sets neither
+> `CONFIG_DRM_SIMPLEDRM` nor `CONFIG_SYSFB_SIMPLEFB`, ships no `simpledrm.ko`, and lets `efifb`
+> claim the framebuffer. The guaranteed display path below **does not exist on the distribution
+> this spec ships**, which inverts the paragraph's conclusion: the native KMS driver is the
+> requirement and there is no fallback. §9 below inherits the same error.
+
 The worst case in this area is "no usable display", because reporting it requires the thing that
 failed. On UEFI the EFI stub hands the kernel a `simple-framebuffer`, and **`simpledrm` binds it as
 a full KMS device with dumb buffers** — `drivers/gpu/drm/tiny/simpledrm.c` declares
@@ -242,6 +255,11 @@ Verification for the QA checklist: `dmesg | grep -E 'crng init done|RDRAND is no
 ## 9. Reporting a failure the GUI cannot report itself
 
 Because `simpledrm` is guaranteed, the kernel console always exists — there is always a channel.
+
+> The premise is wrong ([#40](https://github.com/allisson/aobs/issues/40), §7 above), but **the
+> conclusion survives**: `efifb` provides a kernel console on exactly the machines `simpledrm` was
+> supposed to cover, so this section's channel exists either way. Verified against the built ISO —
+> the appliance finds no DRM device, prints the block below, and halts with it visible.
 
 The app is launched by a wrapper that, on any startup failure, prints a **human-written diagnostic
 block** and halts:
