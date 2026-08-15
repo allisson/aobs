@@ -65,6 +65,23 @@ and the proof are the same mechanism**: a second `set` returns `Err`.
 - Carried forward verbatim so nobody later adds a comforting fake: **we do not claim a test observes
   a freed page.**
 
+Two consequences settled later, by
+[#35](https://github.com/allisson/aobs/issues/35), which asked what else the session holds:
+
+- **Transactions are not wallets: signing is unlimited per session, but the re-display slot holds
+  exactly one — the most recent, overwritten by each new signature.** The reason is this ADR's own
+  second argument pointed at a different object. A list of signed transactions on a device with no
+  names, no labels and no clock can only be distinguished by amount and destination — the facts the
+  outbound screen deliberately omits — so the user would select which transaction to transmit from a
+  list they cannot verify, and transmitting B while believing it is A is destination substitution
+  arriving at their own hands. One slot means there is nothing to select: **the class stops existing
+  rather than being defended.** Named cost: signing A, failing to hand it over, then signing B costs
+  a re-scan, re-review and re-sign for A.
+- **Nothing is zeroized between transactions, and the absence is deliberate.** Everything that turns
+  over is public — the inbound PSBT, the signed transaction, the review model — so a scrub step here
+  would buy nothing while reintroducing exactly the unverifiable boundary this ADR rejected. The "no
+  third mechanism" rule above extends to it unchanged.
+
 ## Alternatives rejected
 
 - **One seed per boot, passphrase re-enterable** — the tempting middle. It buys back the 24-word

@@ -212,6 +212,42 @@ wallet load, serving created and imported seeds alike. Empty by default; **empty
 **account 0**, on the loaded network. `tpub` and coin type `1h` on testnet/signet, `xpub` and `0h` on
 mainnet.
 
+### Which network, and where it is chosen
+
+**Two states, not three.** Testnet and signet share coin type `1h`, the `tb` HRP and the same base58
+versions, so nothing in a key, an address or a descriptor distinguishes them. That is why the backup
+header spends one bit.
+
+**Nothing infers it.** A generated seed carries no network and neither does a BIP-39 mnemonic; only
+the restore path knows, from the header's bit0. So it is asked — and it is the one choice in this
+product the user can referee, because *"are you practising, or is this real?"* is a question about
+their intent rather than about the system. The refusals elsewhere in this spec to offer a choice
+(seed length, passphrase strength, script type, colour scheme) all concern judgements the user is not
+equipped to make; this is not one of them.
+
+**The network is a load parameter, exactly like the passphrase (§5).** It is not an input to mnemonic
+generation — it enters at derivation — so there is one control, on the load screen, serving created
+and typed-in seeds alike. Asking there costs nothing because **the seed is network-independent**: the
+words already written on paper are a valid backup on either network, so a user who chooses at load
+restarts nothing.
+
+**Placement is forced, not preferred.** The restore path must not be prompted (§10 of
+`04-screens.md`), so a control answered before the device knows which path the user is on would take
+a value the header then discards. A control whose answer is thrown away is the silent-disagreement
+class this spec removes everywhere else. On the load screen, restore *states* the value where the
+other two paths *ask* it.
+
+**Mainnet is preselected and the choice is not forced.** A forced pick on a 95/5 split is a
+click-through trainer on the screen where that is most expensive. The state this creates — an
+inattentive rehearser on mainnet — is self-limiting: signing requires coins, and a rehearser has
+none on mainnet, so the default's failure is an empty wallet. A testnet default would instead put the
+common path into a `tpub` the coordinator rejects.
+
+**The master fingerprint is identical on every network** — BIP-32 derives the master key with one
+constant and the identifier is `HASH160` over a 33-byte pubkey; the network lives only in the base58
+version bytes. So the fingerprint cannot catch a network mistake and **the network line is the whole
+signal**. It is stated in both directions, never encoded as an absence.
+
 **Those four accounts are the definition of "ours"** — for change re-derivation (§7), for receive
 verification (§9), and for the watch-only export (§10).
 
@@ -319,13 +355,23 @@ value with trailing bytes.
    as foreign only causes it to be *shown*, and putting our fingerprint on the attacker's address
    fails the byte-compare and refuses.
 
-### Two copy requirements on the refusals
+### Three copy requirements on the refusals
 
-Both exist because the failure would otherwise read as a bug in aobs:
+All three exist because the failure would otherwise read as a bug in aobs:
 
 - When the refusal is **"no input is ours"** and a passphrase is in use, the copy **names the
   passphrase as the likely cause**.
 - The **"no input is ours"** refusal **names account 0 as the assumption**.
+- The **"no input is ours"** refusal **names the loaded network**. A network mismatch reaches this
+  refusal with no distinguishing symptom, because `scriptPubKey`s are network-agnostic bytes: a
+  testnet PSBT loaded as mainnet simply fails re-derivation.
+
+Three causes in a list names nothing, so there is a fourth requirement that makes the common
+accidental case precise. **When every input's declared BIP32 coin type disagrees with the loaded
+network, the refusal says so outright** — *this transaction is for testnet; the loaded wallet is
+mainnet.* This does not breach standing rule 1: the derivation path selects the **copy** and has no
+effect on acceptance, which still rests entirely on the byte-compare. It is a typed variant on the
+refusal model, computed here — the shell must not branch on it (standing rule 4).
 
 ## 8. Signing
 
@@ -549,3 +595,36 @@ from the passphrase ticket: **the passphrase cannot change mid-session.**
 **No idle timeout.** The threat is a present adversary mid-session, which is not defended; the
 false-trigger cost is now maximal; and a timeout would be the shell holding a policy about when
 secrets die.
+
+### Signing more than once
+
+**Unlimited signatures per session, and the re-display slot holds exactly one — the most recent.**
+
+No cap is available to us in any case: rate limiting is structurally unavailable, core has no clock,
+and refusing to emit a signature already produced is the worst failure the product can have.
+
+The slot is a **single shell-side value, overwritten on each signature. No list, no history, no
+selection UI.** Holding many would create a state in which the user selects which signed transaction
+to transmit from a list they cannot verify: with no names, no labels and no clock, the only
+distinguishing facts are amount and destination — exactly what `04-screens.md` §11.5 removes from
+this path — and a txid is 64 hex characters with nothing to compare against, and is not even stable
+across signing for a P2PKH input. Transmitting B while believing it is A is destination substitution
+arriving at the user's own hands. With one slot there is nothing to select and the class does not
+exist, which is the same move as one-wallet-per-boot above.
+
+**Cost, named and accepted:** a user who signs A, fails to hand it to the host, signs B, and then
+needs A again has no recovery but re-scanning, re-reviewing and re-signing. This **narrows** the
+safety net that `04-screens.md` §11.5 relies on, and that section is worded accordingly. It is
+survivable because the host still holds the PSBT — it is the machine that sent it — so nothing is
+destroyed and only a ceremony is repeated, and RFC6979 makes the re-sign byte-identical.
+
+**No warning before the replacement.** It would clear the warning bar (we cannot know whether the
+host received A, and the user can), but it would land several screens away from the hold that
+actually replaces it, and what is at stake is time rather than money.
+
+**Nothing is zeroized between transactions, and that is a decision rather than an omission.** Every
+artifact that turns over is public: the inbound PSBT, the signed transaction, the review model. The
+only secret in play is the wallet key material, which this section deliberately grants the whole
+session. Adding a scrub step here would reintroduce exactly the lifetime boundary rejected above —
+standing rule 9 says we do not claim a test observes a freed page, so any boundary we declare is a
+promise we cannot verify, and this one would be bought for material that is not secret.
