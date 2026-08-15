@@ -14,7 +14,7 @@ Research findings live in `docs/research/`, one file per resolved ticket, every 
 
 These came out of grilling and research. Reopening one is a deliberate act with a reason, not a drive-by.
 
-- **Slint, not Tauri.** Tauri was the original premise and lost on measurement: 268 packages / 650 MiB against Slint's 22 / 21 MiB, and `getUserMedia` cannot work in a stock Tauri app on Linux. The UI is Slint on `backend-linuxkms` + `renderer-software`, rendering to KMS/DRM with no X server and no compositor. See `docs/research/05-tauri-viability.md`. The GPL-3.0-vs-MIT licence question this raised is open at issue #12.
+- **Slint, not Tauri.** Tauri was the original premise and lost on measurement: 268 packages / 650 MiB against Slint's 22 / 21 MiB, and `getUserMedia` cannot work in a stock Tauri app on Linux. The UI is Slint on `backend-linuxkms` + `renderer-software`, rendering to KMS/DRM with no X server and no compositor. See `docs/research/05-tauri-viability.md`. The licence question this raised is settled: **the repo is GPL-3.0-only**, which is what Slint's GPL option requires and what removes an unresolvable ambiguity in its royalty-free licence. See `docs/adr/0001-gpl-3-0-for-the-slint-ui-toolkit.md`.
 - **Air-gapped by construction.** The appliance has no network stack, no cloud, no sync, no broadcasting, no telemetry, no update check. Every feature is designed to work with the machine's networking physically absent.
 - **QR is the only data channel**, both directions, using BC-UR / UR2 (`ur:crypto-psbt`). The physical keyboard handles seed import and passphrase entry. QR decoding happens in Rust (`v4l` → `rqrr`), never in a webview.
 - **Single-sig only** across BIP44/49/84/86, mainnet plus testnet/signet.
