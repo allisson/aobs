@@ -1,0 +1,738 @@
+<title>Creating a Wallet</title>
+<!--
+  PROTOTYPE — throwaway. Answers issue #17: what does a user see from "create a new
+  wallet" to "the mnemonic is confirmed recorded"?
+
+  You WALK this one. The entropy is real (`crypto.getRandomValues`), the dice mixing is
+  #8's formula implemented literally, the checksum is a real SHA-256 and the 24 words
+  come from the real BIP39 English list — so the phrase on screen is a phrase you could
+  actually restore. There is no derivation: the fingerprint shown on the identity screen
+  is SHA-256 over the entropy, not a BIP32 fingerprint, and nothing here is a wallet.
+
+  Light scheme per #26. Every contested question in the ticket is a switch in the bench
+  under the screen, so each answer can be felt rather than argued. THE DEFAULTS ARE THE
+  POSITION THIS PROTOTYPE ARGUES FOR — the other positions are the live alternatives,
+  kept switchable so the trade can be re-felt rather than re-argued:
+
+    ?dice=offered|advanced|always    a step everyone sees and skips, buried behind
+                                     "advanced", or a screen nobody can pass
+    ?gather=honest|bar               indeterminate with a named activity, or a progress bar
+    ?words=grid|pair|pages           24 at once in 4 columns, 2 tall columns, or 2 pages of 12
+    ?confirm=sampled|full|attest     type back 4 words by position, retype all 24, or tick
+                                     "written down" per page with no typing at all
+    ?wrong=keep|restart              a wrong confirmation keeps the phrase for correction,
+                                     or discards the wallet and generates a new one
+    ?chrome=bare|status              while the seed is on screen: nothing else at all, or
+                                     the ordinary status bar stays put
+
+  Settled inputs this flow obeys:
+    #7   the encrypted-backup QR is offered only AFTER the mnemonic is confirmed recorded
+    #8   `random.trust_cpu=off` costs ~1–16 s [unmeasured] behind a visible gathering state;
+         dice are free entry, roll count only, no bit counter, no distribution check, and
+         `entropy = csprng_32 XOR SHA-256("aobs/seed-entropy/v1" ‖ framed(cam) ‖ framed(dice))`
+    #10  core is pure functions over data; no clock, no growable secret types
+    #16  24 words, always, no choice offered
+    #18  word entry is prefix + space-commits; nothing auto-accepts; nothing is masked
+    #20  one always-present passphrase prompt at load, empty by default, shown in clear,
+         never trimmed, printable ASCII, no strength meter; identity screen after every load
+    #25  one wallet per boot; "end the session" IS shutdown; restart is how you load another
+    #26  light, one scheme, no toggle
+    #27  creation closes on a single `ur:crypto-account` QR, four families at account 0
+
+  The appliance has a keyboard and no pointer. Clicking here is this prototype's stand-in
+  for arrow keys and Enter.
+-->
+<style>
+  :root {
+    --ground:   #eef1f5;
+    --panel:    #ffffff;
+    --panel-2:  #f4f6f9;
+    --line:     #c9d1dc;
+    --line-soft:#e2e7ee;
+    --ink:      #0f151c;
+    --ink-mid:  #414d5c;
+    --ink-dim:  #66717f;
+    --focus:    #1d6fa5;
+    --ok:       #1c7a5e;  --ok-bg:   #e6f4ef;  --ok-line:   #9fd0be;
+    --warn:     #8a5b12;  --warn-bg: #fbf1de;  --warn-line: #ddbe83;
+    --crit:     #a32f2c;  --crit-bg: #fbeceb;  --crit-line: #e0a9a6;
+    --net:      #2b5f79;  --net-line:#a9c6d4;
+
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #6a7280; font-family: var(--sans); font-size: 15px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased; padding: var(--s5) var(--s4) var(--s6); color: var(--ink);
+  }
+  .frame-note {
+    max-width: 1180px; margin: 0 auto var(--s3); color: #fff; opacity: .85; font-size: 12px;
+    letter-spacing: .08em; text-transform: uppercase; display: flex; justify-content: space-between; gap: var(--s4);
+  }
+  .screen {
+    max-width: 1180px; margin: 0 auto; aspect-ratio: 16 / 10; min-height: 680px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .statusbar {
+    display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s5);
+    border-bottom: 1px solid var(--line-soft); background: var(--ground);
+    font-size: 12px; color: var(--ink-dim); letter-spacing: .06em; text-transform: uppercase; flex: 0 0 auto;
+  }
+  .statusbar .spacer { flex: 1; }
+  .chip {
+    display: inline-flex; align-items: center; gap: var(--s1); padding: 3px var(--s2); border-radius: 3px;
+    border: 1px solid var(--line); color: var(--ink-mid); font-family: var(--mono); font-size: 11px; text-transform: none;
+  }
+  .chip.net  { border-color: var(--net-line); color: var(--net); }
+  .chip.ok   { border-color: var(--ok-line); color: var(--ok); background: var(--ok-bg); }
+  .chip.crit { border-color: var(--crit-line); color: var(--crit); background: var(--crit-bg); }
+
+  .body { flex: 1; min-height: 0; padding: var(--s5) var(--s7) var(--s4); display: flex; flex-direction: column; }
+  .body.center { align-items: center; justify-content: center; text-align: center; }
+  .body.seed   { padding: var(--s4) var(--s6) var(--s3); }
+
+  .label { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-dim); }
+  h1 { font-size: 28px; font-weight: 500; margin: 0 0 var(--s2); letter-spacing: -.01em; }
+  h2 { font-size: 19px; font-weight: 600; margin: 0 0 var(--s2); }
+  p  { margin: 0 0 var(--s3); color: var(--ink-mid); max-width: 64ch; }
+  .body.center p { margin-left: auto; margin-right: auto; }
+  .mono { font-family: var(--mono); }
+  .dim  { color: var(--ink-dim); }
+
+  .head { display: flex; align-items: baseline; gap: var(--s4); margin-bottom: var(--s3); flex: 0 0 auto; }
+  .head .spacer { flex: 1; }
+  .progress { font-family: var(--mono); font-size: 13px; color: var(--ink-dim); }
+
+  /* --- the mnemonic --- */
+  .words { display: grid; gap: var(--s1) var(--s5); flex: 1 1 auto; align-content: center; }
+  .words.grid  { grid-template-columns: repeat(4, 1fr); }
+  .words.pair  { grid-template-columns: repeat(2, 1fr); }
+  .words.pages { grid-template-columns: repeat(2, 1fr); }
+  .w {
+    display: flex; align-items: baseline; gap: var(--s3); padding: var(--s2) var(--s3);
+    border-bottom: 1px solid var(--line-soft); min-height: 42px;
+  }
+  .w .n { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); width: 2.4ch; text-align: right; flex: 0 0 auto; }
+  .w .t { font-family: var(--mono); color: var(--ink); letter-spacing: .015em; }
+  .words.grid  .w .t { font-size: 20px; }
+  .words.pair  .w .t { font-size: 24px; }
+  .words.pages .w .t { font-size: 26px; }
+  .words.pair .w, .words.pages .w { min-height: 48px; }
+  .w.hi { background: var(--panel-2); border-bottom: 2px solid var(--focus); }
+  .w.bad { background: var(--crit-bg); border-bottom-color: var(--crit-line); }
+  .w.bad .t { color: var(--crit); }
+  .w.ticked .n { color: var(--ok); }
+
+  .seedbanner {
+    display: flex; align-items: center; gap: var(--s3); padding: var(--s2) var(--s4);
+    border: 1px solid var(--warn-line); background: var(--warn-bg); color: var(--warn);
+    border-radius: 4px; font-size: 13.5px; margin-bottom: var(--s3); flex: 0 0 auto;
+  }
+
+  /* --- the word-entry strip, borrowed from #18 --- */
+  .entry { flex: 0 0 auto; margin-top: var(--s4); border-top: 1px solid var(--line-soft); padding-top: var(--s3);
+           min-height: 116px; display: flex; flex-direction: column; gap: var(--s2); }
+  .askrow { display: flex; align-items: baseline; gap: var(--s4); }
+  .askrow .ask { font-size: 17px; color: var(--ink); }
+  .askrow .typed {
+    font-family: var(--mono); font-size: 22px; color: var(--ink); min-width: 12ch;
+    border-bottom: 2px solid var(--focus); padding: 0 var(--s1) 2px;
+  }
+  .askrow .typed .ghost { color: var(--ink-dim); }
+  .caret { display: inline-block; width: 2px; height: 21px; background: var(--focus); vertical-align: -3px; margin-left: 1px; }
+  .cands { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
+  .cand {
+    font-family: var(--mono); font-size: 15px; padding: 2px var(--s2); border-radius: 3px;
+    border: 1px solid var(--line-soft); background: var(--panel-2); color: var(--ink-mid);
+  }
+  .cand.only { border-color: var(--ok-line); background: var(--ok-bg); color: var(--ok); font-weight: 600; }
+  .cand b { color: var(--ink); }
+  .note { font-size: 13px; color: var(--ink-dim); }
+  .note.bad  { color: var(--crit); font-weight: 600; }
+  .note.good { color: var(--ok); font-weight: 600; }
+
+  /* --- dice --- */
+  .dice { display: flex; flex-wrap: wrap; gap: 6px; max-width: 62ch; margin: var(--s4) 0; min-height: 120px; align-content: flex-start; }
+  .die {
+    font-family: var(--mono); font-size: 17px; width: 30px; height: 30px; display: grid; place-items: center;
+    border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); color: var(--ink);
+  }
+  .rollcount { font-family: var(--mono); font-size: 15px; color: var(--ink-mid); }
+
+  /* --- gathering --- */
+  .spinner { width: 44px; height: 44px; border: 3px solid var(--line-soft); border-top-color: var(--focus);
+             border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto var(--s4); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .bar { width: 380px; height: 8px; border-radius: 4px; background: var(--line-soft); overflow: hidden; margin: 0 auto var(--s4); }
+  .bar i { display: block; height: 100%; background: var(--focus); width: 0; }
+  .ticker { font-family: var(--mono); font-size: 13px; color: var(--ink-dim); min-height: 20px; }
+
+  /* --- passphrase --- */
+  .ppfield {
+    font-family: var(--mono); font-size: 22px; padding: var(--s3) var(--s4); min-width: 52ch; min-height: 56px;
+    border: 1px solid var(--line); border-bottom: 2px solid var(--focus); border-radius: 4px;
+    background: var(--panel-2); text-align: left; word-break: break-all;
+  }
+  .ppfield .sp { color: var(--focus); opacity: .55; }
+  .ppfield .empty { color: var(--ink-dim); font-family: var(--sans); font-size: 17px; }
+
+  /* --- identity / export --- */
+  .idrow { display: flex; gap: var(--s7); margin: var(--s4) 0; text-align: left; }
+  .idrow div .label { display: block; margin-bottom: 2px; }
+  .idrow div .v { font-family: var(--mono); font-size: 18px; }
+  .qr { width: 250px; height: 250px; image-rendering: pixelated; border: 8px solid #fff; outline: 1px solid var(--line); }
+  .exportwrap { display: flex; gap: var(--s7); align-items: center; text-align: left; }
+
+  .verdict { border-radius: 4px; padding: var(--s4) var(--s5); max-width: 74ch; margin-bottom: var(--s4); text-align: left; }
+  .verdict.bad { background: var(--crit-bg); border: 1px solid var(--crit-line); }
+  .verdict.ok  { background: var(--ok-bg);  border: 1px solid var(--ok-line); }
+  .verdict.bad h2 { color: var(--crit); }
+  .verdict.ok h2  { color: var(--ok); }
+  .verdict p:last-child { margin-bottom: 0; }
+
+  .foot {
+    border-top: 1px solid var(--line-soft); padding: var(--s3) var(--s5); margin-top: auto;
+    display: flex; align-items: center; gap: var(--s4); background: var(--ground); flex: 0 0 auto;
+  }
+  .foot .spacer { flex: 1; }
+  .keyhint { font-size: 12px; color: var(--ink-dim); }
+  .keyhint kbd {
+    font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 3px; padding: 1px 5px; background: var(--panel); color: var(--ink-mid); margin: 0 2px;
+  }
+  .btn {
+    font: inherit; font-size: 15px; padding: var(--s2) var(--s5); border-radius: 4px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
+  }
+  .btn.go    { border-color: var(--ok-line); background: var(--ok-bg); color: var(--ok); font-weight: 600; }
+  .btn.quiet { background: transparent; border-color: transparent; color: var(--ink-dim); }
+  .btn.big   { font-size: 18px; padding: var(--s3) var(--s6); }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .menu { display: flex; flex-direction: column; gap: var(--s3); margin-top: var(--s5); min-width: 380px; }
+  .menu .btn { text-align: left; padding: var(--s4) var(--s5); }
+  .menu .btn small { display: block; color: var(--ink-dim); font-size: 13px; font-weight: 400; }
+
+  /* --- the bench --- */
+  .bench { max-width: 1180px; margin: var(--s5) auto 0; display: grid; grid-template-columns: 1fr 340px; gap: var(--s4); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: var(--s4) var(--s5); }
+  .card h3 { margin: 0 0 var(--s3); font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-dim); font-weight: 600; }
+  .switches { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3) var(--s5); }
+  .sw .q { font-size: 13px; color: var(--ink-mid); margin-bottom: var(--s1); }
+  .sw .opts { display: flex; gap: var(--s1); flex-wrap: wrap; }
+  .sw .opts button {
+    font: inherit; font-size: 13px; font-family: var(--mono); padding: 3px var(--s3); cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-mid); border-radius: 3px;
+  }
+  .sw .opts button.on { background: var(--focus); border-color: var(--focus); color: #fff; }
+  .scen { display: flex; flex-direction: column; gap: var(--s2); }
+  .scen button {
+    font: inherit; font-size: 14px; text-align: left; padding: var(--s2) var(--s3); cursor: pointer;
+    border: 1px solid var(--line-soft); background: var(--panel-2); border-radius: 4px; color: var(--ink);
+  }
+  .scen button:hover { border-color: var(--focus); }
+  .scen button small { display: block; color: var(--ink-dim); font-size: 12px; }
+  .state { font-family: var(--mono); font-size: 12.5px; color: var(--ink-mid); }
+  .state div { display: flex; justify-content: space-between; gap: var(--s3); padding: 2px 0; border-bottom: 1px solid var(--line-soft); }
+  .state div span:last-child { color: var(--ink); text-align: right; word-break: break-all; }
+  .intro { max-width: 1180px; margin: 0 auto var(--s4); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: var(--s4) var(--s5); }
+  .intro p { max-width: 96ch; }
+  .intro p:last-child { margin-bottom: 0; }
+  .steps { display: flex; gap: var(--s1); flex-wrap: wrap; margin-top: var(--s3); }
+  .steps span { font-family: var(--mono); font-size: 12px; padding: 2px var(--s2); border-radius: 3px;
+                border: 1px solid var(--line-soft); color: var(--ink-dim); background: var(--panel-2); }
+  .steps span.on { border-color: var(--focus); color: var(--focus); font-weight: 600; }
+  .steps span.done { border-color: var(--ok-line); color: var(--ok); }
+</style>
+
+<div class="frame-note"><span>Prototype — issue #17 — wallet creation</span><span>walk it: the entropy, the dice mixing and the checksum are real</span></div>
+
+<div class="intro">
+  <h2>What this is asking</h2>
+  <p>
+    Between <i>“create a new wallet”</i> and <i>“the mnemonic is confirmed recorded”</i> sit six decisions the
+    map never made: where the optional dice sit, what the screen says while the CSPRNG is still gathering,
+    how 24 words are laid out for someone copying them onto paper, what counts as proof they were written
+    down, what else may share the screen with a seed, and what a wrong confirmation destroys.
+    <b>Walk the flow and each one stops being an argument.</b> Every contested answer is a switch on the
+    right — flip one and walk it again.
+  </p>
+  <p class="mono" style="font-size:13px;color:var(--ink-dim)">
+    The phrase is generated from <b>crypto.getRandomValues</b>, mixed with your dice exactly as #8 specifies,
+    and checksummed with a real SHA-256 — so the words are a phrase you could genuinely restore. Don’t put money on it.
+  </p>
+  <div class="steps" id="steps"></div>
+</div>
+
+<div class="screen" id="screen"></div>
+
+<div class="bench">
+  <div class="card">
+    <h3>The six questions, as switches</h3>
+    <div class="switches" id="switches"></div>
+    <h3 style="margin-top:var(--s5)">Walkthroughs</h3>
+    <div class="scen" id="scen"></div>
+  </div>
+  <div class="card">
+    <h3>Session state — what the shell would hold</h3>
+    <div class="state" id="statepanel"></div>
+    <p style="font-size:12px;color:var(--ink-dim);margin:var(--s3) 0 0">
+      One wallet, one boot (#25): a <span class="mono">OnceLock</span> that a second write cannot fill.
+      Core sees <span class="mono">csprng_32</span> as a parameter and never calls <span class="mono">getrandom</span> itself (#8, #10).
+    </p>
+  </div>
+</div>
+
+<script>
+// ───────────────────────────────────────────────────────────────────────────────
+//  The part worth keeping: BIP39 generation and #8's mixing formula, as pure
+//  functions over bytes. No DOM, no events, no clock. Everything below is shell.
+// ───────────────────────────────────────────────────────────────────────────────
+const WORDS = "abandon ability able about above absent absorb abstract absurd abuse access accident account accuse achieve acid acoustic acquire across act action actor actress actual adapt add addict address adjust admit adult advance advice aerobic affair afford afraid again age agent agree ahead aim air airport aisle alarm album alcohol alert alien all alley allow almost alone alpha already also alter always amateur amazing among amount amused analyst anchor ancient anger angle angry animal ankle announce annual another answer antenna antique anxiety any apart apology appear apple approve april arch arctic area arena argue arm armed armor army around arrange arrest arrive arrow art artefact artist artwork ask aspect assault asset assist assume asthma athlete atom attack attend attitude attract auction audit august aunt author auto autumn average avocado avoid awake aware away awesome awful awkward axis baby bachelor bacon badge bag balance balcony ball bamboo banana banner bar barely bargain barrel base basic basket battle beach bean beauty because become beef before begin behave behind believe below belt bench benefit best betray better between beyond bicycle bid bike bind biology bird birth bitter black blade blame blanket blast bleak bless blind blood blossom blouse blue blur blush board boat body boil bomb bone bonus book boost border boring borrow boss bottom bounce box boy bracket brain brand brass brave bread breeze brick bridge brief bright bring brisk broccoli broken bronze broom brother brown brush bubble buddy budget buffalo build bulb bulk bullet bundle bunker burden burger burst bus business busy butter buyer buzz cabbage cabin cable cactus cage cake call calm camera camp can canal cancel candy cannon canoe canvas canyon capable capital captain car carbon card cargo carpet carry cart case cash casino castle casual cat catalog catch category cattle caught cause caution cave ceiling celery cement census century cereal certain chair chalk champion change chaos chapter charge chase chat cheap check cheese chef cherry chest chicken chief child chimney choice choose chronic chuckle chunk churn cigar cinnamon circle citizen city civil claim clap clarify claw clay clean clerk clever click client cliff climb clinic clip clock clog close cloth cloud clown club clump cluster clutch coach coast coconut code coffee coil coin collect color column combine come comfort comic common company concert conduct confirm congress connect consider control convince cook cool copper copy coral core corn correct cost cotton couch country couple course cousin cover coyote crack cradle craft cram crane crash crater crawl crazy cream credit creek crew cricket crime crisp critic crop cross crouch crowd crucial cruel cruise crumble crunch crush cry crystal cube culture cup cupboard curious current curtain curve cushion custom cute cycle dad damage damp dance danger daring dash daughter dawn day deal debate debris decade december decide decline decorate decrease deer defense define defy degree delay deliver demand demise denial dentist deny depart depend deposit depth deputy derive describe desert design desk despair destroy detail detect develop device devote diagram dial diamond diary dice diesel diet differ digital dignity dilemma dinner dinosaur direct dirt disagree discover disease dish dismiss disorder display distance divert divide divorce dizzy doctor document dog doll dolphin domain donate donkey donor door dose double dove draft dragon drama drastic draw dream dress drift drill drink drip drive drop drum dry duck dumb dune during dust dutch duty dwarf dynamic eager eagle early earn earth easily east easy echo ecology economy edge edit educate effort egg eight either elbow elder electric elegant element elephant elevator elite else embark embody embrace emerge emotion employ empower empty enable enact end endless endorse enemy energy enforce engage engine enhance enjoy enlist enough enrich enroll ensure enter entire entry envelope episode equal equip era erase erode erosion error erupt escape essay essence estate eternal ethics evidence evil evoke evolve exact example excess exchange excite exclude excuse execute exercise exhaust exhibit exile exist exit exotic expand expect expire explain expose express extend extra eye eyebrow fabric face faculty fade faint faith fall false fame family famous fan fancy fantasy farm fashion fat fatal father fatigue fault favorite feature february federal fee feed feel female fence festival fetch fever few fiber fiction field figure file film filter final find fine finger finish fire firm first fiscal fish fit fitness fix flag flame flash flat flavor flee flight flip float flock floor flower fluid flush fly foam focus fog foil fold follow food foot force forest forget fork fortune forum forward fossil foster found fox fragile frame frequent fresh friend fringe frog front frost frown frozen fruit fuel fun funny furnace fury future gadget gain galaxy gallery game gap garage garbage garden garlic garment gas gasp gate gather gauge gaze general genius genre gentle genuine gesture ghost giant gift giggle ginger giraffe girl give glad glance glare glass glide glimpse globe gloom glory glove glow glue goat goddess gold good goose gorilla gospel gossip govern gown grab grace grain grant grape grass gravity great green grid grief grit grocery group grow grunt guard guess guide guilt guitar gun gym habit hair half hammer hamster hand happy harbor hard harsh harvest hat have hawk hazard head health heart heavy hedgehog height hello helmet help hen hero hidden high hill hint hip hire history hobby hockey hold hole holiday hollow home honey hood hope horn horror horse hospital host hotel hour hover hub huge human humble humor hundred hungry hunt hurdle hurry hurt husband hybrid ice icon idea identify idle ignore ill illegal illness image imitate immense immune impact impose improve impulse inch include income increase index indicate indoor industry infant inflict inform inhale inherit initial inject injury inmate inner innocent input inquiry insane insect inside inspire install intact interest into invest invite involve iron island isolate issue item ivory jacket jaguar jar jazz jealous jeans jelly jewel job join joke journey joy judge juice jump jungle junior junk just kangaroo keen keep ketchup key kick kid kidney kind kingdom kiss kit kitchen kite kitten kiwi knee knife knock know lab label labor ladder lady lake lamp language laptop large later latin laugh laundry lava law lawn lawsuit layer lazy leader leaf learn leave lecture left leg legal legend leisure lemon lend length lens leopard lesson letter level liar liberty library license life lift light like limb limit link lion liquid list little live lizard load loan lobster local lock logic lonely long loop lottery loud lounge love loyal lucky luggage lumber lunar lunch luxury lyrics machine mad magic magnet maid mail main major make mammal man manage mandate mango mansion manual maple marble march margin marine market marriage mask mass master match material math matrix matter maximum maze meadow mean measure meat mechanic medal media melody melt member memory mention menu mercy merge merit merry mesh message metal method middle midnight milk million mimic mind minimum minor minute miracle mirror misery miss mistake mix mixed mixture mobile model modify mom moment monitor monkey monster month moon moral more morning mosquito mother motion motor mountain mouse move movie much muffin mule multiply muscle museum mushroom music must mutual myself mystery myth naive name napkin narrow nasty nation nature near neck need negative neglect neither nephew nerve nest net network neutral never news next nice night noble noise nominee noodle normal north nose notable note nothing notice novel now nuclear number nurse nut oak obey object oblige obscure observe obtain obvious occur ocean october odor off offer office often oil okay old olive olympic omit once one onion online only open opera opinion oppose option orange orbit orchard order ordinary organ orient original orphan ostrich other outdoor outer output outside oval oven over own owner oxygen oyster ozone pact paddle page pair palace palm panda panel panic panther paper parade parent park parrot party pass patch path patient patrol pattern pause pave payment peace peanut pear peasant pelican pen penalty pencil people pepper perfect permit person pet phone photo phrase physical piano picnic picture piece pig pigeon pill pilot pink pioneer pipe pistol pitch pizza place planet plastic plate play please pledge pluck plug plunge poem poet point polar pole police pond pony pool popular portion position possible post potato pottery poverty powder power practice praise predict prefer prepare present pretty prevent price pride primary print priority prison private prize problem process produce profit program project promote proof property prosper protect proud provide public pudding pull pulp pulse pumpkin punch pupil puppy purchase purity purpose purse push put puzzle pyramid quality quantum quarter question quick quit quiz quote rabbit raccoon race rack radar radio rail rain raise rally ramp ranch random range rapid rare rate rather raven raw razor ready real reason rebel rebuild recall receive recipe record recycle reduce reflect reform refuse region regret regular reject relax release relief rely remain remember remind remove render renew rent reopen repair repeat replace report require rescue resemble resist resource response result retire retreat return reunion reveal review reward rhythm rib ribbon rice rich ride ridge rifle right rigid ring riot ripple risk ritual rival river road roast robot robust rocket romance roof rookie room rose rotate rough round route royal rubber rude rug rule run runway rural sad saddle sadness safe sail salad salmon salon salt salute same sample sand satisfy satoshi sauce sausage save say scale scan scare scatter scene scheme school science scissors scorpion scout scrap screen script scrub sea search season seat second secret section security seed seek segment select sell seminar senior sense sentence series service session settle setup seven shadow shaft shallow share shed shell sheriff shield shift shine ship shiver shock shoe shoot shop short shoulder shove shrimp shrug shuffle shy sibling sick side siege sight sign silent silk silly silver similar simple since sing siren sister situate six size skate sketch ski skill skin skirt skull slab slam sleep slender slice slide slight slim slogan slot slow slush small smart smile smoke smooth snack snake snap sniff snow soap soccer social sock soda soft solar soldier solid solution solve someone song soon sorry sort soul sound soup source south space spare spatial spawn speak special speed spell spend sphere spice spider spike spin spirit split spoil sponsor spoon sport spot spray spread spring spy square squeeze squirrel stable stadium staff stage stairs stamp stand start state stay steak steel stem step stereo stick still sting stock stomach stone stool story stove strategy street strike strong struggle student stuff stumble style subject submit subway success such sudden suffer sugar suggest suit summer sun sunny sunset super supply supreme sure surface surge surprise surround survey suspect sustain swallow swamp swap swarm swear sweet swift swim swing switch sword symbol symptom syrup system table tackle tag tail talent talk tank tape target task taste tattoo taxi teach team tell ten tenant tennis tent term test text thank that theme then theory there they thing this thought three thrive throw thumb thunder ticket tide tiger tilt timber time tiny tip tired tissue title toast tobacco today toddler toe together toilet token tomato tomorrow tone tongue tonight tool tooth top topic topple torch tornado tortoise toss total tourist toward tower town toy track trade traffic tragic train transfer trap trash travel tray treat tree trend trial tribe trick trigger trim trip trophy trouble truck true truly trumpet trust truth try tube tuition tumble tuna tunnel turkey turn turtle twelve twenty twice twin twist two type typical ugly umbrella unable unaware uncle uncover under undo unfair unfold unhappy uniform unique unit universe unknown unlock until unusual unveil update upgrade uphold upon upper upset urban urge usage use used useful useless usual utility vacant vacuum vague valid valley valve van vanish vapor various vast vault vehicle velvet vendor venture venue verb verify version very vessel veteran viable vibrant vicious victory video view village vintage violin virtual virus visa visit visual vital vivid vocal voice void volcano volume vote voyage wage wagon wait walk wall walnut want warfare warm warrior wash wasp waste water wave way wealth weapon wear weasel weather web wedding weekend weird welcome west wet whale what wheat wheel when where whip whisper wide width wife wild will win window wine wing wink winner winter wire wisdom wise wish witness wolf woman wonder wood wool word work world worry worth wrap wreck wrestle wrist write wrong yard year yellow you young youth zebra zero zone zoo".split(" ");
+
+const sha256 = async bytes => new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+
+// framed(x) = 4-byte big-endian length ‖ x. An absent source frames as length 0,
+// which is what makes "skipped entirely when neither is present" expressible.
+const framed = bytes => {
+  const out = new Uint8Array(4 + bytes.length);
+  new DataView(out.buffer).setUint32(0, bytes.length, false);
+  out.set(bytes, 4);
+  return out;
+};
+const cat = arrs => {
+  const out = new Uint8Array(arrs.reduce((n, a) => n + a.length, 0));
+  let o = 0; for (const a of arrs) { out.set(a, o); o += a.length; }
+  return out;
+};
+
+// #8, literally:
+//   entropy = csprng_32 XOR SHA-256("aobs/seed-entropy/v1" ‖ framed(camera) ‖ framed(dice))
+// ...and skipped entirely when neither supplement is present, so that the no-dice
+// path is byte-identical to the CSPRNG rather than "the CSPRNG hashed once more".
+const mixEntropy = async (csprng32, diceDigits) => {
+  if (!diceDigits.length) return { entropy: csprng32, mixed: false };
+  const enc = new TextEncoder();
+  const supplement = await sha256(cat([
+    enc.encode("aobs/seed-entropy/v1"),
+    framed(new Uint8Array(0)),                  // camera: absent in this prototype
+    framed(enc.encode(diceDigits.join(""))),
+  ]));
+  return { entropy: csprng32.map((b, i) => b ^ supplement[i]), mixed: true };
+};
+
+// 32 bytes -> 256 bits ‖ 8 checksum bits -> 24 words. The real thing.
+const toMnemonic = async entropy => {
+  const ck = (await sha256(entropy))[0];
+  const bits = [...entropy].map(b => b.toString(2).padStart(8, "0")).join("")
+             + ck.toString(2).padStart(8, "0");
+  return Array.from({ length: 24 }, (_, i) => WORDS[parseInt(bits.slice(i * 11, i * 11 + 11), 2)]);
+};
+
+const matches = prefix => prefix === "" ? [] : WORDS.filter(w => w.startsWith(prefix));
+const hex = bytes => [...bytes].map(b => b.toString(16).padStart(2, "0")).join("");
+
+// ───────────────────────────────────────────────────────────────────────────────
+//  Shell
+// ───────────────────────────────────────────────────────────────────────────────
+const OPTS = {
+  dice:    { q: "Where do the dice sit?",            vals: ["offered", "advanced", "always"] },
+  gather:  { q: "The gathering-entropy screen",      vals: ["honest", "bar"] },
+  words:   { q: "How 24 words are laid out",         vals: ["grid", "pair", "pages"] },
+  confirm: { q: "What proves it was written down",   vals: ["sampled", "full", "attest"] },
+  wrong:   { q: "A wrong confirmation…",             vals: ["keep", "restart"] },
+  chrome:  { q: "On screen beside a visible seed",   vals: ["bare", "status"] },
+};
+const cfg = {};
+const url = new URLSearchParams(location.search);
+for (const k in OPTS) cfg[k] = OPTS[k].vals.includes(url.get(k)) ? url.get(k) : OPTS[k].vals[0];
+
+const FLOW = ["menu", "dice", "gather", "words", "confirm", "passphrase", "identity", "end"];
+
+let S = null;
+const fresh = () => ({
+  screen: "menu",
+  rolls: [],            // digits 1..6, free entry, no minimum (#8)
+  csprng: null,         // the 32 bytes from getrandom(2)
+  entropy: null,        // after mixing
+  mnemonic: null,
+  mixed: false,
+  page: 0,              // which page of the mnemonic (words=pages) or of the attestation
+  ticked: [],           // attest mode: pages the user has ticked
+  ask: [],              // sampled/full mode: the positions still to be answered
+  askAt: 0,
+  typed: "",
+  given: {},            // position -> word the user typed back
+  badAt: null,          // position that failed
+  attempts: 0,
+  pp: "",               // BIP39 passphrase, printable ASCII, never trimmed (#20)
+  ppDone: false,
+  gatherT: 0,
+  showText: false,      // identity screen: text fallback behind the QR (#27)
+});
+S = fresh();
+
+const el = id => document.getElementById(id);
+const esc = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const set = (patch) => { Object.assign(S, patch); render(); };
+
+const go = async screen => {
+  if (screen === "gather") { S.screen = "gather"; render(); return runGather(); }
+  if (screen === "confirm") startConfirm();
+  S.screen = screen; render();
+};
+
+// --- generation -------------------------------------------------------------
+// The wait is #8's: `random.trust_cpu=off` means the pool must credit enough
+// non-RDSEED entropy before getrandom(2) returns. ~1–16 s, UNMEASURED.
+let gatherTimer = null;
+const GATHER_MS = 7000;
+const runGather = async () => {
+  clearInterval(gatherTimer);
+  S.gatherT = 0;
+  const started = performance.now();
+  gatherTimer = setInterval(() => {
+    S.gatherT = performance.now() - started;
+    if (S.gatherT >= GATHER_MS) { clearInterval(gatherTimer); finishGather(); }
+    else render();
+  }, 100);
+};
+const finishGather = async () => {
+  S.csprng = crypto.getRandomValues(new Uint8Array(32));
+  const { entropy, mixed } = await mixEntropy(S.csprng, S.rolls);
+  S.entropy = entropy; S.mixed = mixed;
+  S.mnemonic = await toMnemonic(entropy);
+  S.screen = "words"; S.page = 0; render();
+};
+
+// --- confirmation -----------------------------------------------------------
+const SAMPLE_N = 4;
+const startConfirm = () => {
+  S.typed = ""; S.given = {}; S.badAt = null; S.page = 0; S.ticked = [];
+  if (cfg.confirm === "full") S.ask = Array.from({ length: 24 }, (_, i) => i);
+  else if (cfg.confirm === "sampled") {
+    const pool = Array.from({ length: 24 }, (_, i) => i);
+    S.ask = Array.from({ length: SAMPLE_N }, () =>
+      pool.splice(crypto.getRandomValues(new Uint32Array(1))[0] % pool.length, 1)[0]).sort((a, b) => a - b);
+  } else S.ask = [];
+  S.askAt = 0;
+};
+const commitWord = () => {
+  const w = S.typed.trim();
+  if (!w) return;
+  const at = S.ask[S.askAt];
+  S.given[at] = w;
+  S.typed = "";
+  if (w !== S.mnemonic[at]) { S.badAt = at; S.attempts++; render(); return; }
+  S.askAt++;
+  if (S.askAt >= S.ask.length) { S.screen = "passphrase"; }
+  render();
+};
+const afterWrong = () => {
+  if (cfg.wrong === "restart") { const r = fresh(); r.screen = "gather"; S = r; render(); runGather(); }
+  else { S.badAt = null; S.screen = "words"; S.page = 0; render(); }
+};
+
+// --- fingerprint (NOT a BIP32 one — see the header comment) -----------------
+let fpCache = "";
+const fingerprint = async () => {
+  if (!S.entropy) return "";
+  const enc = new TextEncoder();
+  const h = await sha256(cat([enc.encode("prototype-fp"), S.entropy, enc.encode(S.pp)]));
+  fpCache = hex(h.slice(0, 4));
+  return fpCache;
+};
+
+// --- a stand-in QR: deterministic noise, right shape, no encoder ------------
+const qrDataUrl = seed => {
+  const n = 41, c = document.createElement("canvas");
+  c.width = c.height = n; const x = c.getContext("2d");
+  x.fillStyle = "#fff"; x.fillRect(0, 0, n, n);
+  let h = 2166136261;
+  for (const ch of seed) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+  x.fillStyle = "#000";
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    h = Math.imul(h ^ (i * 31 + j), 16777619);
+    if ((h >>> 13) & 1) x.fillRect(i, j, 1, 1);
+  }
+  const eye = (ox, oy) => { x.fillStyle = "#fff"; x.fillRect(ox, oy, 9, 9); x.fillStyle = "#000";
+    x.fillRect(ox + 1, oy + 1, 7, 7); x.fillStyle = "#fff"; x.fillRect(ox + 2, oy + 2, 5, 5);
+    x.fillStyle = "#000"; x.fillRect(ox + 3, oy + 3, 3, 3); };
+  eye(0, 0); eye(n - 9, 0); eye(0, n - 9);
+  return c.toDataURL();
+};
+
+// ───────────────────────────────────────────────────────────────────────────────
+//  Screens
+// ───────────────────────────────────────────────────────────────────────────────
+const statusbar = (right = "") => `
+  <div class="statusbar">
+    <span>aobs</span>
+    <span class="chip net">testnet</span>
+    <span class="spacer"></span>
+    <span class="chip">no network</span>
+    ${right}
+  </div>`;
+
+const foot = (hint, right) => `<div class="foot"><span class="keyhint">${hint}</span><span class="spacer"></span>${right}</div>`;
+
+const view = {
+
+menu: () => statusbar() + `
+  <div class="body center">
+    <h1>aobs</h1>
+    <p>An offline signer. Nothing on this machine survives being switched off.</p>
+    <div class="menu">
+      <button class="btn go big" onclick="go('${cfg.dice === "always" ? "dice" : cfg.dice === "offered" ? "dice" : "gather"}')">
+        Create a new wallet<small>24 words, generated here, written down by you</small></button>
+      <button class="btn big" disabled>Load an existing wallet<small>type a recovery phrase you already have</small></button>
+      ${cfg.dice === "advanced" ? `<button class="btn quiet" onclick="go('dice')">Advanced: add your own dice rolls</button>` : ``}
+    </div>
+  </div>` + foot(`<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>Enter</kbd> choose`, ``),
+
+dice: () => statusbar() + `
+  <div class="body">
+    <div class="head"><h1>Dice, if you want them</h1><span class="spacer"></span>
+      <span class="rollcount">${S.rolls.length} roll${S.rolls.length === 1 ? "" : "s"}</span></div>
+    <p>Type your rolls as digits <span class="mono">1</span>–<span class="mono">6</span>. Stop whenever you like.</p>
+    <p><b>Your rolls are combined with the system random number generator; they can only add
+       randomness, never remove it.</b></p>
+    <div class="dice">${S.rolls.map(d => `<span class="die">${d}</span>`).join("") ||
+      `<span class="note">nothing rolled yet — that is a complete answer</span>`}</div>
+    ${cfg.dice === "always"
+      ? `<p class="note">This screen cannot be skipped in this configuration — which is the point of the switch.</p>` : ``}
+  </div>` + foot(`<kbd>1</kbd>–<kbd>6</kbd> roll &nbsp; <kbd>⌫</kbd> undo &nbsp; <kbd>Enter</kbd> continue`,
+    `${cfg.dice === "always" && !S.rolls.length ? `<button class="btn" disabled>Continue</button>`
+      : `<button class="btn go" onclick="go('gather')">Continue${S.rolls.length ? "" : " without dice"}</button>`}`),
+
+gather: () => statusbar() + `
+  <div class="body center">
+    ${cfg.gather === "bar"
+      ? `<div class="bar"><i style="width:${Math.min(100, S.gatherT / GATHER_MS * 100).toFixed(0)}%"></i></div>
+         <h1>Gathering entropy</h1>
+         <p>${Math.min(99, Math.floor(S.gatherT / GATHER_MS * 100))}% — please wait.</p>`
+      : `<div class="spinner"></div>
+         <h1>Gathering entropy</h1>
+         <p>The kernel is collecting randomness from this machine’s own timing. It is not stuck;
+            it finishes when there is enough, which on some machines takes a few seconds longer.</p>
+         <div class="ticker">${(S.gatherT / 1000).toFixed(1)} s &nbsp;·&nbsp; ${S.rolls.length ? `${S.rolls.length} dice rolls will be mixed in` : `no dice supplied`}</div>`}
+  </div>` + foot(`this wait is #8’s <span class="mono">random.trust_cpu=off</span> — ~1–16 s, unmeasured`, ``),
+
+words: () => (cfg.chrome === "status" ? statusbar(`<span class="chip crit">seed on screen</span>`) : ``) + `
+  <div class="body seed">
+    <div class="head">
+      <h1>Write these down</h1><span class="spacer"></span>
+      <span class="progress">${cfg.words === "pages" ? `page ${S.page + 1} of 2 · words ${S.page * 12 + 1}–${S.page * 12 + 12}` : `24 words`}</span>
+    </div>
+    <div class="seedbanner"><span>These 24 words are the wallet. Anyone who reads them can spend from it, and nobody can recover it without them. They are not stored anywhere on this machine.</span></div>
+    <div class="words ${cfg.words}">
+      ${(cfg.words === "pages" ? S.mnemonic.slice(S.page * 12, S.page * 12 + 12) : S.mnemonic)
+        .map((w, i) => { const n = cfg.words === "pages" ? S.page * 12 + i + 1 : i + 1;
+          return `<div class="w"><span class="n">${n}</span><span class="t">${w}</span></div>`; }).join("")}
+    </div>
+  </div>` + foot(cfg.chrome === "bare" ? `nothing else is on this screen — no status bar, no clock, no network chip`
+                                       : `the ordinary status bar stays, with the seed flagged`,
+    cfg.words === "pages" && S.page === 0
+      ? `<button class="btn go" onclick="set({page:1})">Next 12 words</button>`
+      : `${cfg.words === "pages" ? `<button class="btn quiet" onclick="set({page:0})">Back to 1–12</button>` : ``}
+         <button class="btn go" onclick="go('confirm')">I have written them down</button>`),
+
+confirm: () => {
+  if (S.badAt !== null) return statusbar() + `
+    <div class="body center">
+      <div class="verdict bad">
+        <h2>That is not word ${S.badAt + 1}</h2>
+        <p>You typed <span class="mono">${esc(S.given[S.badAt] || "")}</span>. That is not what is written
+           at position ${S.badAt + 1}.</p>
+        <p>${cfg.wrong === "keep"
+          ? `The phrase has not changed and nothing has been destroyed. Read it again and correct
+             what is on your paper — the difference between the paper and the screen is the only
+             thing here worth finding.`
+          : `<b>This wallet has been discarded and a new phrase generated.</b> Anything you already
+             wrote down is now worthless. Start again from the new words.`}</p>
+      </div>
+    </div>` + foot(``, `<button class="btn go" onclick="afterWrong()">${cfg.wrong === "keep" ? "Show the words again" : "Generate a new wallet"}</button>`);
+
+  if (cfg.confirm === "attest") {
+    const page = S.page, from = page * 8, slice = S.mnemonic.slice(from, from + 8);
+    return statusbar(`<span class="chip crit">seed on screen</span>`) + `
+    <div class="body seed">
+      <div class="head"><h1>Check what you wrote</h1><span class="spacer"></span>
+        <span class="progress">page ${page + 1} of 3</span></div>
+      <p>Compare these eight against your paper, then confirm. Nothing is typed back.</p>
+      <div class="words pair">
+        ${slice.map((w, i) => `<div class="w ${S.ticked.includes(page) ? "ticked" : ""}">
+          <span class="n">${from + i + 1}</span><span class="t">${w}</span></div>`).join("")}
+      </div>
+    </div>` + foot(`this take proves attention, not transcription — it cannot detect a wrong word`,
+      `<button class="btn go" onclick="${page < 2 ? `set({ticked:[...S.ticked,${page}],page:${page + 1}})`
+                                                 : `go('passphrase')`}">
+        ${page < 2 ? "These eight match my paper" : "All 24 match my paper"}</button>`);
+  }
+
+  const at = S.ask[S.askAt], cands = matches(S.typed), only = cands.length === 1;
+  return statusbar() + `
+  <div class="body">
+    <div class="head">
+      <h1>${cfg.confirm === "full" ? "Type the phrase back" : "Check four words"}</h1><span class="spacer"></span>
+      <span class="progress">${S.askAt + 1} / ${S.ask.length}</span>
+    </div>
+    <p>${cfg.confirm === "full"
+      ? `Type all 24 words back from your paper, in order. The screen is not showing them.`
+      : `Read these four back from your paper. They were chosen at random after you wrote the phrase down,
+         so they cannot have been memorised from the screen.`}</p>
+    <div class="words grid" style="flex:0 0 auto;align-content:start">
+      ${S.ask.map((p, i) => `<div class="w ${i === S.askAt ? "hi" : ""}">
+        <span class="n">${p + 1}</span>
+        <span class="t">${i < S.askAt ? esc(S.given[p]) : i === S.askAt ? `<span class="dim">?</span>` : ``}</span></div>`).join("")}
+    </div>
+    <div class="entry">
+      <div class="askrow">
+        <span class="ask">Word <b>${at + 1}</b></span>
+        <span class="typed">${esc(S.typed) || `<span class="ghost">…</span>`}<span class="caret"></span></span>
+      </div>
+      <div class="cands">
+        ${cands.slice(0, 12).map(w => `<span class="cand ${only ? "only" : ""}">
+          <b>${esc(S.typed)}</b>${esc(w.slice(S.typed.length))}</span>`).join("")
+          || `<span class="note">${S.typed ? `no BIP39 word starts with “${esc(S.typed)}”` : `start typing`}</span>`}
+      </div>
+      <div class="note">${only ? `press <b>space</b> to commit — nothing commits itself (#18)` : `${cands.length} words match`}</div>
+    </div>
+  </div>` + foot(`<kbd>a</kbd>–<kbd>z</kbd> type &nbsp; <kbd>space</kbd> commit &nbsp; <kbd>⌫</kbd> back`, ``);
+},
+
+passphrase: () => statusbar() + `
+  <div class="body">
+    <div class="head"><h1>Passphrase</h1></div>
+    <p>An optional extra word or sentence, remembered by you and never written on this machine.
+       <b>Leave it empty if you do not want one</b> — empty is the ordinary case and is not worse.</p>
+    <p>It is shown as you type it, because a passphrase you cannot see is a passphrase you can mistype
+       into a different, empty wallet with no error.</p>
+    <div class="ppfield">${S.pp
+      ? esc(S.pp).replace(/ /g, `<span class="sp">␣</span>`)
+      : `<span class="empty">empty — no passphrase</span>`}<span class="caret"></span></div>
+    <div class="note" style="margin-top:var(--s3)">
+      ${S.pp.length} characters${/^ | $|  /.test(S.pp) ? ` · <b>contains leading, trailing or repeated spaces — they count, and they are never trimmed</b>` : ``}
+    </div>
+  </div>` + foot(`printable ASCII only (#20) &nbsp; <kbd>Enter</kbd> continue`,
+    `<button class="btn go" onclick="go('identity')">${S.pp ? "Use this passphrase" : "Continue without a passphrase"}</button>`),
+
+identity: () => statusbar(`<span class="chip ok">wallet loaded</span>`) + `
+  <div class="body">
+    <div class="head"><h1>This wallet</h1></div>
+    <div class="idrow">
+      <div><span class="label">Fingerprint</span><span class="v">${fpCache || "…"}</span></div>
+      <div><span class="label">Network</span><span class="v">testnet</span></div>
+      <div><span class="label">Passphrase</span><span class="v">${S.pp ? "in use" : "none"}</span></div>
+      <div><span class="label">Accounts</span><span class="v">44′ · 49′ · 84′ · 86′ / 0′</span></div>
+    </div>
+    <div class="exportwrap">
+      <div>
+        ${S.showText
+          ? `<div class="mono" style="font-size:12px;max-width:44ch;word-break:break-all;color:var(--ink-mid);line-height:1.35">
+               UR:CRYPTO-ACCOUNT/OEADCYWTHDGHAOLYTAADMUTAADDLOXAXHDCLAX…${fpCache.toUpperCase()}</div>`
+          : `<img class="qr" src="${qrDataUrl(fpCache + S.pp)}" alt="ur:crypto-account">`}
+      </div>
+      <div>
+        <h2>Watch-only export</h2>
+        <p>Scan this with your everyday wallet software so it can show you balances and build
+           transactions. It contains no private keys and cannot spend.</p>
+        <p class="note">One <span class="mono">ur:crypto-account</span> QR, all four address types at account 0 (#27).</p>
+        <button class="btn quiet" onclick="set({showText:!S.showText})">${S.showText ? "Show the QR" : "Show as text instead"}</button>
+      </div>
+    </div>
+  </div>` + foot(`the fingerprint stays in view on every screen from here on`,
+    `<button class="btn" onclick="go('end')">End the session</button>
+     <button class="btn go" disabled>Sign a transaction</button>`),
+
+end: () => statusbar() + `
+  <div class="body center">
+    <h1>Ready to switch off</h1>
+    <p>The wallet is gone from this machine the moment it powers down. Your 24 words are the only
+       copy that exists, and they are on your paper.</p>
+    <p class="note">To use a different wallet, restart — a wallet is loaded once per boot and is never
+       swapped out while the machine is running (#25).</p>
+    <div class="menu" style="min-width:320px">
+      <button class="btn go big" onclick="alert('shutdown')">Shut down</button>
+      <button class="btn" onclick="S=fresh();render()">Restart</button>
+    </div>
+  </div>` + foot(`there is no lock screen and no log out — nothing here persists to lock`, ``),
+};
+
+// ───────────────────────────────────────────────────────────────────────────────
+const render = async () => {
+  if (S.screen === "identity" && !fpCache) { await fingerprint(); }
+  el("screen").innerHTML = view[S.screen]();
+  el("steps").innerHTML = FLOW.map(f => {
+    const skipped = f === "dice" && cfg.dice === "advanced";
+    return `<span class="${S.screen === f ? "on" : FLOW.indexOf(S.screen) > FLOW.indexOf(f) ? "done" : ""}"
+      style="${skipped ? "opacity:.4" : ""}">${f}${skipped ? " (hidden)" : ""}</span>`;
+  }).join("");
+  el("switches").innerHTML = Object.entries(OPTS).map(([k, o]) => `
+    <div class="sw"><div class="q">${o.q}</div><div class="opts">
+      ${o.vals.map(v => `<button class="${cfg[k] === v ? "on" : ""}" onclick="flip('${k}','${v}')">${v}</button>`).join("")}
+    </div></div>`).join("");
+  el("statepanel").innerHTML = [
+    ["screen", S.screen],
+    ["dice rolls", S.rolls.length],
+    ["csprng_32", S.csprng ? hex(S.csprng).slice(0, 16) + "…" : "—"],
+    ["entropy", S.entropy ? hex(S.entropy).slice(0, 16) + "…" : "—"],
+    ["mixed with dice", S.mixed ? "yes" : "no"],
+    ["mnemonic", S.mnemonic ? `24 words` : "—"],
+    ["confirmed", S.screen === "passphrase" || FLOW.indexOf(S.screen) > 4 ? "yes" : "no"],
+    ["failed attempts", S.attempts],
+    ["passphrase", S.pp ? `${S.pp.length} chars` : "none"],
+  ].map(([k, v]) => `<div><span>${k}</span><span>${v}</span></div>`).join("");
+};
+
+const flip = (k, v) => {
+  cfg[k] = v;
+  const u = new URLSearchParams(location.search); u.set(k, v);
+  history.replaceState(null, "", "?" + u);
+  if (S.screen === "confirm") startConfirm();
+  if (S.screen === "words") S.page = 0;
+  render();
+};
+
+document.addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key;
+  if (S.screen === "dice") {
+    if (/^[1-6]$/.test(k)) { S.rolls.push(+k); e.preventDefault(); return render(); }
+    if (k === "Backspace") { S.rolls.pop(); e.preventDefault(); return render(); }
+    if (k === "Enter" && !(cfg.dice === "always" && !S.rolls.length)) { e.preventDefault(); return go("gather"); }
+  }
+  if (S.screen === "confirm" && S.badAt === null && cfg.confirm !== "attest") {
+    if (/^[a-z]$/.test(k)) { S.typed += k; e.preventDefault(); return render(); }
+    if (k === " ") { e.preventDefault(); return commitWord(); }
+    if (k === "Backspace") { S.typed = S.typed.slice(0, -1); e.preventDefault(); return render(); }
+  }
+  if (S.screen === "passphrase") {
+    if (k.length === 1 && k >= " " && k <= "~") { S.pp += k; fpCache = ""; e.preventDefault(); return render(); }
+    if (k === "Backspace") { S.pp = S.pp.slice(0, -1); fpCache = ""; e.preventDefault(); return render(); }
+    if (k === "Enter") { e.preventDefault(); return go("identity"); }
+  }
+});
+
+const WALKS = [
+  ["The ordinary path", "no dice, straight through to a confirmed phrase",
+    () => { S = fresh(); go("gather"); }],
+  ["With dice", "eleven rolls mixed in — watch the entropy change",
+    () => { S = fresh(); S.rolls = [4,2,6,1,3,5,5,2,1,6,3]; go("gather"); }],
+  ["Straight to the words", "skip the wait and judge the layout",
+    () => { S = fresh(); finishGather(); }],
+  ["A wrong word at confirmation", "what a mistake costs under each switch",
+    () => { S = fresh(); finishGather().then(() => { startConfirm(); S.screen = "confirm";
+        const at = S.ask[0]; S.given[at] = "zebra"; S.badAt = at; S.attempts = 1; render(); }); }],
+  ["A passphrase with spaces", "the whitespace rendering #20 requires",
+    () => { S = fresh(); finishGather().then(() => {
+        S.pp = " correct horse "; S.screen = "passphrase"; render(); }); }],
+];
+el("scen").innerHTML = WALKS.map(([t, s], i) =>
+  `<button onclick="WALKS[${i}][2]()">${t}<small>${s}</small></button>`).join("");
+window.WALKS = WALKS;
+window.go = go; window.set = set; window.flip = flip; window.afterWrong = afterWrong;
+render();
+</script>
