@@ -1,0 +1,321 @@
+<title>Light or Dark</title>
+<!--
+  PROTOTYPE — throwaway. Answers issue #26: is the appliance rendered light or dark?
+
+  Decided against the real artifact, not from principle: this renders the screens #9
+  actually settled — the dense review panel and the per-address confirmation — in both
+  schemes, from one markup template, so only the tokens differ.
+
+    ?view=split   both schemes side by side (default)
+    ?view=dark    dark only, full size
+    ?view=light   light only, full size
+
+  The "fee warning" toggle shows #22's single surviving advisory inline on the fee row,
+  because how a warning colour reads is one of the few things that genuinely differs
+  between the two schemes.
+
+  Same fake transaction as transaction-review.html. Not production code. Not Slint.
+  #9's mixed-input-script warning is gone: #13 declined the refusal and #22 cut the warning.
+-->
+<style>
+  /* ---------- DARK: the scheme the #9 prototype assumed without asking ---------- */
+  .pane {
+    --ground:   #10151c;
+    --panel:    #161c25;
+    --panel-2:  #1c242f;
+    --line:     #263140;
+    --line-soft:#1e2836;
+    --ink:      #e6ecf3;
+    --ink-mid:  #a7b4c4;
+    --ink-dim:  #6f7d8e;
+    --focus:    #56c8e8;
+    --ok:       #48c8a2;  --ok-bg:   #14312a;  --ok-line:   #2a5f4e;
+    --warn:     #dfa441;  --warn-bg: #33270f;  --warn-line: #6a5220;
+    --crit:     #e2635f;  --crit-bg: #351a1c;  --crit-line: #6b3033;
+    --net:      #8fc9de;  --net-line:#2d4a5c;
+  }
+
+  /* ---------- LIGHT: derived, not inverted. Ink-on-paper contrast for address work. ---------- */
+  .pane.light {
+    --ground:   #eef1f5;
+    --panel:    #ffffff;
+    --panel-2:  #f5f7fa;
+    --line:     #c3ccd7;
+    --line-soft:#dfe5ec;
+    --ink:      #0f151c;
+    --ink-mid:  #414d5c;
+    --ink-dim:  #66717f;
+    --focus:    #0a6a86;
+    --ok:       #0a6b4d;  --ok-bg:   #e2f4ec;  --ok-line:   #8fc9b3;
+    --warn:     #7a5200;  --warn-bg: #fbf1da;  --warn-line: #d8b76a;
+    --crit:     #a81f1c;  --crit-bg: #fbe9e8;  --crit-line: #e0a3a1;
+    --net:      #0b5f7a;  --net-line:#9cc4d4;
+  }
+
+  :root {
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: #6a7280;       /* deliberately neutral mid-grey: neither scheme gets a friendly ground */
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    padding: var(--s5) var(--s4) 96px;
+  }
+
+  .stage { display: grid; gap: var(--s5); max-width: 1600px; margin: 0 auto; }
+  .stage.split { grid-template-columns: 1fr 1fr; }
+
+  .pane { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
+  .pane > h2 {
+    margin: 0;
+    font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+    color: #fff; opacity: .85; font-weight: 600;
+  }
+
+  /* The device viewport — judge density as a screen, not a document. */
+  .screen {
+    background: var(--panel);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .screen.panel { aspect-ratio: 16 / 10; min-height: 520px; }
+  .screen.addr-screen { aspect-ratio: 16 / 10; min-height: 400px; }
+
+  .statusbar {
+    display: flex; align-items: center; gap: var(--s3);
+    padding: var(--s3) var(--s5);
+    border-bottom: 1px solid var(--line-soft);
+    background: var(--ground);
+    font-size: 12px; color: var(--ink-dim);
+    letter-spacing: .06em; text-transform: uppercase;
+    flex: 0 0 auto;
+  }
+  .statusbar .spacer { flex: 1; }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: var(--s1);
+    padding: 3px var(--s2); border-radius: 3px;
+    border: 1px solid var(--line); color: var(--ink-mid);
+    font-family: var(--mono); font-size: 11px;
+    letter-spacing: .04em; text-transform: none;
+  }
+  .chip.net { border-color: var(--net-line); color: var(--net); }
+  .chip.ok  { border-color: var(--ok-line);  color: var(--ok); background: var(--ok-bg); }
+
+  .label { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-dim); }
+
+  .amount { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .amount .unit { color: var(--ink-dim); font-size: .68em; margin-left: .35em; letter-spacing: .04em; }
+
+  /* Address rendering: 4-character groups, ends emphasised for comparison. */
+  .addr {
+    font-family: var(--mono); font-size: 17px; line-height: 1.9;
+    color: var(--ink-mid); word-spacing: .55em; overflow-wrap: anywhere;
+  }
+  .addr b { color: var(--ink); font-weight: 600; }
+  .addr.lg { font-size: 22px; line-height: 2; }
+  .addr.sm { font-size: 13px; line-height: 1.7; }
+
+  .actions { display: flex; gap: var(--s3); flex: 0 0 auto; }
+  .btn {
+    font: inherit; font-size: 15px; padding: var(--s3) var(--s5);
+    border-radius: 4px; border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--ink);
+    cursor: pointer; letter-spacing: .02em;
+  }
+  .btn.sign   { border-color: var(--ok-line);   background: var(--ok-bg);   color: var(--ok); font-weight: 600; }
+  .btn.refuse { border-color: var(--crit-line); background: var(--crit-bg); color: var(--crit); }
+  .btn .key   { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); margin-left: var(--s2); }
+
+  .checks { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); font-size: 12px; color: var(--ink-mid); }
+  .checks span::before { content: "✓ "; color: var(--ok); }
+
+  /* dense panel */
+  .body { display: grid; grid-template-columns: 280px 1fr; flex: 1; min-height: 0; }
+  .left {
+    border-right: 1px solid var(--line-soft); padding: var(--s5);
+    display: flex; flex-direction: column; gap: var(--s5); background: var(--ground);
+  }
+  .headline .amount { font-size: 32px; display: block; margin-top: var(--s1); }
+  .stat {
+    display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3);
+    padding: var(--s2) 0; border-bottom: 1px solid var(--line-soft);
+  }
+  .stat:last-child { border-bottom: 0; }
+  .stat .amount { font-size: 14px; }
+
+  /* #22's one surviving advisory: inline, on the fee row, full sentence, no icon. */
+  .stat.warned { background: var(--warn-bg); margin: 0 calc(var(--s3) * -1); padding: var(--s2) var(--s3); border-radius: 3px; }
+  .stat.warned .amount, .stat.warned .label { color: var(--warn); }
+  .feewarn {
+    display: none; color: var(--warn); background: var(--warn-bg);
+    border: 1px solid var(--warn-line); border-radius: 3px;
+    padding: var(--s2) var(--s3); font-size: 12.5px; line-height: 1.45;
+  }
+  .warnon .feewarn { display: block; }
+  .warnon .stat.fee { background: var(--warn-bg); margin: 0 -8px; padding: var(--s2) 8px; border-radius: 3px; }
+  .warnon .stat.fee .label, .warnon .stat.fee .amount { color: var(--warn); }
+
+  .right { padding: var(--s5); overflow-y: auto; display: flex; flex-direction: column; gap: var(--s4); }
+  .out {
+    border: 1px solid var(--line-soft); border-left: 3px solid var(--line);
+    border-radius: 4px; padding: var(--s4); background: var(--ground);
+  }
+  .out.change { border-left-color: var(--ok); }
+  .out-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s4); margin-bottom: var(--s2); }
+  .out-head .amount { font-size: 20px; }
+
+  .foot {
+    border-top: 1px solid var(--line-soft); padding: var(--s4) var(--s5);
+    display: flex; align-items: center; gap: var(--s5); background: var(--ground); flex: 0 0 auto;
+  }
+  .foot .spacer { flex: 1; }
+
+  /* per-address confirmation */
+  .addr-body {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: var(--s7) var(--s6); text-align: center; min-height: 0;
+  }
+  .addr-body .sub { color: var(--ink-mid); max-width: 58ch; margin: 0 auto; }
+  .addrwrap { max-width: 30ch; margin: var(--s5) auto 0; text-align: left; }
+
+  /* floating bar */
+  .bar {
+    position: fixed; left: 50%; bottom: var(--s5); transform: translateX(-50%);
+    display: flex; align-items: center; gap: var(--s4);
+    background: #10151c; border: 1px solid #2b3644; border-radius: 999px;
+    padding: var(--s2) var(--s5); color: #e6ecf3; font-size: 13px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.4); z-index: 10;
+  }
+  .bar a { color: #e6ecf3; text-decoration: none; padding: 4px 10px; border-radius: 999px; opacity: .55; }
+  .bar a.on { opacity: 1; background: #263140; }
+  .bar label { display: flex; align-items: center; gap: 6px; opacity: .8; cursor: pointer; }
+  .bar .sep { width: 1px; height: 18px; background: #2b3644; }
+</style>
+
+<div class="stage" id="stage"></div>
+
+<div class="bar">
+  <a href="?view=split">Split</a>
+  <a href="?view=dark">Dark</a>
+  <a href="?view=light">Light</a>
+  <span class="sep"></span>
+  <label><input type="checkbox" id="warn"> fee warning (#22)</label>
+</div>
+
+<script>
+  // One template, rendered twice. The two schemes cannot drift apart.
+  function screens() { return `
+  <section class="screen panel">
+    <div class="statusbar">
+      <span class="chip net">mainnet</span>
+      <span class="chip">wallet 9a4f·c21b</span>
+      <span class="spacer"></span>
+      <span>Review before signing</span>
+    </div>
+    <div class="body">
+      <div class="left">
+        <div class="headline">
+          <div class="label">Leaving your wallet</div>
+          <span class="amount">0.04855200<span class="unit">BTC</span></span>
+        </div>
+        <div>
+          <div class="stat"><span class="label">Paying</span><span class="amount">0.04850000</span></div>
+          <div class="stat fee"><span class="label">Network fee</span><span class="amount">0.00005200</span></div>
+          <div class="stat"><span class="label">Fee rate</span><span class="amount">25.0 sat/vB</span></div>
+          <div class="stat"><span class="label">Fee vs amount</span><span class="amount">0.107%</span></div>
+          <div class="feewarn">The network fee of 0.00005200 BTC is larger than the 0.00004000 BTC you are paying.</div>
+        </div>
+        <div>
+          <div class="stat"><span class="label">Inputs</span><span class="amount">2</span></div>
+          <div class="stat"><span class="label">Input total</span><span class="amount">0.05210000</span></div>
+          <div class="stat"><span class="label">Returning to you</span><span class="amount">0.00354800</span></div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="label">3 outputs</div>
+        <div class="out">
+          <div class="out-head"><span class="label">Payment 1</span><span class="amount">0.04000000<span class="unit">BTC</span></span></div>
+          <div class="addr"><b>bc1q</b> 8f3k m2wd 9xhq 7t4n vr6s ldpc 0z85 ay3e <b>u9nf</b></div>
+        </div>
+        <div class="out">
+          <div class="out-head"><span class="label">Payment 2</span><span class="amount">0.00850000<span class="unit">BTC</span></span></div>
+          <div class="addr"><b>bc1q</b> j57r p4mx t8ge 2qwc h6bd n1ks 3vza 9lyu <b>4td6</b></div>
+        </div>
+        <div class="out change">
+          <div class="out-head"><span class="label">Change — back to you</span><span class="amount">0.00354800<span class="unit">BTC</span></span></div>
+          <div class="addr sm"><b>bc1q</b> r2np 6dwl 8vkc x3sa m9tq 5fzj he70 b4gy <b>c8mr</b></div>
+          <div style="margin-top:8px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+            <span class="chip ok">re-derived · m/84'/0'/0'/1/37</span>
+            <span style="font-size:12px; color:var(--ink-dim);">address rebuilt from your seed and matched byte for byte</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="foot">
+      <div class="checks">
+        <span>Change verified</span><span>All inputs yours</span><span>Sighash ALL</span>
+      </div>
+      <span class="spacer"></span>
+      <div class="actions">
+        <button class="btn refuse">Refuse<span class="key">Esc</span></button>
+        <button class="btn sign">Hold to sign<span class="key">3s</span></button>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen addr-screen">
+    <div class="statusbar">
+      <span class="chip net">mainnet</span>
+      <span class="chip">wallet 9a4f·c21b</span>
+      <span class="spacer"></span>
+      <span>Payment 1 of 2</span>
+    </div>
+    <div class="addr-body">
+      <div class="label">Payment 1 of 2 · 0.04000000 BTC</div>
+      <p class="sub">Compare every group against the address on the device that gave you this transaction.</p>
+      <div class="addrwrap">
+        <div class="addr lg"><b>bc1q</b> 8f3k m2wd 9xhq 7t4n vr6s ldpc 0z85 ay3e <b>u9nf</b></div>
+      </div>
+    </div>
+    <div class="foot">
+      <button class="btn">Back</button>
+      <span class="spacer"></span>
+      <div class="actions">
+        <button class="btn refuse">Refuse<span class="key">Esc</span></button>
+        <button class="btn sign">This is correct<span class="key">→</span></button>
+      </div>
+    </div>
+  </section>`;
+  }
+
+  var view = (new URLSearchParams(location.search).get("view") || "split").toLowerCase();
+  if (["split","dark","light"].indexOf(view) < 0) view = "split";
+
+  var stage = document.getElementById("stage");
+  var panes = view === "split" ? ["dark","light"] : [view];
+  stage.className = "stage" + (view === "split" ? " split" : "");
+  stage.innerHTML = panes.map(function (t) {
+    return '<div class="pane' + (t === "light" ? " light" : "") + '"><h2>' + t + '</h2>' + screens() + '</div>';
+  }).join("");
+
+  document.querySelectorAll(".bar a").forEach(function (a) {
+    if (a.getAttribute("href") === "?view=" + view) a.classList.add("on");
+  });
+
+  document.getElementById("warn").addEventListener("change", function (e) {
+    document.querySelectorAll(".pane").forEach(function (p) { p.classList.toggle("warnon", e.target.checked); });
+  });
+</script>
