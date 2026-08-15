@@ -2,13 +2,17 @@
 
 A Bitcoin signing appliance shipped as a bootable Debian LiveCD (`bitcoin-signer-amd64.iso`, amd64 only). The user boots it, loads or creates a wallet, signs a PSBT, and shuts down. The wallet lives in RAM and nothing survives the session.
 
-## Status: spec-first, no product code yet
+## Status: the spec is closed; implementation has not started
 
-The repo holds research and planning. The v1 implementation spec is still being written, so **the work right now is deciding, not building.** Scaffolding a crate, adding a dependency, or writing signer code ahead of the spec creates work the spec will contradict.
+The v1 implementation spec is written and merged — `docs/specs/` (six files), `docs/adr/` (fifteen ADRs) and `CONTEXT.md`, assembled from 27 closed decision tickets. **There is still no product code**: the next commit that adds a crate is the first one.
 
-**The map is [issue #1](https://github.com/allisson/aobs/issues/1)** — the canonical planning artifact, on GitHub Issues. It carries the destination, the settled constraints, the fog, and what is out of scope. Its child issues are the open decisions. Read it before proposing any design, and work it with `/wayfinder 1`. Decisions are recorded as resolution comments on the child issues; the map indexes them one line each.
+**`docs/specs/` is the authority — build from it.** The rule it states about itself governs here too: *if you find yourself deciding something the spec does not answer, that is a ticket, not a gap in the prose to fill in with judgement. Say so and stop.* The exception is the routine mechanics of Rust — module names, error enum shapes, function signatures — which are yours.
 
-Research findings live in `docs/research/`, one file per resolved ticket, every claim carrying a source URL. Read the relevant file before reopening a question it already answers.
+**The map is [issue #1](https://github.com/allisson/aobs/issues/1)**, and it is complete. It is no longer a work queue; it is the index of *why*, one line per decision, each linking the ticket whose resolution comment holds the full argument. Read the relevant resolution before reopening a settled question — the map's one-liner is a pointer, not the reasoning. An effort past this destination gets its own map, via `/wayfinder`, rather than reopening this one.
+
+**Research findings** live in `docs/research/`, one file per resolved ticket, every claim carrying a source URL. Read the relevant file before reopening a question it already answers.
+
+**Deliberately unfinished:** eight owed measurements and three verification obligations, listed in `docs/specs/00-overview.md` under *What is still owed*. Each is a number that was derived rather than measured, or a claim read from a specification rather than checked against the dependency. None blocks implementation; all block the release gate.
 
 ## Settled — do not silently revisit
 
@@ -19,7 +23,9 @@ These came out of grilling and research. Reopening one is a deliberate act with 
 - **QR is the only data channel**, both directions, using BC-UR / UR2 (`ur:crypto-psbt`). The physical keyboard handles seed import and passphrase entry. QR decoding happens in Rust (`v4l` → `rqrr`), never in a webview.
 - **Single-sig only** across BIP44/49/84/86, mainnet plus testnet/signet.
 - **Amnesic.** State lives in RAM for one session. There is no config file, no wallet database, no transaction history, no cache.
-- **Backup crypto**: Argon2id m=64 MiB/t=3/p=4 → ChaCha20-Poly1305 over the BIP-39 entropy. The user cannot choose the password; it is 8 words drawn independently from the EFF long list, ASCII-space separated. Whether this feature ships at all is still open at issue #7.
+- **Backup crypto**: Argon2id m=64 MiB/t=3/p=4 → ChaCha20-Poly1305 over the BIP-39 entropy. The user cannot choose the password; it is 8 words drawn independently from the EFF long list, ASCII-space separated. It ships, narrowed: offered only after the mnemonic is recorded, and displayed only after the user types the 8 words back correctly. See `docs/adr/0007-encrypted-backup-ships-narrowed.md`.
+- **One wallet per boot**, enforced by a `OnceLock` rather than by a test — no switch, no unload, no idle timeout, and restart is the sanctioned way to reach a different wallet. Signing is unlimited within a session, but only the most recently signed transaction is re-displayable. See `docs/adr/0010-one-wallet-per-boot.md`.
+- **The network is a load parameter**, not a property of a seed: a two-state selector beside the passphrase, mainnet preselected, stated for a restore rather than asked. Testnet/signet sessions look identical to mainnet ones by design. See `docs/adr/0015-network-is-a-load-parameter.md`.
 
 ## Threat model
 
@@ -30,6 +36,8 @@ Out of reach and openly so: malicious firmware, hardware implants, cold-boot and
 The consequence that shapes the most code: **the transaction review screen is the mitigation.** If the user cannot verify what they are signing, no other property matters.
 
 ## Rules that bite while coding
+
+The full list is `docs/specs/00-overview.md` under *Standing rules* — nine of them, and breaking one silently invalidates a chain of tickets. The ones that come up most:
 
 - **Re-derive, never trust.** A PSBT's BIP32 derivation paths are an attacker-supplied assertion. Change outputs are re-derived from our own key material and byte-compared against the `scriptPubKey`. Every surveyed signer does this; so do we.
 - **Everything crossing the QR boundary is hostile input.** `ur-rs` adopts an attacker-controlled `seqLen` and allocates on it, so limits are clamped at our call site. The PSBT parser and the UR decoder carry fuzz targets we write ourselves.
