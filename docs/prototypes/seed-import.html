@@ -1,0 +1,672 @@
+<title>Importing a Seed</title>
+<!--
+  PROTOTYPE — throwaway. Answers issue #18: how does a user type an existing BIP39
+  mnemonic on a physical keyboard?
+
+  You TYPE into this one. It carries the real 2048-word BIP39 English list and a real
+  SHA-256, so prefix matching, the checksum and the last-word candidate set are all
+  genuine. Not production code, not Slint, no derivation — nothing here is a wallet.
+
+  Light scheme per #26. Every contested behaviour in the ticket is a switch in the
+  bar under the screen, so each answer can be felt rather than argued. THE DEFAULTS
+  ARE THE ANSWERS #18 SETTLED ON — the other position of each switch is what was
+  rejected, kept switchable so the trade can be re-felt rather than re-argued:
+
+    ?length=inferred|declared     24 slots and stop where you like, or pick the length first
+    ?auto=on|off                  a unique prefix commits itself, or you press space
+    ?lastword=on|off              offer the valid final words once the rest are in
+    ?reject=keep|zeroize          a failed checksum keeps the words for correction, or wipes them
+    ?mask=on|off                  committed words hidden behind dots
+    ?keys=strict|loose            refuse a keystroke no BIP39 word can follow, or accept and mark it
+
+  Settled inputs this screen obeys:
+    #10  core is pure functions over data; the wordlist and the checksum live there,
+         the shell only carries keystrokes in. Fixed slots, no growable secret types.
+    #13  the fingerprint is a hint, never an authority
+    #16  import accepts 12 / 15 / 18 / 21 / 24 words
+    #20  precedent: secrets are shown in clear, never trimmed, no strength theatre
+    #25  one wallet per boot; a discard is a restart, not an unload
+    #26  light, one scheme, no toggle
+
+  The appliance has a keyboard and no pointer: arrow keys move between words, and
+  clicking a slot here is only this prototype's stand-in for that.
+-->
+<style>
+  :root {
+    --ground:   #eef1f5;
+    --panel:    #ffffff;
+    --panel-2:  #f4f6f9;
+    --line:     #c9d1dc;
+    --line-soft:#e2e7ee;
+    --ink:      #0f151c;
+    --ink-mid:  #414d5c;
+    --ink-dim:  #66717f;
+    --focus:    #1d6fa5;
+    --ok:       #1c7a5e;  --ok-bg:   #e6f4ef;  --ok-line:   #9fd0be;
+    --warn:     #8a5b12;  --warn-bg: #fbf1de;  --warn-line: #ddbe83;
+    --crit:     #a32f2c;  --crit-bg: #fbeceb;  --crit-line: #e0a9a6;
+    --net:      #2b5f79;  --net-line:#a9c6d4;
+
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #6a7280; font-family: var(--sans); font-size: 15px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased; padding: var(--s5) var(--s4) var(--s6); color: var(--ink);
+  }
+  .frame-note {
+    max-width: 1180px; margin: 0 auto var(--s3); color: #fff; opacity: .85; font-size: 12px;
+    letter-spacing: .08em; text-transform: uppercase; display: flex; justify-content: space-between; gap: var(--s4);
+  }
+
+  .screen {
+    max-width: 1180px; margin: 0 auto; aspect-ratio: 16 / 10; min-height: 660px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .statusbar {
+    display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s5);
+    border-bottom: 1px solid var(--line-soft); background: var(--ground);
+    font-size: 12px; color: var(--ink-dim); letter-spacing: .06em; text-transform: uppercase; flex: 0 0 auto;
+  }
+  .statusbar .spacer { flex: 1; }
+  .chip {
+    display: inline-flex; align-items: center; gap: var(--s1); padding: 3px var(--s2); border-radius: 3px;
+    border: 1px solid var(--line); color: var(--ink-mid); font-family: var(--mono); font-size: 11px; text-transform: none;
+  }
+  .chip.net { border-color: var(--net-line); color: var(--net); }
+  .chip.ok  { border-color: var(--ok-line); color: var(--ok); background: var(--ok-bg); }
+
+  .body { flex: 1; min-height: 0; padding: var(--s5) var(--s7) var(--s4); display: flex; flex-direction: column; }
+  .body.center { align-items: center; justify-content: center; text-align: center; }
+
+  .label { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-dim); }
+  h1 { font-size: 28px; font-weight: 500; margin: 0 0 var(--s2); letter-spacing: -.01em; }
+  h2 { font-size: 19px; font-weight: 600; margin: 0 0 var(--s2); }
+  p  { margin: 0 0 var(--s3); color: var(--ink-mid); max-width: 64ch; }
+  .mono { font-family: var(--mono); }
+
+  .head { display: flex; align-items: baseline; gap: var(--s4); margin-bottom: var(--s4); flex: 0 0 auto; }
+  .head .spacer { flex: 1; }
+  .progress { font-family: var(--mono); font-size: 13px; color: var(--ink-dim); }
+
+  /* --- the grid of words --- */
+  .slots { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s1) var(--s5); flex: 0 0 auto; }
+  .slot {
+    display: flex; align-items: baseline; gap: var(--s3); padding: var(--s2) var(--s3);
+    border-bottom: 1px solid var(--line-soft); min-height: 40px; cursor: pointer;
+  }
+  .slot .n { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); width: 2.2ch; text-align: right; flex: 0 0 auto; }
+  .slot .t { font-family: var(--mono); font-size: 19px; color: var(--ink); letter-spacing: .01em; }
+  .slot.todo .t { color: var(--line); }
+  .slot.now  { background: var(--panel-2); border-bottom: 2px solid var(--focus); }
+  .slot.now .t { color: var(--ink); }
+  .slot.bad  { background: var(--crit-bg); border-bottom-color: var(--crit-line); }
+  .slot.bad .t { color: var(--crit); }
+  .slot .ghost { color: var(--ink-dim); }
+  .caret { display: inline-block; width: 2px; height: 19px; background: var(--focus); vertical-align: -3px; margin-left: 1px; }
+
+  /* --- the candidate strip --- */
+  .strip {
+    flex: 0 0 auto; margin-top: var(--s5); border-top: 1px solid var(--line-soft); padding-top: var(--s3);
+    min-height: 104px; display: flex; flex-direction: column; gap: var(--s2);
+  }
+  .cands { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
+  .cand {
+    font-family: var(--mono); font-size: 16px; padding: 2px var(--s2); border-radius: 3px;
+    border: 1px solid var(--line-soft); background: var(--panel-2); color: var(--ink-mid); cursor: pointer;
+  }
+  .cand.only { border-color: var(--ok-line); background: var(--ok-bg); color: var(--ok); font-weight: 600; }
+  .cand b { color: var(--ink); }
+  .strip .note { font-size: 13px; color: var(--ink-dim); }
+  .strip .note.bad { color: var(--crit); font-weight: 600; }
+  .strip .note.warn { color: var(--warn); }
+
+  .foot {
+    border-top: 1px solid var(--line-soft); padding: var(--s3) var(--s5); margin-top: auto;
+    display: flex; align-items: center; gap: var(--s4); background: var(--ground); flex: 0 0 auto;
+  }
+  .foot .spacer { flex: 1; }
+  .keyhint { font-size: 12px; color: var(--ink-dim); }
+  .keyhint kbd {
+    font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 3px; padding: 1px 5px; background: var(--panel); color: var(--ink-mid); margin: 0 2px;
+  }
+  .btn {
+    font: inherit; font-size: 15px; padding: var(--s2) var(--s5); border-radius: 4px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
+  }
+  .btn.go    { border-color: var(--ok-line); background: var(--ok-bg); color: var(--ok); font-weight: 600; }
+  .btn.quiet { background: transparent; border-color: transparent; color: var(--ink-dim); }
+  .btn:disabled { opacity: .4; cursor: default; }
+
+  .lenpick { display: flex; gap: var(--s3); margin-top: var(--s5); }
+  .lenpick .btn { font-family: var(--mono); font-size: 18px; padding: var(--s3) var(--s6); }
+
+  .verdict { border-radius: 4px; padding: var(--s4) var(--s5); max-width: 72ch; margin-bottom: var(--s4); text-align: left; }
+  .verdict.bad { background: var(--crit-bg); border: 1px solid var(--crit-line); }
+  .verdict.ok  { background: var(--ok-bg);  border: 1px solid var(--ok-line); }
+  .verdict h2 { color: inherit; }
+  .verdict.bad h2 { color: var(--crit); }
+  .verdict.ok h2  { color: var(--ok); }
+  .verdict p:last-child { margin-bottom: 0; }
+
+  .idrow { display: flex; gap: var(--s7); margin: var(--s4) 0; text-align: left; }
+  .idrow div .label { display: block; margin-bottom: 2px; }
+  .idrow div .v { font-family: var(--mono); font-size: 18px; }
+
+  /* --- the bench under the screen --- */
+  .bench { max-width: 1180px; margin: var(--s5) auto 0; display: grid; grid-template-columns: 1fr 340px; gap: var(--s4); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: var(--s4) var(--s5); }
+  .card h3 { margin: 0 0 var(--s3); font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-dim); font-weight: 600; }
+  .switches { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3) var(--s5); }
+  .sw .q { font-size: 13px; color: var(--ink-mid); margin-bottom: var(--s1); }
+  .sw .opts { display: flex; gap: var(--s1); }
+  .sw .opts button {
+    font: inherit; font-size: 13px; font-family: var(--mono); padding: 3px var(--s3); cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-mid); border-radius: 3px;
+  }
+  .sw .opts button.on { background: var(--focus); border-color: var(--focus); color: #fff; }
+  .scen { display: flex; flex-direction: column; gap: var(--s2); }
+  .scen button {
+    font: inherit; font-size: 14px; text-align: left; padding: var(--s2) var(--s3); cursor: pointer;
+    border: 1px solid var(--line-soft); background: var(--panel-2); border-radius: 4px; color: var(--ink);
+  }
+  .scen button:hover { border-color: var(--focus); }
+  .scen button small { display: block; color: var(--ink-dim); font-size: 12px; }
+  .state { font-family: var(--mono); font-size: 12.5px; color: var(--ink-mid); }
+  .state div { display: flex; justify-content: space-between; gap: var(--s3); padding: 2px 0; border-bottom: 1px solid var(--line-soft); }
+  .state div span:last-child { color: var(--ink); }
+  .intro { max-width: 1180px; margin: 0 auto var(--s4); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: var(--s4) var(--s5); }
+  .intro p { max-width: 92ch; }
+  .intro p:last-child { margin-bottom: 0; }
+</style>
+
+<div class="frame-note"><span>Prototype — issue #18 — seed import</span><span>type into it: the wordlist and the checksum are real</span></div>
+
+<div class="intro">
+  <h2>What this is asking</h2>
+  <p>
+    A user has a recovery phrase written on paper and a physical keyboard. Between those two facts sit
+    seven decisions: how a word is entered, what happens to a word that is not on the list, when the
+    checksum is allowed to speak, whether the final word is offered as a choice, how the length is
+    declared, how a mistake is corrected, and what a rejection destroys. <b>Type a phrase in and each one
+    stops being an argument.</b> Every contested answer is a switch on the right — flip one and retype.
+  </p>
+  <p class="mono" style="font-size:13px;color:var(--ink-dim)">
+    Try: <b>absurd avoid scissors anxiety gather lottery category door army half long camera</b> — a real, valid 12-word phrase.
+  </p>
+</div>
+
+<div class="screen" id="screen"></div>
+
+<div class="bench">
+  <div class="card">
+    <h3>The seven questions, as switches</h3>
+    <div class="switches" id="switches"></div>
+    <h3 style="margin-top:var(--s5)">Walkthroughs</h3>
+    <div class="scen" id="scen"></div>
+  </div>
+  <div class="card">
+    <h3>Entry state — what core would hold</h3>
+    <div class="state" id="statepanel"></div>
+    <p style="font-size:12px;color:var(--ink-dim);margin:var(--s3) 0 0">
+      This is the whole of it: fixed slots, a cursor, a keystroke buffer. No clock, no growable
+      string, no knowledge of a keyboard — the shell carries characters in, per #10.
+    </p>
+  </div>
+</div>
+
+<script>
+// ───────────────────────────────────────────────────────────────────────────────
+//  The part worth keeping: a pure entry model. No DOM, no events, no I/O.
+//  reduce(state, action) -> state.  Everything below the fold is a thin shell.
+// ───────────────────────────────────────────────────────────────────────────────
+const SeedEntry = (() => {
+  const WORDS = "abandon ability able about above absent absorb abstract absurd abuse access accident account accuse achieve acid acoustic acquire across act action actor actress actual adapt add addict address adjust admit adult advance advice aerobic affair afford afraid again age agent agree ahead aim air airport aisle alarm album alcohol alert alien all alley allow almost alone alpha already also alter always amateur amazing among amount amused analyst anchor ancient anger angle angry animal ankle announce annual another answer antenna antique anxiety any apart apology appear apple approve april arch arctic area arena argue arm armed armor army around arrange arrest arrive arrow art artefact artist artwork ask aspect assault asset assist assume asthma athlete atom attack attend attitude attract auction audit august aunt author auto autumn average avocado avoid awake aware away awesome awful awkward axis baby bachelor bacon badge bag balance balcony ball bamboo banana banner bar barely bargain barrel base basic basket battle beach bean beauty because become beef before begin behave behind believe below belt bench benefit best betray better between beyond bicycle bid bike bind biology bird birth bitter black blade blame blanket blast bleak bless blind blood blossom blouse blue blur blush board boat body boil bomb bone bonus book boost border boring borrow boss bottom bounce box boy bracket brain brand brass brave bread breeze brick bridge brief bright bring brisk broccoli broken bronze broom brother brown brush bubble buddy budget buffalo build bulb bulk bullet bundle bunker burden burger burst bus business busy butter buyer buzz cabbage cabin cable cactus cage cake call calm camera camp can canal cancel candy cannon canoe canvas canyon capable capital captain car carbon card cargo carpet carry cart case cash casino castle casual cat catalog catch category cattle caught cause caution cave ceiling celery cement census century cereal certain chair chalk champion change chaos chapter charge chase chat cheap check cheese chef cherry chest chicken chief child chimney choice choose chronic chuckle chunk churn cigar cinnamon circle citizen city civil claim clap clarify claw clay clean clerk clever click client cliff climb clinic clip clock clog close cloth cloud clown club clump cluster clutch coach coast coconut code coffee coil coin collect color column combine come comfort comic common company concert conduct confirm congress connect consider control convince cook cool copper copy coral core corn correct cost cotton couch country couple course cousin cover coyote crack cradle craft cram crane crash crater crawl crazy cream credit creek crew cricket crime crisp critic crop cross crouch crowd crucial cruel cruise crumble crunch crush cry crystal cube culture cup cupboard curious current curtain curve cushion custom cute cycle dad damage damp dance danger daring dash daughter dawn day deal debate debris decade december decide decline decorate decrease deer defense define defy degree delay deliver demand demise denial dentist deny depart depend deposit depth deputy derive describe desert design desk despair destroy detail detect develop device devote diagram dial diamond diary dice diesel diet differ digital dignity dilemma dinner dinosaur direct dirt disagree discover disease dish dismiss disorder display distance divert divide divorce dizzy doctor document dog doll dolphin domain donate donkey donor door dose double dove draft dragon drama drastic draw dream dress drift drill drink drip drive drop drum dry duck dumb dune during dust dutch duty dwarf dynamic eager eagle early earn earth easily east easy echo ecology economy edge edit educate effort egg eight either elbow elder electric elegant element elephant elevator elite else embark embody embrace emerge emotion employ empower empty enable enact end endless endorse enemy energy enforce engage engine enhance enjoy enlist enough enrich enroll ensure enter entire entry envelope episode equal equip era erase erode erosion error erupt escape essay essence estate eternal ethics evidence evil evoke evolve exact example excess exchange excite exclude excuse execute exercise exhaust exhibit exile exist exit exotic expand expect expire explain expose express extend extra eye eyebrow fabric face faculty fade faint faith fall false fame family famous fan fancy fantasy farm fashion fat fatal father fatigue fault favorite feature february federal fee feed feel female fence festival fetch fever few fiber fiction field figure file film filter final find fine finger finish fire firm first fiscal fish fit fitness fix flag flame flash flat flavor flee flight flip float flock floor flower fluid flush fly foam focus fog foil fold follow food foot force forest forget fork fortune forum forward fossil foster found fox fragile frame frequent fresh friend fringe frog front frost frown frozen fruit fuel fun funny furnace fury future gadget gain galaxy gallery game gap garage garbage garden garlic garment gas gasp gate gather gauge gaze general genius genre gentle genuine gesture ghost giant gift giggle ginger giraffe girl give glad glance glare glass glide glimpse globe gloom glory glove glow glue goat goddess gold good goose gorilla gospel gossip govern gown grab grace grain grant grape grass gravity great green grid grief grit grocery group grow grunt guard guess guide guilt guitar gun gym habit hair half hammer hamster hand happy harbor hard harsh harvest hat have hawk hazard head health heart heavy hedgehog height hello helmet help hen hero hidden high hill hint hip hire history hobby hockey hold hole holiday hollow home honey hood hope horn horror horse hospital host hotel hour hover hub huge human humble humor hundred hungry hunt hurdle hurry hurt husband hybrid ice icon idea identify idle ignore ill illegal illness image imitate immense immune impact impose improve impulse inch include income increase index indicate indoor industry infant inflict inform inhale inherit initial inject injury inmate inner innocent input inquiry insane insect inside inspire install intact interest into invest invite involve iron island isolate issue item ivory jacket jaguar jar jazz jealous jeans jelly jewel job join joke journey joy judge juice jump jungle junior junk just kangaroo keen keep ketchup key kick kid kidney kind kingdom kiss kit kitchen kite kitten kiwi knee knife knock know lab label labor ladder lady lake lamp language laptop large later latin laugh laundry lava law lawn lawsuit layer lazy leader leaf learn leave lecture left leg legal legend leisure lemon lend length lens leopard lesson letter level liar liberty library license life lift light like limb limit link lion liquid list little live lizard load loan lobster local lock logic lonely long loop lottery loud lounge love loyal lucky luggage lumber lunar lunch luxury lyrics machine mad magic magnet maid mail main major make mammal man manage mandate mango mansion manual maple marble march margin marine market marriage mask mass master match material math matrix matter maximum maze meadow mean measure meat mechanic medal media melody melt member memory mention menu mercy merge merit merry mesh message metal method middle midnight milk million mimic mind minimum minor minute miracle mirror misery miss mistake mix mixed mixture mobile model modify mom moment monitor monkey monster month moon moral more morning mosquito mother motion motor mountain mouse move movie much muffin mule multiply muscle museum mushroom music must mutual myself mystery myth naive name napkin narrow nasty nation nature near neck need negative neglect neither nephew nerve nest net network neutral never news next nice night noble noise nominee noodle normal north nose notable note nothing notice novel now nuclear number nurse nut oak obey object oblige obscure observe obtain obvious occur ocean october odor off offer office often oil okay old olive olympic omit once one onion online only open opera opinion oppose option orange orbit orchard order ordinary organ orient original orphan ostrich other outdoor outer output outside oval oven over own owner oxygen oyster ozone pact paddle page pair palace palm panda panel panic panther paper parade parent park parrot party pass patch path patient patrol pattern pause pave payment peace peanut pear peasant pelican pen penalty pencil people pepper perfect permit person pet phone photo phrase physical piano picnic picture piece pig pigeon pill pilot pink pioneer pipe pistol pitch pizza place planet plastic plate play please pledge pluck plug plunge poem poet point polar pole police pond pony pool popular portion position possible post potato pottery poverty powder power practice praise predict prefer prepare present pretty prevent price pride primary print priority prison private prize problem process produce profit program project promote proof property prosper protect proud provide public pudding pull pulp pulse pumpkin punch pupil puppy purchase purity purpose purse push put puzzle pyramid quality quantum quarter question quick quit quiz quote rabbit raccoon race rack radar radio rail rain raise rally ramp ranch random range rapid rare rate rather raven raw razor ready real reason rebel rebuild recall receive recipe record recycle reduce reflect reform refuse region regret regular reject relax release relief rely remain remember remind remove render renew rent reopen repair repeat replace report require rescue resemble resist resource response result retire retreat return reunion reveal review reward rhythm rib ribbon rice rich ride ridge rifle right rigid ring riot ripple risk ritual rival river road roast robot robust rocket romance roof rookie room rose rotate rough round route royal rubber rude rug rule run runway rural sad saddle sadness safe sail salad salmon salon salt salute same sample sand satisfy satoshi sauce sausage save say scale scan scare scatter scene scheme school science scissors scorpion scout scrap screen script scrub sea search season seat second secret section security seed seek segment select sell seminar senior sense sentence series service session settle setup seven shadow shaft shallow share shed shell sheriff shield shift shine ship shiver shock shoe shoot shop short shoulder shove shrimp shrug shuffle shy sibling sick side siege sight sign silent silk silly silver similar simple since sing siren sister situate six size skate sketch ski skill skin skirt skull slab slam sleep slender slice slide slight slim slogan slot slow slush small smart smile smoke smooth snack snake snap sniff snow soap soccer social sock soda soft solar soldier solid solution solve someone song soon sorry sort soul sound soup source south space spare spatial spawn speak special speed spell spend sphere spice spider spike spin spirit split spoil sponsor spoon sport spot spray spread spring spy square squeeze squirrel stable stadium staff stage stairs stamp stand start state stay steak steel stem step stereo stick still sting stock stomach stone stool story stove strategy street strike strong struggle student stuff stumble style subject submit subway success such sudden suffer sugar suggest suit summer sun sunny sunset super supply supreme sure surface surge surprise surround survey suspect sustain swallow swamp swap swarm swear sweet swift swim swing switch sword symbol symptom syrup system table tackle tag tail talent talk tank tape target task taste tattoo taxi teach team tell ten tenant tennis tent term test text thank that theme then theory there they thing this thought three thrive throw thumb thunder ticket tide tiger tilt timber time tiny tip tired tissue title toast tobacco today toddler toe together toilet token tomato tomorrow tone tongue tonight tool tooth top topic topple torch tornado tortoise toss total tourist toward tower town toy track trade traffic tragic train transfer trap trash travel tray treat tree trend trial tribe trick trigger trim trip trophy trouble truck true truly trumpet trust truth try tube tuition tumble tuna tunnel turkey turn turtle twelve twenty twice twin twist two type typical ugly umbrella unable unaware uncle uncover under undo unfair unfold unhappy uniform unique unit universe unknown unlock until unusual unveil update upgrade uphold upon upper upset urban urge usage use used useful useless usual utility vacant vacuum vague valid valley valve van vanish vapor various vast vault vehicle velvet vendor venture venue verb verify version very vessel veteran viable vibrant vicious victory video view village vintage violin virtual virus visa visit visual vital vivid vocal voice void volcano volume vote voyage wage wagon wait walk wall walnut want warfare warm warrior wash wasp waste water wave way wealth weapon wear weasel weather web wedding weekend weird welcome west wet whale what wheat wheel when where whip whisper wide width wife wild will win window wine wing wink winner winter wire wisdom wise wish witness wolf woman wonder wood wool word work world worry worth wrap wreck wrestle wrist write wrong yard year yellow you young youth zebra zero zone zoo".split(" ");
+  const LENGTHS = [12, 15, 18, 21, 24];
+
+  /* --- real SHA-256, because the checksum is half the question --- */
+  const K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  const rr = (x, n) => (x >>> n) | (x << (32 - n));
+  function sha256(bytes) {
+    const H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+    const l = bytes.length, withPad = new Uint8Array((((l + 9) >> 6) + 1) << 6);
+    withPad.set(bytes); withPad[l] = 0x80;
+    new DataView(withPad.buffer).setUint32(withPad.length - 4, l * 8);
+    const w = new Uint32Array(64), v = new DataView(withPad.buffer);
+    for (let i = 0; i < withPad.length; i += 64) {
+      for (let t = 0; t < 16; t++) w[t] = v.getUint32(i + t * 4);
+      for (let t = 16; t < 64; t++) {
+        const s0 = rr(w[t-15],7) ^ rr(w[t-15],18) ^ (w[t-15] >>> 3);
+        const s1 = rr(w[t-2],17) ^ rr(w[t-2],19) ^ (w[t-2] >>> 10);
+        w[t] = (w[t-16] + s0 + w[t-7] + s1) >>> 0;
+      }
+      let [a,b,c,d,e,f,g,h] = H;
+      for (let t = 0; t < 64; t++) {
+        const S1 = rr(e,6) ^ rr(e,11) ^ rr(e,25), ch = (e & f) ^ (~e & g);
+        const t1 = (h + S1 + ch + K[t] + w[t]) >>> 0;
+        const S0 = rr(a,2) ^ rr(a,13) ^ rr(a,22), maj = (a & b) ^ (a & c) ^ (b & c);
+        const t2 = (S0 + maj) >>> 0;
+        h=g; g=f; f=e; e=(d + t1) >>> 0; d=c; c=b; b=a; a=(t1 + t2) >>> 0;
+      }
+      [a,b,c,d,e,f,g,h].forEach((x, j) => H[j] = (H[j] + x) >>> 0);
+    }
+    return H;
+  }
+
+  /* --- BIP39 checksum over the words themselves --- */
+  const bitsOf = words => words.map(w => WORDS.indexOf(w).toString(2).padStart(11, "0")).join("");
+  function checksumOk(words) {
+    const bits = bitsOf(words), entBits = (bits.length * 32) / 33;
+    const ent = new Uint8Array(entBits / 8);
+    for (let i = 0; i < ent.length; i++) ent[i] = parseInt(bits.slice(i * 8, i * 8 + 8), 2);
+    const first = sha256(ent)[0] >>> 24;
+    const want = first.toString(2).padStart(8, "0").slice(0, bits.length - entBits);
+    return bits.slice(entBits) === want;
+  }
+  /* every word that would make the phrase check out, given the ones before it */
+  const finalCandidates = prior => WORDS.filter(w => checksumOk([...prior, w]));
+
+  const matches = prefix => prefix === "" ? [] : WORDS.filter(w => w.startsWith(prefix));
+
+  /* --- state --- */
+  const create = opts => ({
+    opts,
+    words: Array(24).fill(""),          // fixed slots; nothing grows, nothing reallocates
+    cursor: 0,
+    buf: "",
+    length: null,                       // inferred mode never knows it until Done
+    status: opts.length === "declared" ? "choosing" : "entering",
+    flash: null,                        // the keystroke we refused, for one render
+    marked: false,                      // buffer holds something no word starts with (loose keys)
+  });
+
+  const filled = s => s.words.filter(Boolean).length;
+  const lastIndex = s => (s.length || 24) - 1;
+  const complete = s => s.length !== null && s.words.slice(0, s.length).every(Boolean);
+  const canFinish = s => s.length !== null
+    ? complete(s)
+    : LENGTHS.includes(filled(s)) && s.words.slice(0, filled(s)).every(Boolean);
+
+  /* leaving a slot: whatever is in the buffer goes back in if it resolves to a word, else the slot stays empty */
+  function settle(s) {
+    if (s.buf === "") return s;
+    const m = matches(s.buf);
+    const w = m.length === 1 ? m[0] : (m.includes(s.buf) ? s.buf : null);
+    const words = [...s.words];
+    if (w) words[s.cursor] = w;
+    return { ...s, words, buf: "", marked: false };
+  }
+
+  function commit(s, word) {
+    const words = [...s.words]; words[s.cursor] = word;
+    let cursor = s.cursor + 1;
+    while (cursor < 24 && words[cursor] && cursor <= lastIndex(s)) cursor++;   // skip past what's already in
+    return { ...s, words, buf: "", marked: false, cursor: Math.min(cursor, 23) };
+  }
+
+  function reduce(s, a) {
+    s = { ...s, flash: null };
+    switch (a.t) {
+      case "length":
+        return { ...s, length: a.n, status: "entering" };
+
+      case "char": {
+        if (s.status !== "entering") return s;
+        const next = s.buf + a.c;
+        if (matches(next).length === 0) {
+          if (s.opts.keys === "strict") return { ...s, flash: a.c };   // the key simply does not land
+          return { ...s, buf: next, marked: true };
+        }
+        const only = matches(next);
+        if (s.opts.auto && only.length === 1) return commit(s, only[0]);
+        return { ...s, buf: next, marked: false };
+      }
+
+      case "commit": {
+        if (s.status !== "entering" || s.buf === "") return s;
+        const m = matches(s.buf);
+        if (m.length === 1) return commit(s, m[0]);
+        if (m.includes(s.buf)) return commit(s, s.buf);                // exact word that is also a prefix
+        return { ...s, flash: "?" };                                   // still ambiguous, or not a word
+      }
+
+      case "pick":
+        return s.status === "entering" ? commit(s, a.w) : s;
+
+      case "back": {
+        if (s.status !== "entering") return s;
+        if (s.buf !== "") return { ...s, buf: s.buf.slice(0, -1), marked: false };
+        const prev = s.cursor - 1;
+        if (prev < 0) return s;
+        const words = [...s.words], pulled = words[prev];
+        words[prev] = "";
+        return { ...s, words, cursor: prev, buf: pulled, marked: false };   // the word comes back as text
+      }
+
+      case "goto": {
+        if (s.status !== "entering") return s;
+        const i = Math.max(0, Math.min(a.i, lastIndex(s)));
+        if (i === s.cursor) return s;
+        const t = settle(s);                                  // don't lose the word you were editing
+        return { ...t, cursor: i, buf: t.words[i], words: t.words.map((w, j) => j === i ? "" : w) };
+      }
+
+      case "finish": {
+        if (!canFinish(s)) return s;
+        const n = s.length || filled(s);
+        const words = s.words.slice(0, n);
+        if (checksumOk(words)) return { ...s, length: n, status: "accepted" };
+        if (s.opts.reject === "zeroize") return { ...create(s.opts), status: "rejected", wiped: true, length: s.length };
+        return { ...s, length: n, status: "rejected", wiped: false };
+      }
+
+      case "fix":
+        return { ...s, status: "entering", cursor: 0, buf: "" };
+
+      case "discard":
+        return create(s.opts);
+
+      default:
+        return s;
+    }
+  }
+
+  return { WORDS, LENGTHS, create, reduce, matches, finalCandidates, checksumOk, filled, canFinish, lastIndex, complete };
+})();
+
+// ───────────────────────────────────────────────────────────────────────────────
+//  Throwaway shell below.
+// ───────────────────────────────────────────────────────────────────────────────
+const QUESTIONS = [
+  { k: "length", q: "How is the length declared?", opts: [["inferred", "stop where you like"], ["declared", "pick it first"]] },
+  { k: "auto",   q: "Does a unique prefix commit itself?", opts: [["on", "yes"], ["off", "press space"]] },
+  { k: "lastword", q: "Is the final word offered?", opts: [["off", "no"], ["on", "yes"]] },
+  { k: "reject", q: "A failed checksum…", opts: [["keep", "keeps the words"], ["zeroize", "wipes them"]] },
+  { k: "keys",   q: "A key no word can follow…", opts: [["strict", "does not land"], ["loose", "lands, marked"]] },
+  { k: "mask",   q: "Words already entered are…", opts: [["off", "shown"], ["on", "dotted out"]] },
+];
+
+const url = new URLSearchParams(location.search);
+const opts = {
+  length: url.get("length") === "declared" ? "declared" : "inferred",
+  auto:   url.get("auto") === "on",
+  lastword: url.get("lastword") === "on",
+  reject: url.get("reject") === "zeroize" ? "zeroize" : "keep",
+  keys:   url.get("keys") === "loose" ? "loose" : "strict",
+  mask:   url.get("mask") === "on",
+};
+const optValue = k => k === "auto" ? (opts.auto ? "on" : "off") : k === "lastword" ? (opts.lastword ? "on" : "off")
+                    : k === "mask" ? (opts.mask ? "on" : "off") : opts[k];
+
+let S = SeedEntry.create(opts);
+const send = a => { S = SeedEntry.reduce(S, a); render(); };
+
+const el = (t, c, h) => { const n = document.createElement(t); if (c) n.className = c; if (h !== undefined) n.innerHTML = h; return n; };
+const esc = s => s.replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+
+function setOpt(k, v) {
+  if (k === "auto" || k === "lastword" || k === "mask") opts[k] = v === "on"; else opts[k] = v;
+  url.set(k, v); history.replaceState(null, "", "?" + url);
+  S = { ...S, opts };
+  if (k === "length") S = SeedEntry.create(opts);
+  render();
+}
+
+/* ---------- screens ---------- */
+function chrome(inner) {
+  const s = el("div", "screen");
+  s.innerHTML = `<div class="statusbar">
+      <span>aobs</span><span class="chip net">signet</span>
+      <span class="spacer"></span><span class="chip">no network</span><span class="chip">session in ram</span>
+    </div>`;
+  s.append(inner);
+  return s;
+}
+
+function screenChoosing() {
+  const b = el("div", "body center");
+  b.append(el("h1", null, "How many words are on your paper?"));
+  b.append(el("p", null, "Count them before you start. A phrase is 12, 15, 18, 21 or 24 words — nothing else is a BIP39 phrase."));
+  const row = el("div", "lenpick");
+  SeedEntry.LENGTHS.forEach(n => {
+    const btn = el("button", "btn", String(n));
+    btn.onclick = () => send({ t: "length", n });
+    row.append(btn);
+  });
+  b.append(row);
+  return b;
+}
+
+function screenEntry() {
+  const b = el("div", "body");
+  const n = S.length || 24;
+  const head = el("div", "head");
+  head.append(el("h1", null, "Type your recovery phrase"));
+  head.append(el("span", "spacer"));
+  head.append(el("div", "progress", S.length
+    ? `word ${S.cursor + 1} of ${n}`
+    : `${SeedEntry.filled(S)} words · 12 / 15 / 18 / 21 / 24 accepted`));
+  b.append(head);
+
+  const grid = el("div", "slots");
+  for (let i = 0; i < n; i++) {
+    const cur = i === S.cursor;
+    const w = S.words[i];
+    const slot = el("div", "slot" + (cur ? " now" : "") + (!w && !cur ? " todo" : "") + (cur && S.marked ? " bad" : ""));
+    slot.append(el("span", "n", String(i + 1)));
+    let text;
+    if (cur) text = `${esc(S.buf)}<span class="caret"></span>` + (
+      S.buf && !S.marked && SeedEntry.matches(S.buf).length
+        ? `<span class="ghost">${esc(SeedEntry.matches(S.buf)[0].slice(S.buf.length))}</span>` : "");
+    else if (!w) text = "·";
+    else text = opts.mask ? "••••••" : esc(w);
+    slot.append(el("span", "t", text));
+    slot.onclick = () => send({ t: "goto", i });
+    grid.append(slot);
+  }
+  b.append(grid);
+
+  /* the strip: what the machine can say right now */
+  const strip = el("div", "strip");
+  const atLast = S.cursor === SeedEntry.lastIndex(S) && S.words.slice(0, SeedEntry.lastIndex(S)).every(Boolean);
+  if (opts.lastword && atLast && S.length) {
+    const cands = SeedEntry.finalCandidates(S.words.slice(0, SeedEntry.lastIndex(S)));
+    const shown = S.buf ? cands.filter(w => w.startsWith(S.buf)) : cands;
+    strip.append(el("div", "note warn", `${cands.length} words would make this phrase check out. Any of them is a valid phrase — only one of them is yours.`));
+    const row = el("div", "cands");
+    shown.slice(0, 40).forEach(w => {
+      const c = el("button", "cand" + (shown.length === 1 ? " only" : ""), esc(w));
+      c.onclick = () => send({ t: "pick", w });
+      row.append(c);
+    });
+    if (shown.length > 40) row.append(el("span", "note", `+ ${shown.length - 40} more`));
+    strip.append(row);
+  } else if (opts.lastword && !S.length && SeedEntry.filled(S) >= 11 && S.buf === "") {
+    strip.append(el("div", "note warn", "The final word cannot be offered here: with the length inferred, "
+      + "the device does not know which word is meant to be last."));
+    strip.append(el("div", "note", "Offering the final word and inferring the length are mutually exclusive — one of the two has to go."));
+  } else if (S.marked) {
+    strip.append(el("div", "note bad", `No BIP39 word begins with “${esc(S.buf)}”.`));
+    strip.append(el("div", "note", "Backspace to the last letter that was right."));
+  } else if (S.buf === "") {
+    strip.append(el("div", "note", S.flash
+      ? `“${esc(S.flash)}” would not start any word. The key did nothing.`
+      : "Type the word. You will usually only need three or four letters."));
+  } else {
+    const m = SeedEntry.matches(S.buf);
+    strip.append(el("div", "note", m.length === 1
+      ? (opts.auto ? "One word left — taken." : "One word left. Space accepts it.")
+      : `${m.length} words begin with “${esc(S.buf)}”.`));
+    const row = el("div", "cands");
+    m.slice(0, 12).forEach(w => {
+      const c = el("button", "cand" + (m.length === 1 ? " only" : ""), `<b>${esc(S.buf)}</b>${esc(w.slice(S.buf.length))}`);
+      c.onclick = () => send({ t: "pick", w });
+      row.append(c);
+    });
+    if (m.length > 12) row.append(el("span", "note", `+ ${m.length - 12} more`));
+    strip.append(row);
+  }
+  if (S.flash && S.flash !== "?" && !S.marked && S.buf !== "") {
+    strip.append(el("div", "note bad", `“${esc(S.flash)}” would not continue any word. The key did nothing.`));
+  }
+  b.append(strip);
+
+  const foot = el("div", "foot");
+  foot.append(el("div", "keyhint", "<kbd>a–z</kbd> type <kbd>space</kbd> accept the word <kbd>⌫</kbd> back a letter, then back a word "
+    + "<kbd>← ↑ ↓ →</kbd> move between words <kbd>⏎</kbd> done"));
+  foot.append(el("span", "spacer"));
+  const cancel = el("button", "btn quiet", "Discard and restart");
+  cancel.onclick = () => send({ t: "discard" });
+  foot.append(cancel);
+  const done = el("button", "btn go", "Done");
+  done.disabled = !SeedEntry.canFinish(S);
+  done.onclick = () => send({ t: "finish" });
+  foot.append(done);
+  b.append(foot);
+  return b;
+}
+
+function screenRejected() {
+  const b = el("div", "body center");
+  const v = el("div", "verdict bad");
+  v.append(el("h2", null, "This is not a valid recovery phrase"));
+  v.append(el("p", null, "Every word you typed is a real BIP39 word, but together they fail the phrase's own checksum. "
+    + "That check covers the phrase as a whole, so <b>it cannot tell us which word is wrong</b> — one word out of place fails exactly the same way as five."));
+  v.append(el("p", null, S.wiped
+    ? "<b>The words have been cleared.</b> Nothing you typed is still on the device; start again from your paper."
+    : "<b>Your words are still on screen.</b> Compare them against your paper — a word in the wrong position fails this check just as a wrong word does."));
+  b.append(v);
+  const foot = el("div", "foot");
+  foot.append(el("span", "spacer"));
+  const again = el("button", "btn", S.wiped ? "Start again" : "Correct the words");
+  again.onclick = () => send(S.wiped ? { t: "discard" } : { t: "fix" });
+  foot.append(again);
+  b.append(foot);
+  return b;
+}
+
+function screenAccepted() {
+  const b = el("div", "body center");
+  const v = el("div", "verdict ok");
+  v.append(el("h2", null, "Phrase accepted"));
+  v.append(el("p", null, `${S.length} words, checksum good. Next comes the passphrase prompt (#20), then the wallet identity screen — `
+    + "which is where a mistyped passphrase, the failure this checksum cannot see, becomes visible."));
+  b.append(v);
+  const row = el("div", "idrow");
+  [["network", "signet"], ["script type", "P2WPKH · m/84'/1'/0'"], ["fingerprint (fake)", "9c1f4e02"]].forEach(([k, val]) => {
+    const d = el("div"); d.append(el("span", "label", k)); d.append(el("div", "v", val)); row.append(d);
+  });
+  b.append(row);
+  b.append(el("p", null, "<span class='mono' style='font-size:12px'>Nothing is derived in this prototype — the fingerprint above is invented, and #13 calls it a hint in any case.</span>"));
+  const foot = el("div", "foot");
+  foot.append(el("span", "spacer"));
+  const again = el("button", "btn quiet", "Start over");
+  again.onclick = () => send({ t: "discard" });
+  foot.append(again);
+  b.append(foot);
+  return b;
+}
+
+/* ---------- bench ---------- */
+function renderSwitches() {
+  const box = document.getElementById("switches");
+  box.innerHTML = "";
+  QUESTIONS.forEach(({ k, q, opts: choices }) => {
+    const sw = el("div", "sw");
+    sw.append(el("div", "q", q));
+    const row = el("div", "opts");
+    choices.forEach(([v, lbl]) => {
+      const btn = el("button", optValue(k) === v ? "on" : "", lbl);
+      btn.onclick = () => setOpt(k, v);
+      row.append(btn);
+    });
+    sw.append(row);
+    box.append(sw);
+  });
+}
+
+const M12 = "absurd avoid scissors anxiety gather lottery category door army half long camera".split(" ");
+const M12BAD = "absurd avoid scissors anxiety gather lottery mirror door army half long camera".split(" ");
+const M24 = ("adapt explain ecology dinner glare old unfair empty expect road off suggest dash dolphin "
+  + "captain version oval census uncover inform arrest trash first nice").split(" ");
+
+/* type raw letters (for the half-word cases) */
+function type(text) { for (const ch of text) send({ t: "char", c: ch }); }
+/* type whole words, stopping each one early if the "unique prefix commits itself" switch is on */
+function typeWords(ws) {
+  for (const w of ws) {
+    const before = SeedEntry.filled(S);
+    for (const ch of w) { send({ t: "char", c: ch }); if (SeedEntry.filled(S) > before) break; }
+    if (SeedEntry.filled(S) === before) send({ t: "commit" });
+  }
+}
+function reset(n) { S = SeedEntry.create(opts); if (opts.length === "declared" && n) send({ t: "length", n }); render(); }
+
+const SCENARIOS = [
+  ["A clean 12-word import", "Then press Done. Watch how few letters each word cost.", () => { reset(12); typeWords(M12); }],
+  ["A word that is not on the list", "“bitcoin” is not BIP39 — “bitter” is. Now type the c.", () => { reset(12); type("bit"); }],
+  ["One word wrong — the checksum at the end", "Word 7 is a real word in the wrong place. Press Done.", () => { reset(12); typeWords(M12BAD); }],
+  ["The last word, offered", "23 of 24 in. Flip “final word offered” on and count the offers.", () => { reset(24); typeWords(M24.slice(0, 23)); }],
+  ["The same offer at 12 words", "11 of 12 in. The shorter the phrase, the weaker the offer.", () => { reset(12); typeWords(M12.slice(0, 11)); }],
+  ["Backspacing into a word already entered", "Six words in, one backspace — word 6 comes back as text.", () => { reset(12); typeWords(M12.slice(0, 6)); send({ t: "back" }); }],
+];
+
+function renderScenarios() {
+  const box = document.getElementById("scen");
+  box.innerHTML = "";
+  SCENARIOS.forEach(([title, sub, run]) => {
+    const btn = el("button", null, `${title}<small>${sub}</small>`);
+    btn.onclick = run;
+    box.append(btn);
+  });
+}
+
+function renderState() {
+  const n = S.length || 24;
+  const rows = [
+    ["status", S.status],
+    ["length", S.length === null ? "not declared" : S.length],
+    ["cursor", `slot ${S.cursor + 1}`],
+    ["buffer", S.buf === "" ? "—" : `"${S.buf}"`],
+    ["words held", `${SeedEntry.filled(S)} / ${n}`],
+    ["matches", S.buf ? SeedEntry.matches(S.buf).length : "—"],
+    ["done allowed", SeedEntry.canFinish(S) ? "yes" : "no"],
+  ];
+  document.getElementById("statepanel").innerHTML =
+    rows.map(([k, v]) => `<div><span>${k}</span><span>${esc(String(v))}</span></div>`).join("");
+}
+
+function render() {
+  const inner = S.status === "choosing" ? screenChoosing()
+              : S.status === "rejected" ? screenRejected()
+              : S.status === "accepted" ? screenAccepted()
+              : screenEntry();
+  document.getElementById("screen").replaceWith(chrome(inner));
+  document.querySelector(".screen").id = "screen";
+  renderSwitches(); renderScenarios(); renderState();
+}
+
+addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (/^[a-z]$/i.test(e.key)) { e.preventDefault(); send({ t: "char", c: e.key.toLowerCase() }); }
+  else if (e.key === " ") { e.preventDefault(); send({ t: "commit" }); }
+  else if (e.key === "Enter") {
+    e.preventDefault();
+    if (S.status !== "entering") send(S.status === "rejected" && !S.wiped ? { t: "fix" } : { t: "discard" });
+    else if (S.buf !== "") send({ t: "commit" });
+    else if (SeedEntry.canFinish(S)) send({ t: "finish" });
+  }
+  else if (e.key === "Backspace") { e.preventDefault(); send({ t: "back" }); }
+  else if (e.key.startsWith("Arrow")) {
+    e.preventDefault();
+    const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -4, ArrowDown: 4 }[e.key];   // 4 columns
+    if (step) send({ t: "goto", i: S.cursor + step });
+  }
+});
+
+render();
+</script>
