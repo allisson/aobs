@@ -1,0 +1,569 @@
+<title>Before You Sign</title>
+<!--
+  PROTOTYPE — throwaway. Answers issue #9: what does the transaction review screen show,
+  and what must the user confirm before a signature is produced?
+
+  Three structurally different variants on one screen, switchable via ?variant=A|B|C
+  and the floating bar at the bottom. Not production code. Not Slint. No tests.
+
+  Same transaction in all three, so the variants are comparable:
+    2 inputs (one P2WPKH, one P2SH-P2WPKH — mixed types, deliberately, to exercise a warning)
+    3 outputs (two payments, one change at m/84'/0'/0'/1/37, re-derived and verified)
+    fee 5 200 sat @ 25.0 sat/vB = 0.107% of the amount sent
+  Addresses are plausible-looking but fake. Do not send anything anywhere.
+-->
+<style>
+  :root {
+    --ground:   #10151c;
+    --panel:    #161c25;
+    --panel-2:  #1c242f;
+    --line:     #263140;
+    --line-soft:#1e2836;
+    --ink:      #e6ecf3;
+    --ink-mid:  #a7b4c4;
+    --ink-dim:  #6f7d8e;
+    --focus:    #56c8e8;
+    --ok:       #48c8a2;
+    --ok-bg:    #14312a;
+    --warn:     #dfa441;
+    --warn-bg:  #33270f;
+    --crit:     #e2635f;
+    --crit-bg:  #351a1c;
+
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    padding: var(--s5) var(--s4) 96px;
+  }
+
+  .frame-note {
+    max-width: 1120px;
+    margin: 0 auto var(--s3);
+    color: var(--ink-dim);
+    font-size: 12px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    display: flex;
+    justify-content: space-between;
+    gap: var(--s4);
+    flex-wrap: wrap;
+  }
+
+  /* The device viewport — judge density as a screen, not a document. */
+  .screen {
+    max-width: 1120px;
+    margin: 0 auto;
+    aspect-ratio: 16 / 10;
+    min-height: 620px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ---------- shared atoms ---------- */
+
+  .statusbar {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s3) var(--s5);
+    border-bottom: 1px solid var(--line-soft);
+    background: var(--ground);
+    font-size: 12px;
+    color: var(--ink-dim);
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    flex: 0 0 auto;
+  }
+  .statusbar .spacer { flex: 1; }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1);
+    padding: 3px var(--s2);
+    border-radius: 3px;
+    border: 1px solid var(--line);
+    color: var(--ink-mid);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .04em;
+    text-transform: none;
+  }
+  .chip.net    { border-color: #2d4a5c; color: #8fc9de; }
+  .chip.ok     { border-color: #2a5f4e; color: var(--ok);   background: var(--ok-bg); }
+  .chip.warn   { border-color: #6a5220; color: var(--warn); background: var(--warn-bg); }
+
+  .label {
+    font-size: 11px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+
+  .amount {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .amount .unit { color: var(--ink-dim); font-size: .68em; margin-left: .35em; letter-spacing: .04em; }
+
+  /* Address rendering: 4-character groups, ends emphasised for comparison. */
+  .addr {
+    font-family: var(--mono);
+    font-size: 17px;
+    line-height: 1.9;
+    color: var(--ink-mid);
+    word-spacing: .55em;
+    overflow-wrap: anywhere;
+  }
+  .addr b { color: var(--ink); font-weight: 600; }
+  .addr.lg { font-size: 22px; line-height: 2; }
+  .addr.sm { font-size: 13px; line-height: 1.7; }
+
+  .actions {
+    display: flex;
+    gap: var(--s3);
+    flex: 0 0 auto;
+  }
+  .btn {
+    font: inherit;
+    font-size: 15px;
+    padding: var(--s3) var(--s5);
+    border-radius: 4px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--ink);
+    cursor: pointer;
+    letter-spacing: .02em;
+  }
+  .btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .btn.sign   { border-color: #2a5f4e; background: var(--ok-bg);   color: var(--ok);   font-weight: 600; }
+  .btn.refuse { border-color: #6b3033; background: var(--crit-bg); color: var(--crit); }
+  .btn .key { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); margin-left: var(--s2); }
+
+  .checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2) var(--s4);
+    font-size: 12px;
+    color: var(--ink-mid);
+  }
+  .checks span::before { content: "✓ "; color: var(--ok); }
+  .checks span.warn { color: var(--warn); }
+  .checks span.warn::before { content: "⚠ "; color: var(--warn); }
+
+  /* ============ VARIANT A — dense single panel ============ */
+
+  #A .body { display: grid; grid-template-columns: 300px 1fr; flex: 1; min-height: 0; }
+  #A .left {
+    border-right: 1px solid var(--line-soft);
+    padding: var(--s5);
+    display: flex; flex-direction: column; gap: var(--s5);
+    background: var(--ground);
+  }
+  #A .headline .amount { font-size: 34px; display: block; margin-top: var(--s1); }
+  #A .stat { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3); padding: var(--s2) 0; border-bottom: 1px solid var(--line-soft); }
+  #A .stat:last-child { border-bottom: 0; }
+  #A .stat .amount { font-size: 14px; }
+  #A .right { padding: var(--s5); overflow-y: auto; display: flex; flex-direction: column; gap: var(--s4); }
+  #A .out {
+    border: 1px solid var(--line-soft);
+    border-left: 3px solid var(--line);
+    border-radius: 4px;
+    padding: var(--s4);
+    background: var(--ground);
+  }
+  #A .out.change { border-left-color: var(--ok); }
+  #A .out-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s4); margin-bottom: var(--s2); }
+  #A .out-head .amount { font-size: 20px; }
+  #A .foot {
+    border-top: 1px solid var(--line-soft);
+    padding: var(--s4) var(--s5);
+    display: flex; align-items: center; gap: var(--s5);
+    background: var(--ground);
+    flex: 0 0 auto;
+  }
+  #A .foot .spacer { flex: 1; }
+
+  /* ============ VARIANT B — one fact per screen ============ */
+
+  #B .body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: var(--s7) var(--s6); text-align: center; min-height: 0; }
+  #B .step-label { margin-bottom: var(--s5); }
+  #B .big { font-size: 46px; line-height: 1.1; margin: 0 0 var(--s4); font-weight: 500; }
+  #B .big .amount { font-size: inherit; }
+  #B .sub { color: var(--ink-mid); max-width: 58ch; margin: 0 auto; }
+  #B .addrwrap { max-width: 30ch; margin: var(--s4) auto 0; text-align: left; }
+  #B .dots { display: flex; gap: var(--s2); justify-content: center; padding: var(--s4) 0 0; flex: 0 0 auto; }
+  #B .dot { width: 30px; height: 3px; border-radius: 2px; background: var(--line); }
+  #B .dot.on { background: var(--focus); }
+  #B .dot.done { background: var(--ink-dim); }
+  #B .foot { border-top: 1px solid var(--line-soft); padding: var(--s4) var(--s5); display: flex; align-items: center; gap: var(--s4); background: var(--ground); flex: 0 0 auto; }
+  #B .foot .spacer { flex: 1; }
+  #B .warnbox {
+    border: 1px solid #6a5220; background: var(--warn-bg); color: var(--warn);
+    border-radius: 4px; padding: var(--s3) var(--s4); max-width: 60ch; margin: var(--s5) auto 0;
+    font-size: 14px; text-align: left;
+  }
+
+  /* ============ VARIANT C — balance sheet ============ */
+
+  #C .body { flex: 1; padding: var(--s5) var(--s6); overflow-y: auto; min-height: 0; }
+  #C table { width: 100%; border-collapse: collapse; }
+  #C th {
+    text-align: left; font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-dim); font-weight: 500; padding: 0 0 var(--s2); border-bottom: 1px solid var(--line);
+  }
+  #C th.num, #C td.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #C td { padding: var(--s3) 0; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  #C tr.rule td { border-bottom: 1px solid var(--line); }
+  #C tr.total td { border-bottom: 0; padding-top: var(--s4); font-weight: 600; }
+  #C tr.total td.num { font-size: 19px; }
+  #C .who { display: flex; flex-direction: column; gap: var(--s1); }
+  #C .tag { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-dim); }
+  #C .tag.change { color: var(--ok); }
+  #C .section-title { margin: var(--s5) 0 var(--s3); }
+  #C .section-title:first-child { margin-top: 0; }
+  #C .foot { border-top: 1px solid var(--line-soft); padding: var(--s4) var(--s6); display: flex; align-items: center; gap: var(--s5); background: var(--ground); flex: 0 0 auto; }
+  #C .foot .spacer { flex: 1; }
+  #C .netline { display: flex; align-items: baseline; gap: var(--s3); }
+  #C .netline .amount { font-size: 22px; }
+
+  /* ============ switcher (obviously not part of the design) ============ */
+
+  .switcher {
+    position: fixed; bottom: var(--s4); left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: var(--s2);
+    background: #f2f5f8; color: #10151c;
+    border-radius: 999px; padding: var(--s2) var(--s2);
+    box-shadow: 0 6px 24px rgba(0,0,0,.5);
+    font-family: var(--sans); font-size: 13px; z-index: 50;
+  }
+  .switcher button {
+    font: inherit; border: 0; background: #dde4ec; color: #10151c;
+    width: 30px; height: 30px; border-radius: 999px; cursor: pointer; line-height: 1;
+  }
+  .switcher button:focus-visible { outline: 2px solid #10151c; outline-offset: 2px; }
+  .switcher .name { padding: 0 var(--s3); font-weight: 600; white-space: nowrap; }
+  .switcher .name em { font-weight: 400; font-style: normal; color: #4a5768; }
+
+  [hidden] { display: none !important; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="frame-note">
+  <span>Prototype — issue #9 · fake addresses · not production code</span>
+  <span>2 in · 3 out · 25.0 sat/vB</span>
+</div>
+
+<!-- ================= VARIANT A ================= -->
+<section class="screen" id="A" hidden>
+  <div class="statusbar">
+    <span class="chip net">mainnet</span>
+    <span class="chip">wallet 9a4f·c21b</span>
+    <span class="spacer"></span>
+    <span>Review before signing</span>
+  </div>
+
+  <div class="body">
+    <div class="left">
+      <div class="headline">
+        <div class="label">Leaving your wallet</div>
+        <span class="amount">0.04855200<span class="unit">BTC</span></span>
+      </div>
+
+      <div>
+        <div class="stat"><span class="label">Paying</span><span class="amount">0.04850000</span></div>
+        <div class="stat"><span class="label">Network fee</span><span class="amount">0.00005200</span></div>
+        <div class="stat"><span class="label">Fee rate</span><span class="amount">25.0 sat/vB</span></div>
+        <div class="stat"><span class="label">Fee vs amount</span><span class="amount">0.107%</span></div>
+      </div>
+
+      <div>
+        <div class="stat"><span class="label">Inputs</span><span class="amount">2</span></div>
+        <div class="stat"><span class="label">Input total</span><span class="amount">0.05210000</span></div>
+        <div class="stat"><span class="label">Returning to you</span><span class="amount">0.00354800</span></div>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="label">3 outputs</div>
+
+      <div class="out">
+        <div class="out-head">
+          <span class="label">Payment 1</span>
+          <span class="amount">0.04000000<span class="unit">BTC</span></span>
+        </div>
+        <div class="addr"><b>bc1q</b> 8f3k m2wd 9xhq 7t4n vr6s ldpc 0z85 ay3e <b>u9nf</b></div>
+      </div>
+
+      <div class="out">
+        <div class="out-head">
+          <span class="label">Payment 2</span>
+          <span class="amount">0.00850000<span class="unit">BTC</span></span>
+        </div>
+        <div class="addr"><b>bc1q</b> j57r p4mx t8ge 2qwc h6bd n1ks 3vza 9lyu <b>4td6</b></div>
+      </div>
+
+      <div class="out change">
+        <div class="out-head">
+          <span class="label">Change — back to you</span>
+          <span class="amount">0.00354800<span class="unit">BTC</span></span>
+        </div>
+        <div class="addr sm"><b>bc1q</b> r2np 6dwl 8vkc x3sa m9tq 5fzj he70 b4gy <b>c8mr</b></div>
+        <div style="margin-top:8px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+          <span class="chip ok">re-derived · m/84'/0'/0'/1/37</span>
+          <span style="font-size:12px; color:var(--ink-dim);">address rebuilt from your seed and matched byte for byte</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="checks">
+      <span>Change verified</span>
+      <span>All inputs yours</span>
+      <span>Sighash ALL</span>
+      <span class="warn">Mixed input script types</span>
+    </div>
+    <span class="spacer"></span>
+    <div class="actions">
+      <button class="btn refuse">Refuse<span class="key">Esc</span></button>
+      <button class="btn sign">Hold to sign<span class="key">3s</span></button>
+    </div>
+  </div>
+</section>
+
+<!-- ================= VARIANT B ================= -->
+<section class="screen" id="B" hidden>
+  <div class="statusbar">
+    <span class="chip net">mainnet</span>
+    <span class="chip">wallet 9a4f·c21b</span>
+    <span class="spacer"></span>
+    <span id="B-count">Step 1 of 5</span>
+  </div>
+
+  <div class="body">
+    <div data-step="1">
+      <div class="label step-label">You are sending</div>
+      <p class="big"><span class="amount">0.04850000</span> <span style="color:var(--ink-dim); font-size:.5em;">BTC</span></p>
+      <p class="sub">Across two payments. The next screens show each destination on its own.</p>
+    </div>
+
+    <div data-step="2" hidden>
+      <div class="label step-label">Payment 1 of 2 · 0.04000000 BTC</div>
+      <p class="sub">Compare every group against the address on the device that gave you this transaction.</p>
+      <div class="addrwrap">
+        <div class="addr lg"><b>bc1q</b> 8f3k m2wd 9xhq 7t4n vr6s ldpc 0z85 ay3e <b>u9nf</b></div>
+      </div>
+    </div>
+
+    <div data-step="3" hidden>
+      <div class="label step-label">Payment 2 of 2 · 0.00850000 BTC</div>
+      <p class="sub">Compare every group against the address on the device that gave you this transaction.</p>
+      <div class="addrwrap">
+        <div class="addr lg"><b>bc1q</b> j57r p4mx t8ge 2qwc h6bd n1ks 3vza 9lyu <b>4td6</b></div>
+      </div>
+    </div>
+
+    <div data-step="4" hidden>
+      <div class="label step-label">Change returning to you</div>
+      <p class="big"><span class="amount">0.00354800</span> <span style="color:var(--ink-dim); font-size:.5em;">BTC</span></p>
+      <p class="sub">
+        This address was rebuilt from your seed at <span style="font-family:var(--mono); color:var(--ink);">m/84'/0'/0'/1/37</span>
+        and matched byte for byte. You do not need to check it.
+      </p>
+      <div style="margin-top:16px;"><span class="chip ok">verified</span></div>
+    </div>
+
+    <div data-step="5" hidden>
+      <div class="label step-label">Network fee</div>
+      <p class="big"><span class="amount">0.00005200</span> <span style="color:var(--ink-dim); font-size:.5em;">BTC</span></p>
+      <p class="sub">25.0 sat/vB · 0.107% of the amount sent · 5 200 sat</p>
+      <div class="warnbox">
+        <strong>Mixed input script types.</strong> One input is wrapped SegWit and one is native SegWit.
+        Normal for a wallet imported from an older device, and it does not affect where your money goes.
+      </div>
+    </div>
+
+    <div class="dots" id="B-dots"></div>
+  </div>
+
+  <div class="foot">
+    <button class="btn" id="B-back">Back</button>
+    <span class="spacer"></span>
+    <div class="actions">
+      <button class="btn refuse">Refuse<span class="key">Esc</span></button>
+      <button class="btn sign" id="B-next">Next<span class="key">→</span></button>
+    </div>
+  </div>
+</section>
+
+<!-- ================= VARIANT C ================= -->
+<section class="screen" id="C" hidden>
+  <div class="statusbar">
+    <span class="chip net">mainnet</span>
+    <span class="chip">wallet 9a4f·c21b</span>
+    <span class="spacer"></span>
+    <span>Review before signing</span>
+  </div>
+
+  <div class="body">
+    <div class="label section-title">Coins being spent — 2 inputs</div>
+    <table>
+      <thead>
+        <tr><th>Source</th><th class="num">Amount</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><div class="who"><span class="addr sm">bc1q q8vt 2r9m …4kpz</span><span class="tag">native segwit · m/84'/0'/0'/0/12</span></div></td>
+          <td class="num">0.04210000</td>
+        </tr>
+        <tr class="rule">
+          <td><div class="who"><span class="addr sm">3Jd7 fRq2 …9vWx</span><span class="tag">wrapped segwit · m/49'/0'/0'/0/3</span></div></td>
+          <td class="num">0.01000000</td>
+        </tr>
+        <tr class="total">
+          <td>Total in</td>
+          <td class="num">0.05210000</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="label section-title">Where it goes — 3 outputs</div>
+    <table>
+      <thead>
+        <tr><th>Destination</th><th class="num">Amount</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><div class="who"><span class="addr sm"><b>bc1q</b> 8f3k m2wd 9xhq 7t4n vr6s ldpc 0z85 ay3e <b>u9nf</b></span><span class="tag">payment — not yours</span></div></td>
+          <td class="num">0.04000000</td>
+        </tr>
+        <tr>
+          <td><div class="who"><span class="addr sm"><b>bc1q</b> j57r p4mx t8ge 2qwc h6bd n1ks 3vza 9lyu <b>4td6</b></span><span class="tag">payment — not yours</span></div></td>
+          <td class="num">0.00850000</td>
+        </tr>
+        <tr class="rule">
+          <td><div class="who"><span class="addr sm">bc1q r2np 6dwl …c8mr</span><span class="tag change">change — re-derived at m/84'/0'/0'/1/37 ✓</span></div></td>
+          <td class="num">0.00354800</td>
+        </tr>
+        <tr class="rule">
+          <td><div class="who"><span>Network fee</span><span class="tag">25.0 sat/vB · 0.107% of payments</span></div></td>
+          <td class="num">0.00005200</td>
+        </tr>
+        <tr class="total">
+          <td>Total out</td>
+          <td class="num">0.05210000</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="foot">
+    <div class="netline">
+      <span class="label">You are down</span>
+      <span class="amount">0.04855200<span class="unit">BTC</span></span>
+    </div>
+    <span class="spacer"></span>
+    <div class="checks">
+      <span>Balances</span>
+      <span>Change verified</span>
+      <span class="warn">Mixed input types</span>
+    </div>
+    <div class="actions">
+      <button class="btn refuse">Refuse<span class="key">Esc</span></button>
+      <button class="btn sign">Hold to sign<span class="key">3s</span></button>
+    </div>
+  </div>
+</section>
+
+<div class="switcher">
+  <button id="prev" aria-label="Previous variant">‹</button>
+  <span class="name" id="vname"></span>
+  <button id="next" aria-label="Next variant">›</button>
+</div>
+
+<script>
+  var VARIANTS = [
+    ["A", "Dense panel — everything at once"],
+    ["B", "Forced sequence — one fact per screen"],
+    ["C", "Balance sheet — the arithmetic shown"]
+  ];
+
+  function currentKey() {
+    var k = (new URLSearchParams(location.search).get("variant") || "A").toUpperCase();
+    return VARIANTS.some(function (v) { return v[0] === k; }) ? k : "A";
+  }
+
+  function render() {
+    var key = currentKey();
+    VARIANTS.forEach(function (v) {
+      document.getElementById(v[0]).hidden = v[0] !== key;
+    });
+    var meta = VARIANTS.find(function (v) { return v[0] === key; });
+    document.getElementById("vname").innerHTML = meta[0] + " <em>" + meta[1] + "</em>";
+  }
+
+  function go(delta) {
+    var i = VARIANTS.findIndex(function (v) { return v[0] === currentKey(); });
+    var next = VARIANTS[(i + delta + VARIANTS.length) % VARIANTS.length][0];
+    history.replaceState(null, "", "?variant=" + next);
+    render();
+  }
+
+  document.getElementById("prev").onclick = function () { go(-1); };
+  document.getElementById("next").onclick = function () { go(1); };
+
+  document.addEventListener("keydown", function (e) {
+    var t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    if (e.key === "ArrowLeft") go(-1);
+    if (e.key === "ArrowRight") go(1);
+  });
+
+  // Variant B is a sequence, so it needs a little state of its own.
+  (function () {
+    var step = 1, TOTAL = 5;
+    var dots = document.getElementById("B-dots");
+    for (var i = 0; i < TOTAL; i++) dots.appendChild(document.createElement("span")).className = "dot";
+
+    function paint() {
+      document.querySelectorAll("#B [data-step]").forEach(function (el) {
+        el.hidden = Number(el.dataset.step) !== step;
+      });
+      Array.prototype.forEach.call(dots.children, function (d, i) {
+        d.className = "dot" + (i + 1 === step ? " on" : i + 1 < step ? " done" : "");
+      });
+      document.getElementById("B-count").textContent = "Step " + step + " of " + TOTAL;
+      document.getElementById("B-back").disabled = step === 1;
+      var next = document.getElementById("B-next");
+      next.innerHTML = step === TOTAL
+        ? 'Hold to sign<span class="key">3s</span>'
+        : 'Next<span class="key">→</span>';
+    }
+
+    document.getElementById("B-next").onclick = function () { if (step < TOTAL) { step++; paint(); } };
+    document.getElementById("B-back").onclick = function () { if (step > 1) { step--; paint(); } };
+    paint();
+  })();
+
+  render();
+</script>
