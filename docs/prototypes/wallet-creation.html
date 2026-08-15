@@ -14,16 +14,19 @@
   POSITION THIS PROTOTYPE ARGUES FOR — the other positions are the live alternatives,
   kept switchable so the trade can be re-felt rather than re-argued:
 
-    ?dice=offered|advanced|always    a step everyone sees and skips, buried behind
-                                     "advanced", or a screen nobody can pass
-    ?gather=honest|bar               indeterminate with a named activity, or a progress bar
-    ?words=grid|pair|pages           24 at once in 4 columns, 2 tall columns, or 2 pages of 12
-    ?confirm=sampled|full|attest     type back 4 words by position, retype all 24, or tick
-                                     "written down" per page with no typing at all
-    ?wrong=keep|restart              a wrong confirmation keeps the phrase for correction,
-                                     or discards the wallet and generates a new one
-    ?chrome=bare|status              while the seed is on screen: nothing else at all, or
-                                     the ordinary status bar stays put
+    ?dice=merged|advanced|always     ON the gathering screen (the wait carries the feature),
+                                     buried behind an "advanced" menu entry, or compulsory
+    ?gather=honest|bar               indeterminate with elapsed seconds, or a progress bar
+                                     reporting a percentage getrandom(2) cannot know
+    ?words=pair|grid|pages           2 columns of 12 — the shape of the paper being copied
+                                     onto — or 4 columns of 6, or 2 pages of 12
+    ?confirm=full|sampled|attest     retype all 24 with the phrase off screen, type back 4
+                                     sampled positions (catches 4 in 24), or tick per page
+                                     with no typing at all (catches nothing)
+    ?wrong=keep|restart              a wrong word marks that position on the phrase for
+                                     repair, or discards the wallet and generates a new one
+    ?chrome=status|bare              the ordinary status bar stays unchanged, or all chrome
+                                     vanishes for the one screen showing a seed
 
   Settled inputs this flow obeys:
     #7   the encrypted-backup QR is offered only AFTER the mnemonic is confirmed recorded
@@ -107,10 +110,14 @@
   .progress { font-family: var(--mono); font-size: 13px; color: var(--ink-dim); }
 
   /* --- the mnemonic --- */
-  .words { display: grid; gap: var(--s1) var(--s5); flex: 1 1 auto; align-content: center; }
-  .words.grid  { grid-template-columns: repeat(4, 1fr); }
-  .words.pair  { grid-template-columns: repeat(2, 1fr); }
-  .words.pages { grid-template-columns: repeat(2, 1fr); }
+  /* Column-major fill, always: a column of 12 only matches the paper being copied
+     onto if it actually reads 1–12 down the left and 13–24 down the right. Grid's
+     default row flow would give 1,2 / 3,4 — the layout argument inverted. */
+  .words { display: grid; gap: var(--s1) var(--s5); flex: 1 1 auto; align-content: center;
+           grid-auto-flow: column; }
+  .words.grid  { grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(6, auto); }
+  .words.pair  { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(12, auto); }
+  .words.pages { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(6, auto); }
   .w {
     display: flex; align-items: baseline; gap: var(--s3); padding: var(--s2) var(--s3);
     border-bottom: 1px solid var(--line-soft); min-height: 42px;
@@ -118,10 +125,19 @@
   .w .n { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); width: 2.4ch; text-align: right; flex: 0 0 auto; }
   .w .t { font-family: var(--mono); color: var(--ink); letter-spacing: .015em; }
   .words.grid  .w .t { font-size: 20px; }
-  .words.pair  .w .t { font-size: 24px; }
+  .words.pair  .w .t { font-size: 20px; }
   .words.pages .w .t { font-size: 26px; }
-  .words.pair .w, .words.pages .w { min-height: 48px; }
+  /* 12 rows have to clear the 16:10 frame with the banner and the foot in place.
+     This is a real product constraint, not a prototype one: two columns of 12 is
+     the most a 1280×800 panel holds at a size that survives a poor screen (#26). */
+  .words.pair  { gap: 0 var(--s7); }
+  .words.pair  .w { min-height: 34px; padding: 2px var(--s3); }
+  .words.pages .w { min-height: 48px; }
+  .words.compact .w { min-height: 30px; padding: 2px var(--s3); }
+  .words.compact .w .t { font-size: 17px; }
   .w.hi { background: var(--panel-2); border-bottom: 2px solid var(--focus); }
+  .w.mark { background: var(--warn-bg); border-bottom: 2px solid var(--warn-line); }
+  .w.mark .n { color: var(--warn); font-weight: 700; }
   .w.bad { background: var(--crit-bg); border-bottom-color: var(--crit-line); }
   .w.bad .t { color: var(--crit); }
   .w.ticked .n { color: var(--ok); }
@@ -338,18 +354,21 @@ const hex = bytes => [...bytes].map(b => b.toString(16).padStart(2, "0")).join("
 //  Shell
 // ───────────────────────────────────────────────────────────────────────────────
 const OPTS = {
-  dice:    { q: "Where do the dice sit?",            vals: ["offered", "advanced", "always"] },
+  dice:    { q: "Where do the dice sit?",            vals: ["merged", "advanced", "always"] },
   gather:  { q: "The gathering-entropy screen",      vals: ["honest", "bar"] },
-  words:   { q: "How 24 words are laid out",         vals: ["grid", "pair", "pages"] },
-  confirm: { q: "What proves it was written down",   vals: ["sampled", "full", "attest"] },
-  wrong:   { q: "A wrong confirmation…",             vals: ["keep", "restart"] },
-  chrome:  { q: "On screen beside a visible seed",   vals: ["bare", "status"] },
+  words:   { q: "How 24 words are laid out",         vals: ["pair", "grid", "pages"] },
+  confirm: { q: "What proves it was written down",   vals: ["full", "sampled", "attest"] },
+  wrong:   { q: "A wrong word…",                     vals: ["keep", "restart"] },
+  chrome:  { q: "On screen beside a visible seed",   vals: ["status", "bare"] },
 };
 const cfg = {};
 const url = new URLSearchParams(location.search);
 for (const k in OPTS) cfg[k] = OPTS[k].vals.includes(url.get(k)) ? url.get(k) : OPTS[k].vals[0];
 
+// The dice screen is its own step ONLY under the rejected `advanced` position; the
+// settled flow merges it into the gathering screen, so the wait has something on it.
 const FLOW = ["menu", "dice", "gather", "words", "confirm", "passphrase", "identity", "end"];
+const diceOnGather = () => cfg.dice === "merged" || cfg.dice === "always";
 
 let S = null;
 const fresh = () => ({
@@ -371,6 +390,8 @@ const fresh = () => ({
   ppDone: false,
   gatherT: 0,
   showText: false,      // identity screen: text fallback behind the QR (#27)
+  ready: false,         // getrandom(2) has returned
+  markAt: null,         // a position the retype disputed, marked for repair
 });
 S = fresh();
 
@@ -391,12 +412,17 @@ let gatherTimer = null;
 const GATHER_MS = 7000;
 const runGather = async () => {
   clearInterval(gatherTimer);
-  S.gatherT = 0;
+  S.gatherT = 0; S.ready = false;
   const started = performance.now();
   gatherTimer = setInterval(() => {
     S.gatherT = performance.now() - started;
-    if (S.gatherT >= GATHER_MS) { clearInterval(gatherTimer); finishGather(); }
-    else render();
+    if (S.gatherT >= GATHER_MS) {
+      clearInterval(gatherTimer);
+      S.ready = true;
+      // With the dice on this screen the wait cannot auto-advance — the user is
+      // still rolling. Readiness only unlocks Continue.
+      if (diceOnGather()) render(); else finishGather();
+    } else render();
   }, 100);
 };
 const finishGather = async () => {
@@ -410,7 +436,7 @@ const finishGather = async () => {
 // --- confirmation -----------------------------------------------------------
 const SAMPLE_N = 4;
 const startConfirm = () => {
-  S.typed = ""; S.given = {}; S.badAt = null; S.page = 0; S.ticked = [];
+  S.typed = ""; S.given = {}; S.badAt = null; S.markAt = null; S.page = 0; S.ticked = [];
   if (cfg.confirm === "full") S.ask = Array.from({ length: 24 }, (_, i) => i);
   else if (cfg.confirm === "sampled") {
     const pool = Array.from({ length: 24 }, (_, i) => i);
@@ -430,9 +456,16 @@ const commitWord = () => {
   if (S.askAt >= S.ask.length) { S.screen = "passphrase"; }
   render();
 };
+// #18's argument, mirrored: wiping destroys no secret, only the diff between paper
+// and screen — the user's sole instrument for finding their own error. So `keep`
+// returns to the phrase with the disputed position marked, which IS the repair.
 const afterWrong = () => {
   if (cfg.wrong === "restart") { const r = fresh(); r.screen = "gather"; S = r; render(); runGather(); }
-  else { S.badAt = null; S.screen = "words"; S.page = 0; render(); }
+  else {
+    S.markAt = S.badAt; S.badAt = null; S.screen = "words";
+    S.page = cfg.words === "pages" && S.markAt >= 12 ? 1 : 0;
+    render();
+  }
 };
 
 // --- fingerprint (NOT a BIP32 one — see the header comment) -----------------
@@ -485,13 +518,15 @@ menu: () => statusbar() + `
     <h1>aobs</h1>
     <p>An offline signer. Nothing on this machine survives being switched off.</p>
     <div class="menu">
-      <button class="btn go big" onclick="go('${cfg.dice === "always" ? "dice" : cfg.dice === "offered" ? "dice" : "gather"}')">
+      <button class="btn go big" onclick="go('gather')">
         Create a new wallet<small>24 words, generated here, written down by you</small></button>
       <button class="btn big" disabled>Load an existing wallet<small>type a recovery phrase you already have</small></button>
       ${cfg.dice === "advanced" ? `<button class="btn quiet" onclick="go('dice')">Advanced: add your own dice rolls</button>` : ``}
     </div>
   </div>` + foot(`<kbd>↑</kbd><kbd>↓</kbd> move &nbsp; <kbd>Enter</kbd> choose`, ``),
 
+// Only reachable under the rejected `advanced` position — a dice step of its own,
+// behind a menu entry, which is how a feature becomes one nobody ever finds.
 dice: () => statusbar() + `
   <div class="body">
     <div class="head"><h1>Dice, if you want them</h1><span class="spacer"></span>
@@ -501,43 +536,75 @@ dice: () => statusbar() + `
        randomness, never remove it.</b></p>
     <div class="dice">${S.rolls.map(d => `<span class="die">${d}</span>`).join("") ||
       `<span class="note">nothing rolled yet — that is a complete answer</span>`}</div>
-    ${cfg.dice === "always"
-      ? `<p class="note">This screen cannot be skipped in this configuration — which is the point of the switch.</p>` : ``}
   </div>` + foot(`<kbd>1</kbd>–<kbd>6</kbd> roll &nbsp; <kbd>⌫</kbd> undo &nbsp; <kbd>Enter</kbd> continue`,
-    `${cfg.dice === "always" && !S.rolls.length ? `<button class="btn" disabled>Continue</button>`
-      : `<button class="btn go" onclick="go('gather')">Continue${S.rolls.length ? "" : " without dice"}</button>`}`),
+    `<button class="btn go" onclick="go('gather')">Continue${S.rolls.length ? "" : " without dice"}</button>`),
 
+// The settled screen: the wait and the dice are the same screen. #8 needs the rolls
+// before the mnemonic exists, which is exactly when getrandom(2) is still blocking —
+// so the dead time carries the optional feature, and a screen with something to do
+// on it cannot read as a hang.
 gather: () => statusbar() + `
-  <div class="body center">
+  <div class="body ${diceOnGather() ? "" : "center"}">
     ${cfg.gather === "bar"
       ? `<div class="bar"><i style="width:${Math.min(100, S.gatherT / GATHER_MS * 100).toFixed(0)}%"></i></div>
          <h1>Gathering entropy</h1>
-         <p>${Math.min(99, Math.floor(S.gatherT / GATHER_MS * 100))}% — please wait.</p>`
+         <p>${Math.min(99, Math.floor(S.gatherT / GATHER_MS * 100))}% — please wait.</p>
+         <p class="note">A percentage <span class="mono">getrandom(2)</span> cannot actually report — this is the rejected position.</p>`
+      : diceOnGather()
+      ? `<div class="head">
+           <h1>Gathering entropy</h1><span class="spacer"></span>
+           <span class="rollcount">${S.rolls.length} roll${S.rolls.length === 1 ? "" : "s"}</span>
+         </div>
+         <p>This machine is collecting randomness from its own timing. It is not stuck — it finishes
+            when there is enough, which on some machines takes a few seconds longer.</p>
+         <h2 style="margin-top:var(--s4)">Add dice, if you want to</h2>
+         <p>Roll a die and type each result. Stop whenever you like.
+            <b>Your rolls are combined with the system random number generator; they can only add
+            randomness, never remove it.</b></p>
+         <div class="dice">${S.rolls.map(d => `<span class="die">${d}</span>`).join("") ||
+           `<span class="note">nothing rolled — that is a complete answer</span>`}</div>
+         <div class="ticker">${S.ready
+           ? `<span style="color:var(--ok)">enough randomness gathered after ${(S.gatherT / 1000).toFixed(1)} s</span>`
+           : `still gathering — ${(S.gatherT / 1000).toFixed(1)} s`}</div>`
       : `<div class="spinner"></div>
          <h1>Gathering entropy</h1>
-         <p>The kernel is collecting randomness from this machine’s own timing. It is not stuck;
-            it finishes when there is enough, which on some machines takes a few seconds longer.</p>
-         <div class="ticker">${(S.gatherT / 1000).toFixed(1)} s &nbsp;·&nbsp; ${S.rolls.length ? `${S.rolls.length} dice rolls will be mixed in` : `no dice supplied`}</div>`}
-  </div>` + foot(`this wait is #8’s <span class="mono">random.trust_cpu=off</span> — ~1–16 s, unmeasured`, ``),
+         <p>This machine is collecting randomness from its own timing. It is not stuck; it finishes
+            when there is enough, which on some machines takes a few seconds longer.</p>
+         <div class="ticker">${(S.gatherT / 1000).toFixed(1)} s</div>`}
+  </div>` + foot(
+    diceOnGather() ? `<kbd>1</kbd>–<kbd>6</kbd> roll &nbsp; <kbd>⌫</kbd> undo &nbsp; <kbd>Enter</kbd> continue`
+                   : `this wait is #8’s <span class="mono">random.trust_cpu=off</span> — ~1–16 s, unmeasured`,
+    diceOnGather()
+      ? `<button class="btn go" ${S.ready && !(cfg.dice === "always" && !S.rolls.length) ? `onclick="finishGather()"` : "disabled"}>
+           ${S.ready ? (S.rolls.length ? "Continue" : "Continue without dice") : "Waiting for randomness…"}</button>`
+      : ``),
 
-words: () => (cfg.chrome === "status" ? statusbar(`<span class="chip crit">seed on screen</span>`) : ``) + `
+// Chrome does not vanish for this screen: #26 rejected the theme toggle because a
+// frame that flips mid-flow is a surprise on the screen demanding the most attention,
+// and the same holds here. No "seed on screen" chip either — a warning is only
+// legitimate when the device knows something the user doesn't (#22), and the user
+// can see what is on the screen they are reading.
+words: () => (cfg.chrome === "status" ? statusbar() : ``) + `
   <div class="body seed">
     <div class="head">
-      <h1>Write these down</h1><span class="spacer"></span>
+      <h1>${S.markAt === null ? "Write these down" : `Check word ${S.markAt + 1} against your paper`}</h1>
+      <span class="spacer"></span>
       <span class="progress">${cfg.words === "pages" ? `page ${S.page + 1} of 2 · words ${S.page * 12 + 1}–${S.page * 12 + 12}` : `24 words`}</span>
     </div>
-    <div class="seedbanner"><span>These 24 words are the wallet. Anyone who reads them can spend from it, and nobody can recover it without them. They are not stored anywhere on this machine.</span></div>
+    <div class="seedbanner"><span>${S.markAt === null
+      ? `These 24 words are the wallet. Anyone who reads them can spend from it, and nobody can recover it without them. They are not stored anywhere on this machine.`
+      : `Nothing has been lost and the phrase has not changed. Correct what is on your paper, then type it back again.`}</span></div>
     <div class="words ${cfg.words}">
       ${(cfg.words === "pages" ? S.mnemonic.slice(S.page * 12, S.page * 12 + 12) : S.mnemonic)
         .map((w, i) => { const n = cfg.words === "pages" ? S.page * 12 + i + 1 : i + 1;
-          return `<div class="w"><span class="n">${n}</span><span class="t">${w}</span></div>`; }).join("")}
+          return `<div class="w ${n - 1 === S.markAt ? "mark" : ""}"><span class="n">${n}</span><span class="t">${w}</span></div>`; }).join("")}
     </div>
-  </div>` + foot(cfg.chrome === "bare" ? `nothing else is on this screen — no status bar, no clock, no network chip`
-                                       : `the ordinary status bar stays, with the seed flagged`,
-    cfg.words === "pages" && S.page === 0
+  </div>` + foot(cfg.chrome === "bare" ? `nothing else is on this screen — the rejected position: chrome that vanishes for one screen`
+                                       : `the ordinary status bar stays, unchanged and unflagged`,
+    cfg.words === "pages" && S.page === 0 && S.markAt === null
       ? `<button class="btn go" onclick="set({page:1})">Next 12 words</button>`
-      : `${cfg.words === "pages" ? `<button class="btn quiet" onclick="set({page:0})">Back to 1–12</button>` : ``}
-         <button class="btn go" onclick="go('confirm')">I have written them down</button>`),
+      : `${cfg.words === "pages" ? `<button class="btn quiet" onclick="set({page:${S.page === 0 ? 1 : 0}})">Show ${S.page === 0 ? "13–24" : "1–12"}</button>` : ``}
+         <button class="btn go" onclick="go('confirm')">${S.markAt === null ? "I have written them down" : "Type it back again"}</button>`),
 
 confirm: () => {
   if (S.badAt !== null) return statusbar() + `
@@ -580,10 +647,11 @@ confirm: () => {
       <span class="progress">${S.askAt + 1} / ${S.ask.length}</span>
     </div>
     <p>${cfg.confirm === "full"
-      ? `Type all 24 words back from your paper, in order. The screen is not showing them.`
-      : `Read these four back from your paper. They were chosen at random after you wrote the phrase down,
-         so they cannot have been memorised from the screen.`}</p>
-    <div class="words grid" style="flex:0 0 auto;align-content:start">
+      ? `Type all 24 words back <b>from your paper</b>, in order. The phrase is not on screen — that is
+         what makes this a check on what you wrote rather than on what you can see.`
+      : `Read these four back from your paper. Against a single mis-copied word this catches
+         4 in 24 — the rejected position, kept here to be felt.`}</p>
+    <div class="words ${cfg.confirm === "full" ? "pair compact" : "grid"}" style="flex:0 0 auto;align-content:start">
       ${S.ask.map((p, i) => `<div class="w ${i === S.askAt ? "hi" : ""}">
         <span class="n">${p + 1}</span>
         <span class="t">${i < S.askAt ? esc(S.given[p]) : i === S.askAt ? `<span class="dim">?</span>` : ``}</span></div>`).join("")}
@@ -641,6 +709,12 @@ identity: () => statusbar(`<span class="chip ok">wallet loaded</span>`) + `
            transactions. It contains no private keys and cannot spend.</p>
         <p class="note">One <span class="mono">ur:crypto-account</span> QR, all four address types at account 0 (#27).</p>
         <button class="btn quiet" onclick="set({showText:!S.showText})">${S.showText ? "Show the QR" : "Show as text instead"}</button>
+        <hr style="border:0;border-top:1px solid var(--line-soft);margin:var(--s4) 0">
+        <button class="btn quiet" onclick="alert('#19 owns these screens')">Also make an encrypted backup QR…</button>
+        <p class="note" style="margin-top:var(--s1)">
+          #7’s secondary backup lives behind this door, and can only live here: its AAD carries the
+          passphrase-in-use bit, so it cannot be produced before the passphrase is known. The screens
+          behind it are #19’s.</p>
       </div>
     </div>
   </div>` + foot(`the fingerprint stays in view on every screen from here on`,
@@ -702,7 +776,14 @@ document.addEventListener("keydown", e => {
   if (S.screen === "dice") {
     if (/^[1-6]$/.test(k)) { S.rolls.push(+k); e.preventDefault(); return render(); }
     if (k === "Backspace") { S.rolls.pop(); e.preventDefault(); return render(); }
-    if (k === "Enter" && !(cfg.dice === "always" && !S.rolls.length)) { e.preventDefault(); return go("gather"); }
+    if (k === "Enter") { e.preventDefault(); return go("gather"); }
+  }
+  if (S.screen === "gather" && diceOnGather()) {
+    if (/^[1-6]$/.test(k)) { S.rolls.push(+k); e.preventDefault(); return render(); }
+    if (k === "Backspace") { S.rolls.pop(); e.preventDefault(); return render(); }
+    if (k === "Enter" && S.ready && !(cfg.dice === "always" && !S.rolls.length)) {
+      e.preventDefault(); return finishGather();
+    }
   }
   if (S.screen === "confirm" && S.badAt === null && cfg.confirm !== "attest") {
     if (/^[a-z]$/.test(k)) { S.typed += k; e.preventDefault(); return render(); }
@@ -733,6 +814,9 @@ const WALKS = [
 el("scen").innerHTML = WALKS.map(([t, s], i) =>
   `<button onclick="WALKS[${i}][2]()">${t}<small>${s}</small></button>`).join("");
 window.WALKS = WALKS;
-window.go = go; window.set = set; window.flip = flip; window.afterWrong = afterWrong;
+window.go = go; window.set = set; window.flip = flip;
+window.afterWrong = afterWrong; window.finishGather = finishGather;
 render();
+// ?walk=N jumps straight into a walkthrough, so a screen can be linked to directly.
+if (url.has("walk") && WALKS[+url.get("walk")]) WALKS[+url.get("walk")][2]();
 </script>
