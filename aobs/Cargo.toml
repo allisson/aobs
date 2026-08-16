@@ -14,10 +14,16 @@ aobs-core = { path = "../aobs-core" }
 # manager, no GPU driver requirement. `default-features = false` is what keeps
 # `backend-default` — and with it winit, and a windowing stack this appliance has no use
 # for — out of the closure.
+#
+# PROTOTYPE (#48): `-noseat` instead of `backend-linuxkms`. Same backend, same renderer;
+# the only difference is that device opens are a plain `OpenOptions::open` rather than
+# `libseat::Seat::open_device`. `seatd` allows only evdev, `/dev/dri/`, wscons and hidraw,
+# so it answers `ENOENT` for `/dev/fb0` — which is why the backend's own fbdev fallback
+# could not run on the built ISO (#46). Not a decision: #49 decides.
 [dependencies.slint]
 version = "1.17"
 default-features = false
-features = ["compat-1-2", "std", "backend-linuxkms", "renderer-software"]
+features = ["compat-1-2", "std", "backend-linuxkms-noseat", "renderer-software"]
 
 [build-dependencies]
 slint-build = "1.17"

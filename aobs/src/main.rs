@@ -44,7 +44,15 @@ fn run() -> Result<(), Failure> {
     let elapsed_ms = entropy::time_until_ready().map_err(|_| Failure::EntropyUnavailable)?;
     console::emit(&format!("AOBS_ENTROPY_MS={elapsed_ms}"));
 
-    let ui = AppWindow::new().map_err(|_| Failure::DisplayUnavailable)?;
+    // PROTOTYPE (#48): §9 forbids formatted program state in the diagnostic, so the real
+    // error was thrown away — which is exactly why #40 could observe `AOBS-E02` without
+    // being able to name `libseat` as the cause. Instrumentation on a throwaway branch,
+    // not a shipped behaviour: whether a library's own error string counts as program
+    // state is #49's call.
+    let ui = AppWindow::new().map_err(|error| {
+        console::emit(&format!("AOBS_PROTO_DISPLAY_ERROR={error}"));
+        Failure::DisplayUnavailable
+    })?;
     ui.set_version(buildinfo::VERSION.into());
     ui.set_build_date(buildinfo::build_date().into());
 
