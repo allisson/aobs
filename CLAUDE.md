@@ -2,9 +2,13 @@
 
 A Bitcoin signing appliance shipped as a bootable Debian LiveCD (`bitcoin-signer-amd64.iso`, amd64 only). The user boots it, loads or creates a wallet, signs a PSBT, and shuts down. The wallet lives in RAM and nothing survives the session.
 
-## Status: the spec is closed; implementation has not started
+## Status: the spec is closed; a walking skeleton exists and now lags it
 
-The v1 implementation spec is written and merged — `docs/specs/` (six files), `docs/adr/` (sixteen ADRs, one of them superseded) and `CONTEXT.md`, assembled from 27 closed decision tickets plus the display-path map ([#42](https://github.com/allisson/aobs/issues/42)). **There is still no product code**: the next commit that adds a crate is the first one.
+The v1 implementation spec is written and merged — `docs/specs/` (six files), `docs/adr/` (sixteen ADRs, one of them superseded) and `CONTEXT.md`, assembled from 27 closed decision tickets plus the display-path map ([#42](https://github.com/allisson/aobs/issues/42)).
+
+**A walking skeleton is on `main`** ([#39](https://github.com/allisson/aobs/issues/39)): `aobs/` and `aobs-core/`, `ci/`, and `image/` with the live-build config, hooks and the `aobs.service` unit. It is what falsified ADR-0009 by building an ISO and booting it.
+
+**It predates ADR-0016 and contradicts the spec in named places** — the unit still `Requires=seatd.service`, sets `LIBSEAT_BACKEND=seatd` and `Type=simple`, and still carries `TTYVTDisallocate=yes`, which [#52](https://github.com/allisson/aobs/issues/52) proved kills the appliance the moment `fbcon` unbinds; the package list still installs `seatd` and `libseat1`; the module hook deletes no GPU drivers; there is no `console-detach`. **`docs/specs/` is the authority, not the tree.** Reconcile before building on any of it.
 
 **`docs/specs/` is the authority — build from it.** The rule it states about itself governs here too: *if you find yourself deciding something the spec does not answer, that is a ticket, not a gap in the prose to fill in with judgement. Say so and stop.* The exception is the routine mechanics of Rust — module names, error enum shapes, function signatures — which are yours.
 
