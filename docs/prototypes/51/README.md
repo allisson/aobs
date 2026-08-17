@@ -91,11 +91,13 @@ word and candidates 2 and 3 costing a kernel patch or a distribution.
 ## Not established here
 
 - **Real hardware.** QEMU + `virtio-gpu`, which the appliance will never ship on.
-- **That `simpledrm` behaves like `virtio_gpu` here.** Both are DRM drivers with fbdev emulation and
-  the gating code is generic, but `simpledrm` was not the driver under test — nothing with
-  `simpledrm` has been booted at any point on this map. `simpledrm` also uses the **sysfb** aperture
-  rather than allocating VRAM, so mechanism 1 deserves rechecking against
-  `drm_fbdev_shmem` as `simpledrm` sets it up.
+- **That `simpledrm` behaves like `virtio_gpu` here** — *narrowed to a boot, not a mechanism.*
+  `simpledrm` was not the driver under test, and nothing with `simpledrm` has been booted at any
+  point on this map. But the mechanism is now source-identical rather than analogous:
+  `simpledrm.c:1045` calls **`drm_fbdev_shmem_setup`**, exactly as `virtgpu_drv.c:106` does, so the
+  console client allocates its own buffer through the same `drm_client_framebuffer_create` path. That
+  `simpledrm` *scans out* the sysfb aperture does not change where `fbcon` writes. Both mechanisms
+  therefore apply unchanged; what is missing is an observation, not an argument.
 - Whether a kernel **panic** (`oops_in_progress`, which several of these paths check explicitly and
   which bypasses the gate on purpose) reaches the panel. A panic *should* reach the screen; that is
   §9's whole intent. Untested.
