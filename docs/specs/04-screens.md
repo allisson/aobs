@@ -78,13 +78,19 @@ firmware handed `efifb` — so the mode is an input, and the only free variable 
   firmware hands a user. **Named cost:** 640×480-class firmware is excluded, on machines at or below
   the ~2012 line `01-boot-layer.md` §7 already excludes.
 
-**Addresses wrap; they are never truncated.** Wrapping in 4-character groups keeps every character on
-screen, and it is owed **at the design size**, not only at the floor: a BIP86 P2TR address is 62
-characters, which with 4-character grouping is 77 monospace cells ≈ 787 px at 17 px in DejaVu Sans
-Mono — wider than the review panel's output column at 1280×800. The in-tree prototype renders only
-42-character P2WPKH addresses, so **nothing in-tree has been measured against the widest address class
-we ship**; §11.3's screen already wraps at 30 characters, so the treatment is established rather than
-invented here.
+**Group separation is a gap, not a space.** The 4-character groups are separated by a **sub-cell gap of
+about 0.25 em**, not by a space character occupying a full monospace cell. This is load-bearing rather
+than typographic: at 17 px in DejaVu Sans Mono a 62-character P2TR address is 62 cells + 15 gaps ≈ **698
+px** and holds **one line** inside the floor's ~768 px of usable width, where the prototype's real-space
+treatment is 77 cells ≈ **787 px** and wraps. A wrapped row costs ~86 px against ~57 px, and §11.2's
+output bound is a row count — so this one detail is the difference between a six-output appliance and a
+three-output one.
+
+**Addresses wrap where they still do not fit; they are never truncated.** Wrapping in 4-character groups
+keeps every character on screen, and it remains the treatment at §11.3's larger type, where a 22 px
+address exceeds any canvas — that screen already wraps at 30 characters, so this is established rather
+than invented here. Note that the in-tree prototype renders only 42-character P2WPKH addresses, so
+**nothing in-tree has been measured against the widest address class we ship**.
 
 **Keyboard only.** The software renderer draws no mouse cursor and the appliance has no pointer; the
 UI is fully keyboard-navigable by design, not by retrofit. Escape cancels wherever a cancel exists.
@@ -421,8 +427,8 @@ advantage it actually has: every surveyed device compromises its review screen b
 - **A fixed left rail with the money facts:** amount leaving, amount paying, **fee — absolute, as a
   rate, and as a percentage of the amount** — input count, input total, amount returning.
 - **The outputs at full address width on the right** — *full width* meaning every character, wrapped in
-  4-character groups where the column is narrower than the address, never truncated and never scrolled.
-  A P2TR address needs the wrap at 1280×800 already (§0).
+  4-character groups where the column is still narrower than the address, never truncated and never
+  scrolled. §0's gap-not-space rule is what lets a 62-character P2TR hold one line even at the floor.
 - **Below the design width the rail stops being beside the outputs and stacks above them** (§0's second
   breakpoint), which hands the whole width to the address column. Nothing is dropped in the stacked
   state: it is the same panel, in one column instead of two.
@@ -438,12 +444,16 @@ advantage it actually has: every surveyed device compromises its review screen b
 - Nothing that should stop a transaction appears here. Refusals happen before this screen is drawn at
   all.
 
-*Owed, and it is a hole rather than a number: **how many outputs this panel must hold.** "The whole
-transaction, non-scrolling" has no bound behind it at any mode — `02-core.md` §7 caps inputs
-transitively through the 64 KiB transport bound and mandatory `non_witness_utxo`, but a renderable
-output costs ~44 bytes, so a structurally valid PSBT can carry on the order of a thousand of them.
-Decided by [#58](https://github.com/allisson/aobs/issues/58); until it is, do not implement this panel
-as if scrolling or clipping were available — neither is.*
+**The panel holds at most six outputs, and a seventh is a refusal rather than a scroll.** Payment and
+change outputs both count — a row is a row. The count is checked in core, before this screen exists
+(`02-core.md` §7), so the panel is never asked to draw something it cannot hold.
+
+Six is **set by the minimum canvas, not by the panel in front of the user**: 600 px less chrome, the
+stacked money facts, the list header and the footer leaves roughly 320 px of rows, and a single-line
+output row costs about 57 px. A bound derived from the live mode would sign a PSBT on one machine and
+refuse it on another, which no test row and no user could reason about. *Owed: that six rows fit the
+minimum canvas. Provisional in the same way the RAM floor is provisional, and movable only before the
+first signed ISO ships.*
 
 ### 11.3 Per-address confirmation
 
@@ -454,6 +464,10 @@ transactions have one payment, so it is typically one extra screen.
 
 **The warning is absent from these screens.** They exist for one job, and a fee statement on them
 dilutes exactly the property they were bought for.
+
+**The walk inherits §11.2's bound at no cost.** Six outputs is at most six confirmation screens, which
+is a walk a person completes — which is the second reason the bound is a refusal rather than a paged
+list. A device that pages 200 outputs has a review that quietly does not happen.
 
 Typed confirmation of address characters was considered and rejected: it trains the habit of checking
 only the substring typed, which is exactly what a vanity-grinding attacker matches.

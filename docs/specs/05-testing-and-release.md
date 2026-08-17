@@ -126,6 +126,8 @@ The cases:
 - whitespace and unicode in parsed address-adjacent fields (Coldcard 2019, where the review screen
   itself was the vulnerability);
 - the 64 KiB boundary at exactly the limit and one byte over;
+- **six outputs, and seven** — the second refusing on `AOBS-R15` — plus a PSBT packing outputs to the
+  transport bound, which is where the ~2,000-output case lives;
 - address-shaped entries: mixed-case bech32, truncated bech32, a valid address differing by one
   character, a valid address differing only in case, `bitcoin:` with a query string, an uppercase
   BIP-21 URI, and a correctly-formed address from the *wrong* account;
@@ -207,7 +209,8 @@ become measured. None of them blocks implementation.
 | 8,000-derivation address search | Narrow the index window, and say what was searched. |
 | The four-descriptor `crypto-account` payload fits one QR at ECC H | **Narrow what we export. Never animate it.** |
 | Two columns of 12 words in the 800×600 **minimum canvas** (the binding geometry since `04-screens.md` §0 fixed the floor; 1280×800 is no longer the tight case) | Type size, not layout. |
-| A 62-character P2TR payment address, 4-character grouped, wrapped and non-scrolling in the minimum canvas — and in the design canvas, where the arithmetic says it already needs the wrap | Wrap to a third line before anything else moves. Never truncate. |
+| A 62-character P2TR payment address, 4-character grouped with §0's sub-cell gaps, on **one line** in the minimum canvas (derived: 62 cells + 15 gaps ≈ 698 px against ~768 px usable) | Wrap it, and drop the output bound to what still fits. Never truncate. |
+| **Six output rows fit the minimum canvas**, non-scrolling, with the stacked money facts above them (derived: ~320 px of rows at ~57 px each) | Lower the bound before the first ISO ships — after that it is fixed. |
 | A phone camera reads our v27 output at arm's length | **v40 is the documented fallback.** |
 | The inbound capture-resolution floor | The resolution fallback chain already handles it. |
 
