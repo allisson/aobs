@@ -202,8 +202,34 @@ Beyond that:
 
 ## 5. RAM wipe at shutdown, and what it does not survive
 
-**`init_on_free=1` on the cmdline, plus freeing the overlayfs upper dir on shutdown.** There is no
-boot-time cost — poisoning is a steady-state allocator overhead, not a startup or shutdown pass.
+**`init_on_free=1` on the cmdline, and nothing else.** There is no boot-time cost — poisoning is a
+steady-state allocator overhead, not a startup or shutdown pass.
+
+**What actually protects the wallet is the process dying.** The wallet lives in the app's anonymous
+memory, never on a filesystem. `04-screens.md` §13's *end the session* is a shutdown: systemd stops the
+unit, the process dies, and **process death frees its pages** — which is what `init_on_free=1` poisons.
+That path holds however the process dies, and it does not involve the overlay at all.
+
+**The overlayfs upper dir is deliberately not claimed**, and this is a correction
+([#62](https://github.com/allisson/aobs/issues/62)) rather than an omission. This section used to read
+*"plus freeing the overlayfs upper dir on shutdown"*, which was half of Tails' two-part mechanism:
+`docs/research/04-amnesic-boot-layer.md` records that a normal shutdown **never frees that branch**, so
+Tails both switches root back into an initramfs to get the rootfs unmounted *and* deletes the upper dir
+from a late service, having found the initramfs jump alone *"necessary but not sufficient"*. This spec
+refuses the switch-root machinery below, so what was kept was the half that cannot stand alone — and
+nothing ever implemented it.
+
+Deleting it is the honest correction on three grounds, in order of weight:
+
+1. **Nothing secret is written to a filesystem here.** No wallet file, no config, no cache, no
+   transaction history — all settled absences — no coredumps (§4), and no swap. The claim the appliance
+   actually makes is stronger than the one the clause made, and it is checkable: `docs/qa-checklist.md`
+   carries a row that a full session leaves the upper dir holding nothing the app wrote.
+2. **The dangerous step would have been ours to make safe.** Deleting the running root's upper dir late
+   in shutdown reverts or removes files the rest of the shutdown path still needs; Tails runs `memlockd`
+   precisely to survive that, and it is machinery this section declines by name.
+3. **It would be a third mechanism**, bought against the cold-boot adversary the threat model excludes,
+   which is exactly what the rule at the end of this section forbids.
 
 **Skipped deliberately:** Tails' `memlockd`, `udev-watchdog` and initramfs-shutdown machinery. That
 machinery almost entirely buys protection against a *present* adversary, which the threat model
@@ -219,6 +245,10 @@ upstream for "severe usability and reliability problems"; do not resurrect it.
 3. **Kernel memory**, some of which is not erased at all.
 4. **Anything the app is still holding.** Freeing is what *triggers* poisoning, so this is no
    substitute for prompt in-app zeroization.
+5. **The overlayfs upper dir and the page cache**, which a normal shutdown does not free at all. Stated
+   because it is the thing this section used to claim: those pages keep whatever the running system
+   wrote until power is cut and the DRAM decays. What makes that acceptable is not a mechanism but an
+   absence — nothing secret is written there.
 
 Shutdown covers secrets twice, because the two mechanisms fail differently: `ZeroizeOnDrop` covers a
 clean exit and a panic but not a kernel abort; `init_on_free=1` covers the process dying any which

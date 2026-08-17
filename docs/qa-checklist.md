@@ -105,6 +105,20 @@ which carries the evidence and the options. Each way out reverses a settled deci
 Rows that only exist because `image/` was brought back in line with `docs/specs/`. Each one
 guards a claim the tree used to contradict.
 
+### The RAM wipe rests on an absence (§5, [#62](https://github.com/allisson/aobs/issues/62))
+
+§5 claims `init_on_free=1` and nothing else, because nothing secret is written to a
+filesystem. That is a checkable claim and these rows are the check — a development build is
+the practical way to run them, since the shipped image offers no shell.
+
+- [ ] After a **full session** — create a wallet, load it with a passphrase, sign a
+      transaction, reach the shutdown screen — the overlayfs upper dir holds **nothing the
+      app wrote**. List it and read the list; do not sample it.
+- [ ] Nothing in `/run/log/journal` carries secret material: no mnemonic, no passphrase, no
+      key, no backup password, no PSBT contents.
+- [ ] No file anywhere on the writable layer is owned by `signer` other than an empty home.
+- [ ] `swapon --show` is empty and `/proc/swaps` lists nothing (§4, and the wipe assumes it).
+
 ### No seat daemon (§2, ADR-0016)
 
 - [ ] `ps` shows no `seatd`, and the published package manifest lists neither `seatd` nor
