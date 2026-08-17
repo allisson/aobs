@@ -1,8 +1,21 @@
 # ADR-0009 — UEFI only, because `simpledrm` deletes the unreportable failure
 
-- **Status**: accepted
+- **Status**: **superseded by [ADR-0016](./0016-two-tier-display-path.md)**
 - **Date**: 2026-08-15
 - **Decides**: [#24 — Hardware compatibility floor, and what happens when hardware is unsupported](https://github.com/allisson/aobs/issues/24)
+
+> **Superseded, and left otherwise intact.** Its central mechanism is false on the distribution this
+> spec ships: Debian 13 sets neither `CONFIG_DRM_SIMPLEDRM` nor `CONFIG_SYSFB_SIMPLEFB`, so
+> `simpledrm` never binds and there is no guaranteed display path with no GPU driver
+> ([#40](https://github.com/allisson/aobs/issues/40)). The premise was read from upstream kernel
+> source and never checked against the shipped kernel — which is why the standing rule says to verify
+> the artifact. [ADR-0016](./0016-two-tier-display-path.md) states the mechanism that actually exists
+> and keeps UEFI-only on a different, weaker reason. Everything below is the record of the original
+> decision; do not build on it.
+>
+> Still current, and unaffected by the falsification: `toram` and its low-memory second GRUB entry,
+> the RAM floor, the camera and keyboard degradation behaviour, `random.trust_cpu=off`, and
+> `panic = "unwind"`.
 
 ## Context
 

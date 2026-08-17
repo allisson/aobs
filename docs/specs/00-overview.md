@@ -36,8 +36,8 @@ The product exists for one reason, and it decides every trade in this spec:
 | `04-screens.md` | Every screen and the flow between them, in the shell. |
 | `05-testing-and-release.md` | Coverage bar, vectors, fuzz targets, adversarial corpus, CI gates, release gates, signing and distribution. |
 
-ADRs in `docs/adr/` carry the *why* for the fourteen decisions a newcomer would otherwise read as
-arbitrary. `CONTEXT.md` is the glossary.
+ADRs in `docs/adr/` carry the *why* for the decisions a newcomer would otherwise read as arbitrary —
+including one, ADR-0009, kept as a superseded record because *how* it was wrong is worth reading. `CONTEXT.md` is the glossary.
 
 ## Architecture
 
@@ -131,6 +131,7 @@ None of these blocks implementation. All of them block the release gate
 |---|---|
 | Entropy readiness delay under `random.trust_cpu=off` on real hardware (derived: 1–16 s). | [#8](https://github.com/allisson/aobs/issues/8), [#24](https://github.com/allisson/aobs/issues/24) |
 | RAM floor confirmed against the built image (provisional: 2 GiB min, 4 GiB recommended). | [#24](https://github.com/allisson/aobs/issues/24) |
+| Package count and installed size of the GUI floor now that `seatd` and `libseat1` are gone (stale: 22 packages / 21 MiB, measured with both present). | [#49](https://github.com/allisson/aobs/issues/49) |
 | Argon2id wall clock on low-end amd64 (derived: ~1.2–2.5 s at 64 MiB). | [#6](https://github.com/allisson/aobs/issues/6) |
 | Address-search time across 4 accounts × 2 branches × 1000 indices (8,000 derivations). | [#21](https://github.com/allisson/aobs/issues/21), [#27](https://github.com/allisson/aobs/issues/27) |
 | That the four-descriptor `crypto-account` payload fits one QR at ECC H (estimated ~460 B CBOR → ~1,000 UR chars). | [#27](https://github.com/allisson/aobs/issues/27) |
@@ -138,7 +139,18 @@ None of these blocks implementation. All of them block the release gate
 | That a phone camera reads our v27 output at arm's length (v40 is the documented fallback). | [#30](https://github.com/allisson/aobs/issues/30) |
 | The capture-resolution floor for reading an inbound v40 symbol. | [#31](https://github.com/allisson/aobs/issues/31) |
 
-Three verification obligations, distinct from measurements:
+Five verification obligations, distinct from measurements:
+
+- **The fbdev display tier on real firmware**, verified only under QEMU + `ramfb` so far: that
+  `efifb`'s reported pixel format negotiates against the renderer's five accepted arms, and that
+  detaching `fbcon` while the app draws behaves as it did in QEMU — the vtcon name and the format both
+  came from that kernel and that firmware ([#49](https://github.com/allisson/aobs/issues/49),
+  [#52](https://github.com/allisson/aobs/issues/52), ADR-0016).
+- **The residual aperture-removal class is unquantified, and accepted by name**: a driver the image
+  *keeps* — `i915`, `nouveau`, `ast`, `mgag200`, `gma500`, `udl`, `hyperv` — that removes the
+  framebuffer aperture and then fails for a reason unrelated to firmware would leave no display and no
+  channel. Only the firmware failures were traced ([#47](https://github.com/allisson/aobs/issues/47));
+  `gma500` is the most likely instance. The tested-hardware list is the only instrument against it.
 
 - **Pin whether BIP-174 explicitly forbids a Signer removing fields**, rather than resting on the
   role separation alone ([#30](https://github.com/allisson/aobs/issues/30)).

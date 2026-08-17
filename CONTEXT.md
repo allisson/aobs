@@ -178,6 +178,22 @@ fountain decoder entirely.
 **Clamp / bound** — a limit enforced at our call site *before* a third-party parser sees a value.
 `seqLen` bounds the claim; the total-parts cap bounds the work.
 
+## The display
+
+**The display path** — the chain from the framebuffer the firmware hands over to a pixel the user
+sees. It has **two tiers**, and which one serves a boot is decided at runtime by what the machine has,
+never configured.
+
+**The DRM tier / the fbdev tier** — the two. *DRM tier*: the appliance owns a KMS device and the
+kernel keeps console text off the panel for it. *fbdev tier*: the appliance owns `/dev/fb0` with no
+arbitration, so the console is detached for exactly as long as it draws. Say which tier a claim is
+about; almost every cost in this area belongs to one and not the other.
+
+**Unreportable failure** — a failure that cannot be shown to the user because showing it needs the
+thing that failed. No usable display is the only one in the product, and deleting it is what the
+hardware floor buys. A failure that halts with a code on a live console is *reported*, however bad it
+is, and is a different class entirely.
+
 ## Screens
 
 **The review panel** — the single non-scrolling screen carrying the whole transaction. The product

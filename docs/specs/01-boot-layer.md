@@ -9,6 +9,13 @@ Sources: [#4](https://github.com/allisson/aobs/issues/4),
 
 Target: Debian 13 (trixie), amd64, kernel 6.12 line.
 
+**The base distribution was re-examined and kept.** Alpine was priced as a candidate when Debian's
+missing `simpledrm` falsified the display story
+([#45](https://github.com/allisson/aobs/issues/45), ADR-0016) and **not taken** — 18 of this file's
+controls port, 16 need rework, 4 are lost. §1–§3 therefore stand as written, corrected in place rather
+than handed to a migration. Debian's own MR !1453 sets both `simpledrm` symbols for forky, which will
+shrink the fbdev tier of §7 with no change on our side.
+
 ## 1. Build toolchain: `live-build`
 
 `live-build`, not `mkosi`, not `debos`, not hand-rolled `debootstrap` + `xorriso`.
@@ -32,23 +39,62 @@ defects: it is shell scripts, `config/` is stateful, and `lb build` needs root.
 
 ## 2. Kiosk: there is no display server
 
-Slint on `backend-linuxkms` + `renderer-software`, rendering straight to KMS/DRM. **No X server, no
-Wayland compositor, no `cage`, no display manager, no GPU driver requirement.** The ISO boots to a
-single Rust binary holding DRM master on tty1.
+Slint on **`backend-linuxkms-noseat`** + `renderer-software`, rendering straight to the display with
+**no seat daemon**. **No X server, no Wayland compositor, no `cage`, no display manager, no GPU driver
+requirement.** The ISO boots to a single Rust binary that owns the panel — as DRM master where the
+machine has a DRM device, and as the only writer of `/dev/fb0` where it does not (§7, ADR-0016).
 
-The 22 packages this needs are `libinput`, `libseat`, `libxkbcommon`, `freetype`, `fontconfig`,
-`fonts-dejavu` and their closure — 21 MiB. That is the irreducible floor for any KMS GUI, not
-Slint's overhead.
+The package floor is `libinput`, `libxkbcommon`, `freetype`, `fontconfig`, `fonts-dejavu` and their
+closure. That is the irreducible floor for any GUI on bare KMS, not Slint's overhead. **The count and
+size are an owed measurement** (`00-overview.md`): the *22 packages / 21 MiB* measured for ADR-0002
+included `libseat1` and `seatd`, which this image no longer ships.
 
-- Unprivileged user `signer`, in `video`, `input`, and **whatever group `seatd.service` names**.
-  This last one was written as `_seatd`, which is the upstream and Arch convention; **Debian has no
-  such group** and runs `ExecStart=seatd -g video`, so on this distribution the seat group and the
-  DRM group are the same one. Following the literal text fails the build with `216/GROUP`. The build
-  hook therefore reads the group out of the unit rather than hardcoding either name, so a Debian
-  that later switches to a dedicated group fails the build instead of shipping an appliance that
-  cannot open a seat.
-- `seatd` (104 KiB) with `LIBSEAT_BACKEND=seatd`.
-- A systemd unit, `ExecStart=/usr/bin/aobs`, `Restart=always`.
+- Unprivileged user `signer`, in **`video` and `input`, and no third group.** Those two are
+  sufficient and this is read from systemd's own udev rules, not from convention: `/dev/fb0` is
+  `SUBSYSTEM=="graphics"` → `root:video`, `/dev/dri/card0` → `root:video`, `/dev/video0` →
+  `root:video`, `/dev/input/event*` → `root:input`.
+- **No `seatd`, no `libseat1`, and `LIBSEAT_BACKEND` is not set.** `libseat` was what stopped
+  `/dev/fb0` from being opened at all: under the `seatd` backend the open is delegated to a daemon
+  that hands back DRM and evdev nodes only. `-noseat` makes it a plain `open(2)`. Slint's own note
+  that `-noseat` requires running "as a user privileged to access all input and DRM/KMS device files"
+  is a statement about file permissions, which group membership satisfies.
+- A systemd unit:
+
+  ```
+  User=signer
+  Type=notify
+  NotifyAccess=all
+  ExecStart=/usr/lib/aobs/launch
+  ExecStartPost=+/usr/lib/aobs/console-detach
+  ExecStopPost=+/usr/lib/aobs/console-attach
+  Restart=always
+  StandardOutput=journal+console
+  ```
+
+  - **`Type=notify` is load-bearing.** The app sends `READY=1` once its window is up. With
+    `Type=simple` the console detach would fire before the app is drawing, and a startup failure
+    would print §9's diagnostic to a console that is already gone.
+  - **`NotifyAccess=all`, never `main`.** `launch` deliberately does not `exec` the binary — the §9
+    fallback text after it is the whole reason the wrapper exists — so the notifying process is never
+    the main PID, and `main` drops the datagram silently until the unit times out.
+  - **The `+` prefix is what keeps the app unprivileged.** systemd runs the two console scripts as
+    root inside a `User=signer` unit; the app never gains a capability. Verified in
+    [#52](https://github.com/allisson/aobs/issues/52).
+  - **`console-detach` unbinds `fbcon`, found by name** in `/sys/class/vtconsole/vtcon*/name`, never
+    by a hardcoded index. `console-attach` rebinds it, so §9 has a channel again after the app stops.
+    Why this exists is §7; that it works is [#52](https://github.com/allisson/aobs/issues/52).
+- **The unit must not be coupled to VT1.** No `TTYPath`, no `StandardInput=tty`, no `TTYReset`, no
+  `TTYVHangup`, and no `TTYVTDisallocate` — see the shell-escape controls below, where the last of
+  those used to live. The app reads no stdin: input is libinput on `/dev/input/*`.
+- **Nothing may be written to the console after the first frame.** `console-detach` writes nothing to
+  the unit's stdout or stderr — both inherit `journal+console`, so a status line from it would land on
+  the panel; anything it needs to say goes to the journal directly. Anything printed in the
+  window between the first paint and the unbind completing **stays on the panel** — Slint does not
+  repaint it away. The readiness line is safe because it is emitted before the first paint and the
+  first frame covers it.
+- **The readiness line is `AOBS_READY version=… build=… display=fbdev|drm`.** It names the tier that
+  won, which is what lets CI's two display rows fail honestly (`05-testing-and-release.md` §6.2), and
+  its absence is what triggers the crash-diagnostic path.
 - `greetd` is rejected: its `initial_session` runs exactly once per boot by design, which is the
   opposite of what a restarting kiosk needs.
 
@@ -56,12 +102,18 @@ Slint's overhead.
 a blank signer with no wallet. That is correct amnesic behaviour: the in-memory wallet is gone and
 the user re-enters the seed. Document it; do not engineer around it.
 
-**No shell escape.** Four controls, all cheap, all required:
+**No shell escape.** Three controls, all cheap, all required, plus one that had to be dropped:
 
 1. `NAutoVTs=0` and `ReserveVT=0` in `logind.conf` — no gettys at all, not even the default.
 2. `kernel.sysrq=0`.
 3. No terminal emulator, no SSH server, no login prompt on any tty.
-4. `TTYVTDisallocate=yes`, `vt.global_cursor_default=0`.
+4. `vt.global_cursor_default=0` on the cmdline.
+
+**`TTYVTDisallocate=yes` is gone, deliberately.** It was listed here as a control, and on this unit it
+**kills the appliance the moment `fbcon` unbinds** — [#52](https://github.com/allisson/aobs/issues/52)
+watched the service die five times in a row behind a black panel because of it. Nothing is lost:
+control 1 leaves no getty to allocate a VT in the first place, so there is no VT holding readable text
+for it to clear. Do not add it back without re-running #52's probe.
 
 Nothing on this image is meant to be driven from a shell, so one is only a mistake surface and it
 advertises a capability the appliance does not offer.
@@ -81,6 +133,12 @@ understood but not used as a control.**
    no `.ko` on the medium to `insmod`, and the QR-only channel gives no way to bring one in.
    **The initramfs must be stripped too** — `initramfs-tools` defaults to `MODULES=most`, which
    bundles net drivers independently of the squashfs. Set `MODULES=dep` or prune the same paths.
+
+   **The same hook deletes `amdgpu.ko`, `xe.ko` and `radeon.ko`, for a different reason** (§7,
+   ADR-0016): with no `firmware-*` package installed none of the three can ever initialise on this
+   image, and each removes the framebuffer aperture *before* failing, destroying a working `efifb`
+   with no way to put it back. Same paths, same `depmod`, same initramfs pruning. `efifb` itself is
+   built in (`CONFIG_FB_EFI=y`) and cannot be pruned this way.
 3. **`install <module> /bin/false` in `/etc/modprobe.d/`.** Blocks `modprobe` and udev autoload but
    not `insmod` on a `.ko` that is still present. A complement to 2, not a substitute.
 4. **`blacklist <module>` is not this.** It suppresses *alias-driven* loading only; an explicit
@@ -91,7 +149,8 @@ No `network-manager` (7.6 MiB saved, worthless as a guarantee on its own).
 **"No network" here means no link layer to any physical interface, not "no network stack".**
 Loopback and AF_UNIX stay intact deliberately.
 
-Build check: `lsinitramfs` shows no `drivers/net` entries.
+Build check: `lsinitramfs` shows no `drivers/net` entries, and neither the module tree nor the
+initramfs contains `amdgpu.ko`, `xe.ko` or `radeon.ko` (`05-testing-and-release.md` §6.1).
 
 ## 4. No swap, no persistence, no crash dumps
 
@@ -147,7 +206,11 @@ quiet loglevel=3 panic=0 nopersistence nohibernate init_on_free=1 \
 random.trust_cpu=off vt.global_cursor_default=0 toram
 ```
 
-- `quiet loglevel=3` — boot messages do not compete for the panel.
+- `quiet loglevel=3` — boot messages do not compete for the panel. On the fbdev tier this is also a
+  narrowing, not just tidiness: everything below CRIT is gone, so only an oops, a panic, an NMI or an
+  MCE can reach the panel at all. **No `loglevel` value can suppress those** — the NMI lines are
+  `pr_emerg`, and suppressing EMERG would suppress the panic text §9 depends on. Hence §2's console
+  detach.
 - `panic=0` — a kernel panic **halts with the message visible** instead of rebooting it away.
 - `random.trust_cpu=off` — see §8.
 - `toram` — see §7.
@@ -156,28 +219,51 @@ random.trust_cpu=off vt.global_cursor_default=0 toram
 
 **UEFI amd64 only. `toram` by default. 2 GiB minimum, 4 GiB recommended (provisional).**
 
-### UEFI is required because it deletes the worst failure rather than handling it
-
-> **Falsified by the walking skeleton. Do not build on this section until
-> [#40](https://github.com/allisson/aobs/issues/40) resolves.** Debian 13 sets neither
-> `CONFIG_DRM_SIMPLEDRM` nor `CONFIG_SYSFB_SIMPLEFB`, ships no `simpledrm.ko`, and lets `efifb`
-> claim the framebuffer. The guaranteed display path below **does not exist on the distribution
-> this spec ships**, which inverts the paragraph's conclusion: the native KMS driver is the
-> requirement and there is no fallback. §9 below inherits the same error.
+### Two display tiers, and that is what deletes the worst failure
 
 The worst case in this area is "no usable display", because reporting it requires the thing that
-failed. On UEFI the EFI stub hands the kernel a `simple-framebuffer`, and **`simpledrm` binds it as
-a full KMS device with dumb buffers** — `drivers/gpu/drm/tiny/simpledrm.c` declares
-`DRM_GEM_SHMEM_DRIVER_OPS` with `DRIVER_ATOMIC | DRIVER_GEM | DRIVER_MODESET`, which is exactly what
-`backend-linuxkms` + `renderer-software` needs. **Every UEFI machine therefore has a guaranteed
-display path with no GPU driver at all**, and `i915`/`amdgpu`/`nouveau` become an optimisation.
+failed. **`simpledrm` is not what deletes it** — Debian 13 sets neither `CONFIG_DRM_SIMPLEDRM` nor
+`CONFIG_SYSFB_SIMPLEFB` and ships no `simpledrm.ko`, so on this image `sysfb` registers an
+`efi-framebuffer` for `efifb` and no `/dev/dri` node is ever created on a machine with no native KMS
+driver ([#40](https://github.com/allisson/aobs/issues/40), which falsified the original reasoning).
+**Two tiers delete it instead** (ADR-0016):
 
-Legacy BIOS has no equivalent: without a native KMS driver you get `vesafb`-class fbdev, which is
-not DRM and which Slint cannot render to. The user would see the GRUB menu and then unexplainable
-blackness.
+| The machine has | The appliance draws through | Protection from console text |
+|---|---|---|
+| A DRM device (`i915`, `nouveau`, `virtio-gpu`, `ast`, …) | a DRM dumb buffer | the kernel's own — a DRM master is never displaced by `fbcon`, and the console is restored on `lastclose` |
+| No DRM device | `/dev/fb0`, provided by `efifb` from the EFI stub's framebuffer | `fbcon` detached for exactly the interval the app is drawing (§2) |
 
-**Named cost, accepted:** machines older than roughly 2012 are excluded — real, since repurposed old
-laptops are this product's natural hardware.
+Slint chooses between them at runtime, per machine, in `display/swdisplay.rs`: `DumbBufferDisplay`
+first, `.or_else` into `LinuxFBDisplay`. **So the second tier reaches only the machines that would
+otherwise be black**, and nothing already covered changes.
+
+Four consequences, each a named cost rather than a hope:
+
+- **`amdgpu`, `xe` and `radeon` are deleted from the image** (§3). Firmware-less they can never
+  initialise here, and each takes the framebuffer aperture before failing. Deleting them turns modern
+  AMD, Radeon HD 2000+, Lunar Lake and Battlemage from *unreportable blackness* into *draws*.
+- **No vsync on the fbdev tier**, by construction in both Slint and `efifb`. It shows on moving
+  content, which is the camera preview only; QR decode runs on the V4L2 frame, not the presented
+  buffer, so it costs appearance and never correctness.
+- **A framebuffer format outside `LinuxFBDisplay`'s five accepted arms** reaches `AOBS-E02` on a live
+  console. `efifb` under OVMF reports 32 bpp with r/g/b at 16/8/0 and alpha at 24, which negotiates to
+  `Argb8888`; real firmware is covered by the per-release tested-hardware list
+  (`05-testing-and-release.md` §6.3), not by an assumption here.
+- **Accepted and unquantified:** a driver we *keep* — `i915`, `nouveau`, `ast`, `mgag200`, `gma500`,
+  `udl`, `hyperv` — that removes the aperture and then fails for a reason unrelated to firmware.
+  `gma500`'s legacy modesetting is the most likely instance. No cheap control covers it.
+
+**UEFI amd64 only still, but for a smaller reason.** `vesafb` is a framebuffer too, so legacy BIOS
+would now have a display path; what it would also have is a second GRUB configuration, a second CI
+matrix, and a pixel format nobody has checked against those five arms. **UEFI-only stands on
+build-and-test surface, not on "no display path exists".**
+
+**Named cost, accepted:** machines older than roughly 2012 are excluded. Still real, and now
+unnecessary rather than structural — which is the honest way to state it.
+
+**The compatibility statement is a floor, not a hardware list:** *UEFI amd64, any machine whose
+firmware hands over a framebuffer.* The empirical claim belongs to the tested-hardware list published
+with each release.
 
 No CPU feature is required. `random.trust_cpu=off` already made RDRAND/RDSEED a performance question
 rather than a correctness one.
@@ -217,7 +303,7 @@ since QR decoding needs luminance only.
 |---|---|
 | Camera | **Degraded but useful.** Create a wallet, see the identity screen, export the watch-only QR, export the encrypted backup QR. Lost: signing and receive-address verification, both of which need a scan. Those actions are shown **visibly unavailable with a stated reason** — not hidden, not an error. |
 | Keyboard | **Fatal but reportable.** The GUI is up, so there is a screen to say it on. It names the problem and keeps polling, so hot-plug recovers without a reboot. |
-| Display path | Structurally impossible after UEFI-only. |
+| Display path | **Reportable, not impossible.** No firmware framebuffer, or one in a format the renderer cannot negotiate, halts on `AOBS-E02` with §9's diagnostic on a live console. The population that used to fail *silently* — a UEFI machine with no usable KMS driver — now draws through the fbdev tier. |
 
 V4L2 devices are enumerated **at the point of use, not at startup**, so plugging a camera in later
 simply works. No udev monitoring, no daemon, no reboot.
@@ -254,12 +340,18 @@ Verification for the QA checklist: `dmesg | grep -E 'crng init done|RDRAND is no
 
 ## 9. Reporting a failure the GUI cannot report itself
 
-Because `simpledrm` is guaranteed, the kernel console always exists — there is always a channel.
+**The kernel console always exists, so there is always a channel** — provided by `efifb` on a machine
+with no DRM driver and by the native driver's `fbcon` where there is one. Neither is `simpledrm`, which
+this image does not have (§7). Verified against the built ISO: with no DRM device the appliance prints
+the block below and halts with it visible on the panel.
 
-> The premise is wrong ([#40](https://github.com/allisson/aobs/issues/40), §7 above), but **the
-> conclusion survives**: `efifb` provides a kernel console on exactly the machines `simpledrm` was
-> supposed to cover, so this section's channel exists either way. Verified against the built ISO —
-> the appliance finds no DRM device, prints the block below, and halts with it visible.
+Two things keep that true under the two-tier path:
+
+- `ExecStartPost` runs only after a **successful** start, so a startup failure never detaches the
+  console — the diagnostic always has somewhere to go. `ExecStopPost` rebinds it for the *app ran, then
+  died* case, where systemd restarts the app anyway.
+- `panic=0` and `StandardOutput=journal+console` are what put the text on the panel; `/dev/console`
+  needs no `TTYPath`, which is why §2 can drop the unit's VT1 coupling without losing this channel.
 
 The app is launched by a wrapper that, on any startup failure, prints a **human-written diagnostic
 block** and halts:

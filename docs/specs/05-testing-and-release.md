@@ -136,6 +136,9 @@ catches this is **provenance**, not statistics.
 - `aobs-core/Cargo.toml` names neither `slint` nor `v4l`.
 - The release profile sets **`panic = "unwind"`**.
 - `lsinitramfs` on the built image shows no `drivers/net` entries.
+- **No `amdgpu.ko`, `xe.ko` or `radeon.ko` anywhere** — neither in the squashfs module tree nor in the
+  initramfs. Each of them removes the framebuffer aperture before failing firmware-less, so on this
+  image their presence is what turns a working `efifb` into blackness (`01-boot-layer.md` §3, §7).
 
 ### 6.2 The QEMU harness
 
@@ -143,11 +146,16 @@ Boots the **built ISO**. One machine-readable readiness line printed to the cons
 no screenshot diffing. That line doubles as the marker whose absence triggers the crash-diagnostic
 path.
 
+**The readiness line carries the display tier**: `AOBS_READY version=… build=… display=fbdev|drm`
+(`01-boot-layer.md` §2). Without the tier neither display row below can fail honestly — a green row
+would prove only that *something* drew.
+
 | Row | Proves |
 |---|---|
 | **Entropy provenance** — trace the `getrandom` syscall during a seed generation and assert the wallet's entropy bytes are **byte-identical** to what the traced syscall returned; assert `crng init done` in `dmesg`; assert **zero opens of `/dev/urandom`**. | The linkage, not the intention. |
-| OVMF + virtio-gpu | The native KMS path. |
-| OVMF + `ramfb`, no GPU | **`simpledrm` specifically** — the fallback the entire display story leans on. **This row cannot pass as written**: Debian builds no `simpledrm`, so there is no fallback to assert ([#40](https://github.com/allisson/aobs/issues/40)). Until that resolves it asserts the opposite — that a machine with no KMS driver reaches `AOBS-E02` and halts with the §9 diagnostic visible, rather than going dark. |
+| OVMF + virtio-gpu | The DRM tier. Asserts `display=drm`. |
+| OVMF + `ramfb`, no GPU | **The fbdev tier** — the fallback the display story now leans on (`01-boot-layer.md` §7, ADR-0016). Asserts `display=fbdev` and a drawn frame. This is the configuration that used to be specified as `simpledrm` and could never pass: Debian builds no `simpledrm`, so `efifb` is what serves this machine, and the assertion is that it **draws**, not that it reports `AOBS-E02`. |
+| **`fbcon` regression** — inject two NMIs on the `ramfb` machine after `AOBS_READY` and assert the panel is **byte-identical** across them. | That the console detach still holds. This is [#52](https://github.com/allisson/aobs/issues/52)'s probe as a standing row, and it must count `AOBS_READY` lines and refuse to compare anything unless the appliance started exactly once — a looping service must not pass for a clean run. |
 | RAM at and below the floor | The low-memory GRUB entry degrades rather than bricks. |
 | No camera | The degraded-but-useful path. |
 | No keyboard | The "no input" screen appears. |
@@ -159,6 +167,10 @@ can silently re-resolve. That is what leaves the harness exactly one site to tra
 
 - A real UVC camera (QEMU has no synthetic UVC device).
 - Real drivers on real silicon: one Intel iGPU, one AMD, one NVIDIA-on-nouveau.
+- **The fbdev tier on real firmware**, on at least one machine with no native KMS driver: that
+  `efifb`'s reported format negotiates, and that the console detach behaves as it did under QEMU. Both
+  were verified against `ramfb` only, where the vtcon index and the pixel format came from that
+  kernel and that firmware (`01-boot-layer.md` §7).
 - Physical keyboards through libinput.
 
 The camera being untestable in CI costs less than it appears, because of where the seam sits: core
@@ -176,6 +188,7 @@ become measured. None of them blocks implementation.
 | Measure | Fallback if it fails |
 |---|---|
 | Entropy readiness delay under `random.trust_cpu=off` (derived: 1–16 s) | None needed; it changes copy, not design. |
+| Package count and installed size of the GUI floor, with `seatd` and `libseat1` gone (stale: 22 packages / 21 MiB, measured when both were present) | None; it is a claim in ADR-0002 and `01-boot-layer.md` §2, not a design input. |
 | RAM floor against the built image (provisional 2 GiB / 4 GiB) | Publish the real number. |
 | Argon2id wall clock on low-end amd64 (derived ~1.2–2.5 s) | None; the wait screen is already indeterminate. |
 | 8,000-derivation address search | Narrow the index window, and say what was searched. |

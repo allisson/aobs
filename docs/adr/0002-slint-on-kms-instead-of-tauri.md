@@ -38,8 +38,14 @@ WebKit's multi-process IPC is `socketpair(AF_UNIX)`, a process cost rather than 
 
 ## Decision
 
-**Slint on `backend-linuxkms` + `renderer-software`**, rendering straight to KMS/DRM. No X server,
-no Wayland compositor, no display manager, no GPU driver requirement.
+**Slint on `backend-linuxkms-noseat` + `renderer-software`**, rendering straight to the display with
+no seat daemon. No X server, no Wayland compositor, no display manager, no GPU driver requirement.
+
+> The feature was `backend-linuxkms` when this was decided. **`-noseat` since
+> [ADR-0016](./0016-two-tier-display-path.md)**, which needs `/dev/fb0` on machines with no DRM device
+> — a node `libseat` never hands back. `seatd` and `libseat1` leave the image with it, so the *22
+> packages / 21 MiB* row above is stale in our favour and is now an owed measurement
+> (`00-overview.md`).
 
 **QR decoding lives in Rust**: capture with the `v4l` crate (raw V4L2 ioctls, no `libv4l` on the
 image), decode with `rqrr` via `PreparedImage::prepare_from_greyscale`, fed directly from the
@@ -47,7 +53,8 @@ frame's luma plane.
 
 ## Consequences
 
-- The ISO boots to a single Rust binary holding DRM master on tty1. The boot layer gets
+- The ISO boots to a single Rust binary that owns the panel — DRM master where the machine has a DRM
+  device, sole writer of `/dev/fb0` where it does not (ADR-0016). The boot layer gets
   substantially simpler.
 - **The app's entire content-parsing surface becomes the PSBT parser and the QR decoder**, both pure
   Rust and both ours to fuzz. Slint's image decoders sit behind an optional cargo feature we do not
