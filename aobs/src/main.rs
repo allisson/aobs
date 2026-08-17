@@ -12,6 +12,7 @@ mod buildinfo;
 mod console;
 mod entropy;
 mod fail;
+mod notify;
 
 use fail::Failure;
 
@@ -66,6 +67,17 @@ fn run() -> Result<(), Failure> {
             buildinfo::VERSION,
             buildinfo::build_date(),
         ));
+    });
+
+    // PROTOTYPE (#52): readiness for `Type=notify`, which is what makes the `fbcon`
+    // detach land on a *drawn* screen rather than at `fork(2)` — see `notify`. The delay
+    // is the crude part and is deliberate: Slint offers no "first frame presented"
+    // callback, and the property under test is what an unbind does to pixels that are
+    // already on the panel. Three seconds is far longer than a first software-rendered
+    // frame takes, even under TCG. A shipped version would hook the render instead.
+    slint::Timer::single_shot(std::time::Duration::from_secs(3), || {
+        console::emit("AOBS_PROTO_NOTIFY_READY");
+        notify::ready();
     });
 
     ui.run().map_err(|_| Failure::DisplayUnavailable)?;

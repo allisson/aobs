@@ -1,0 +1,27 @@
+#!/bin/sh
+# PROTOTYPE (#52) — give the console back when the app stops.
+#
+# The `lastclose` half of console-detach. 01-boot-layer.md §9 wants the kernel console to
+# exist exactly when the GUI does not, so the channel returns the moment the appliance is
+# no longer holding the panel. Run as `ExecStopPost=+`.
+set -u
+
+say() {
+    echo "$1"
+    [ -w /dev/ttyS0 ] && echo "$1" >/dev/ttyS0
+}
+
+for vtcon in /sys/class/vtconsole/vtcon*; do
+    [ -r "${vtcon}/name" ] || continue
+    case "$(cat "${vtcon}/name")" in
+        *"frame buffer device"*) ;;
+        *) continue ;;
+    esac
+    if echo 1 >"${vtcon}/bind" 2>/dev/null; then
+        say "AOBS_PROTO_ATTACH_OK ${vtcon}"
+    else
+        say "AOBS_PROTO_ATTACH_FAIL ${vtcon}"
+    fi
+done
+
+exit 0

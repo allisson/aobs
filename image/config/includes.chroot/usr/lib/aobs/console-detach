@@ -1,0 +1,47 @@
+#!/bin/sh
+# PROTOTYPE (#52) — detach fbcon from the framebuffer while the app is drawing.
+#
+# #48 photographed two pr_emerg lines sitting on top of the UI, permanently, because on
+# the fbdev tier there is one framebuffer and no owner: Slint and fbcon write to the same
+# memory. #51 showed the DRM tier is immune because the console client owns a *different*
+# buffer and the helper "never steals the display from an active drm master", restoring
+# the console on lastclose. This reproduces that semantic with sysfs: console detached
+# exactly while the app draws, reattached by console-attach when it stops (01-boot-layer.md
+# §9 needs the channel precisely then).
+#
+# Run by systemd as `ExecStartPost=+`, i.e. as root inside a `User=signer` unit. The app
+# never gains a privilege.
+set -u
+
+# The markers go to the serial port explicitly. This script's whole job is to take the
+# console away, so writing progress to the console is self-defeating.
+say() {
+    echo "$1"
+    [ -w /dev/ttyS0 ] && echo "$1" >/dev/ttyS0
+}
+
+say "AOBS_PROTO_DETACH_UID=$(id -u)"
+
+found=0
+for vtcon in /sys/class/vtconsole/vtcon*; do
+    [ -r "${vtcon}/name" ] || continue
+    name="$(cat "${vtcon}/name")"
+    # The index is not fixed — fbcon is found by name, never by a hardcoded vtcon1.
+    case "${name}" in
+        *"frame buffer device"*) ;;
+        *) continue ;;
+    esac
+    found=1
+    if echo 0 >"${vtcon}/bind" 2>/dev/null; then
+        say "AOBS_PROTO_DETACH_OK ${vtcon} (${name}) bind=$(cat "${vtcon}/bind" 2>/dev/null)"
+    else
+        say "AOBS_PROTO_DETACH_FAIL ${vtcon} (${name})"
+    fi
+done
+
+[ "${found}" -eq 1 ] || say "AOBS_PROTO_DETACH_NOFBCON"
+
+# Always succeed. A failure here must not tear down the appliance: the probe needs the
+# app running to observe what happened, and in production a console that would not detach
+# is the accepted case, not a reason to refuse to sign.
+exit 0

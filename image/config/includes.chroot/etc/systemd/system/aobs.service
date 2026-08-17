@@ -20,7 +20,19 @@ Conflicts=getty@tty1.service
 After=getty@tty1.service
 
 [Service]
-Type=simple
+# PROTOTYPE (#52): Type=notify, not simple. `ExecStartPost=+` fires when systemd calls
+# the service started, and under `simple` that is at fork(2) — before there are pixels.
+# The detach must land on a drawn screen, because the question under test is what
+# unbinding fbcon does to a framebuffer the app has already painted and, per #48, will
+# not repaint. `aobs::notify` sends READY=1 three seconds into the event loop.
+Type=notify
+# `all`, not `main`: /usr/lib/aobs/launch does not exec the binary — it runs it as a
+# child so that the §9 fallback text after it is reachable — so the notifying process is
+# never the main PID. `main` would silently drop the datagram and the unit would time out.
+NotifyAccess=all
+# Under TCG the entropy wait alone was 7.4 s in #48 and the whole boot 55 s. The default
+# 90 s start timeout is close enough to that to be a flake; this is a probe, not a gate.
+TimeoutStartSec=300
 User=signer
 Group=signer
 # video for DRM master, input for libinput. §2 also says `_seatd`, but Debian has no such
@@ -40,18 +52,31 @@ Environment=SLINT_BACKEND=linuxkms
 # §2 names /usr/bin/aobs; §9 names a wrapper. The wrapper execs it and covers the one
 # case the binary cannot report on — never having started.
 ExecStart=/usr/lib/aobs/launch
+# PROTOTYPE (#52): the `+` prefix runs these as root inside this `User=signer` unit, so
+# the console toggling is systemd's privilege and never the app's — §2's unprivileged
+# rule holds. Detach once the app is drawing, reattach when it stops, which is the
+# `lastclose` semantic #51 found the DRM tier gets from the kernel for free.
+ExecStartPost=+/usr/lib/aobs/console-detach
+ExecStopPost=+/usr/lib/aobs/console-attach
 Restart=always
 RestartSec=1s
 
 # The kernel console is the one channel that survives a GUI that never came up (§9), and
 # simpledrm guarantees it exists.
-TTYPath=/dev/tty1
-StandardInput=tty
+# PROTOTYPE (#52), second cycle. The first cycle detached fbcon successfully and the
+# service died on the spot, five times, leaving a black panel. The four settings removed
+# here are the suspects: they bind this service to VT1, and a hangup on that tty kills the
+# process group while TTYVTDisallocate=yes clears the VT on stop — which would explain
+# both the death and the blank screen without the unbind being destructive at all.
+#
+#   TTYPath=/dev/tty1        StandardInput=tty
+#   TTYReset=yes             TTYVHangup=yes        TTYVTDisallocate=yes
+#
+# Nothing is lost by dropping them here: the app reads no stdin (input is libinput on
+# /dev/input/*), and journal+console keeps §9's channel, which goes to /dev/console and
+# needs no TTYPath.
 StandardOutput=journal+console
 StandardError=journal+console
-TTYReset=yes
-TTYVHangup=yes
-TTYVTDisallocate=yes
 
 [Install]
 WantedBy=multi-user.target

@@ -28,6 +28,11 @@ target
 # ci/build-binary.sh stages the compiled binary here for live-build to pick up.
 /image/config/includes.chroot/usr/bin/aobs
 
+# Panel captures come off the QEMU monitor as PPM, 1.4 MiB apiece. The PNGs are committed
+# and the assertion is the sha256 recorded in the prototype's write-up, so the raw files
+# are working artefacts rather than evidence.
+docs/prototypes/**/*.ppm
+
 .DS_Store
 
 # `lb config` GENERATES most of config/ from auto/config, and 01-boot-layer.md §1 records
