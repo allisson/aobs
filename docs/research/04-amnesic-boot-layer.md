@@ -355,7 +355,14 @@ approach — shipped 0.7 through 2.12 — because of *"severe usability and reli
 problems"*, and removed it in Tails 3.0 (same page). Do not resurrect it.
 
 Recommendation for v1: **take `init_on_free=1` and the overlayfs-free-on-shutdown idea; do
-not port Tails' `memlockd` + `udev-watchdog` + initramfs-shutdown machinery.** The map's
+not port Tails' `memlockd` + `udev-watchdog` + initramfs-shutdown machinery.**
+
+> **Half of this recommendation was reversed by
+> [#62](https://github.com/allisson/aobs/issues/62); the finding above is left as written.** The
+> overlayfs-free-on-shutdown half cannot stand without the machinery the same sentence declines —
+> which is what the paragraph above this one already says, and what nobody noticed when the
+> recommendation was folded into the spec. `01-boot-layer.md` §5 now claims `init_on_free=1` alone,
+> and rests on nothing secret being written to a filesystem in the first place. The map's
 threat model already excludes "DMA and cold-boot attacks by a present adversary", and that
 machinery exists almost entirely to shorten the window against a present adversary. Revisit
 only if the threat model changes.
@@ -636,6 +643,6 @@ a user has typed a passphrase the pool has had substantial additional input rega
 | Kiosk | `cage` (Wayland) + `seatd` + a systemd `Restart=always` unit as an unprivileged user. No DM, no greeter, no XWayland, no getty (`NAutoVTs=0`, `ReserveVT=0`), `kernel.sysrq=0`. Crash → clean restart with no wallet. |
 | No network | Primary: delete `drivers/net`, `drivers/bluetooth` and net protocol modules from both squashfs *and* initramfs; ship no firmware. Secondary: `install … /bin/false`. Never rely on `blacklist` or on `ip link down`. `CONFIG_NET=n` is rejected — it kills AF_UNIX. |
 | No swap / persistence | live-boot defaults are already amnesic; just never pass `persistence` or `swap`. Add `nopersistence`, `nohibernate`, neuter `swapon`, mask `swap.target`, `Storage=none` + `ProcessSizeMax=0` for coredumps, no `kdump-tools`, no `crashkernel=`, no udisks2/gvfs. |
-| RAM wipe | `init_on_free=1` plus freeing the overlayfs upper dir on shutdown. Skip Tails' memlockd/udev-watchdog/initramfs-shutdown machinery. It is a clean-shutdown guarantee only — it does nothing after a hard power cut, does not cover all kernel memory, and does not replace in-app zeroization. |
+| RAM wipe | `init_on_free=1` plus freeing the overlayfs upper dir on shutdown — **the second half reversed by [#62](https://github.com/allisson/aobs/issues/62); see the note above**. Skip Tails' memlockd/udev-watchdog/initramfs-shutdown machinery. It is a clean-shutdown guarantee only — it does nothing after a hard power cut, does not cover all kernel memory, and does not replace in-app zeroization. |
 | Camera | USB UVC only, `uvcvideo` already in `linux-image`, 0 extra packages. Skip `v4l-utils` in the release image. MC-centric (IPU6) cameras are out of scope for v1; say so in the hardware floor. |
 | Entropy | `getrandom(2)` with flags=0, never `/dev/urandom`, never a seed file. CSPRNG is ready before userspace on any RDRAND-capable amd64. Open recommendation: `random.trust_cpu=off` so the CPU RNG is mixed in but not trusted for initialisation; verify the resulting boot delay on hardware. |

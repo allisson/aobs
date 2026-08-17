@@ -24,7 +24,7 @@ The v1 implementation spec is written and merged — `docs/specs/` (seven files,
 
 **Research findings** live in `docs/research/`, one file per resolved ticket, every claim carrying a source URL. Read the relevant file before reopening a question it already answers.
 
-**Deliberately unfinished:** nine owed measurements and five verification obligations, listed in `docs/specs/00-overview.md` under *What is still owed*. Each is a number that was derived rather than measured, or a claim read from a specification rather than checked against the dependency. None blocks implementation; all block the release gate.
+**Deliberately unfinished:** eleven owed measurements and six verification obligations, listed in `docs/specs/00-overview.md` under *What is still owed*. Each is a number that was derived rather than measured, or a claim read from a specification rather than checked against the dependency. None blocks implementation; all block the release gate.
 
 ## Settled — do not silently revisit
 
