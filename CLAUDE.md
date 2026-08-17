@@ -4,7 +4,7 @@ A Bitcoin signing appliance shipped as a bootable Debian LiveCD (`bitcoin-signer
 
 ## Status: the spec is closed; implementation has not started
 
-The v1 implementation spec is written and merged — `docs/specs/` (six files), `docs/adr/` (fifteen ADRs) and `CONTEXT.md`, assembled from 27 closed decision tickets. **There is still no product code**: the next commit that adds a crate is the first one.
+The v1 implementation spec is written and merged — `docs/specs/` (six files), `docs/adr/` (sixteen ADRs, one of them superseded) and `CONTEXT.md`, assembled from 27 closed decision tickets plus the display-path map ([#42](https://github.com/allisson/aobs/issues/42)). **There is still no product code**: the next commit that adds a crate is the first one.
 
 **`docs/specs/` is the authority — build from it.** The rule it states about itself governs here too: *if you find yourself deciding something the spec does not answer, that is a ticket, not a gap in the prose to fill in with judgement. Say so and stop.* The exception is the routine mechanics of Rust — module names, error enum shapes, function signatures — which are yours.
 
@@ -12,13 +12,14 @@ The v1 implementation spec is written and merged — `docs/specs/` (six files), 
 
 **Research findings** live in `docs/research/`, one file per resolved ticket, every claim carrying a source URL. Read the relevant file before reopening a question it already answers.
 
-**Deliberately unfinished:** eight owed measurements and three verification obligations, listed in `docs/specs/00-overview.md` under *What is still owed*. Each is a number that was derived rather than measured, or a claim read from a specification rather than checked against the dependency. None blocks implementation; all block the release gate.
+**Deliberately unfinished:** nine owed measurements and five verification obligations, listed in `docs/specs/00-overview.md` under *What is still owed*. Each is a number that was derived rather than measured, or a claim read from a specification rather than checked against the dependency. None blocks implementation; all block the release gate.
 
 ## Settled — do not silently revisit
 
 These came out of grilling and research. Reopening one is a deliberate act with a reason, not a drive-by.
 
-- **Slint, not Tauri.** Tauri was the original premise and lost on measurement: 268 packages / 650 MiB against Slint's 22 / 21 MiB, and `getUserMedia` cannot work in a stock Tauri app on Linux. The UI is Slint on `backend-linuxkms` + `renderer-software`, rendering to KMS/DRM with no X server and no compositor. See `docs/research/05-tauri-viability.md`. The licence question this raised is settled: **the repo is GPL-3.0-only**, which is what Slint's GPL option requires and what removes an unresolvable ambiguity in its royalty-free licence. See `docs/adr/0001-gpl-3-0-for-the-slint-ui-toolkit.md`.
+- **Slint, not Tauri.** Tauri was the original premise and lost on measurement: 268 packages / 650 MiB against Slint's 22 / 21 MiB, and `getUserMedia` cannot work in a stock Tauri app on Linux. The UI is Slint on `backend-linuxkms-noseat` + `renderer-software`, with no X server, no compositor and no seat daemon. See `docs/research/05-tauri-viability.md`. (The *22 / 21 MiB* is now stale in our favour and owed as a measurement — `seatd` and `libseat1` left with ADR-0016.) The licence question this raised is settled: **the repo is GPL-3.0-only**, which is what Slint's GPL option requires and what removes an unresolvable ambiguity in its royalty-free licence. See `docs/adr/0001-gpl-3-0-for-the-slint-ui-toolkit.md`.
+- **The display path is two tiers**, chosen at runtime by Slint's own `or_else`: a DRM dumb buffer where the machine has a DRM device, `/dev/fb0` via `efifb` where it does not. `simpledrm` — ADR-0009's mechanism — **does not exist on Debian**, which is what falsified it. `amdgpu`, `xe` and `radeon` are deleted from the image because firmware-less they take the framebuffer aperture and then fail. UEFI-only stands, but on build-and-test surface rather than on "no display path exists". See `docs/adr/0016-two-tier-display-path.md`; ADR-0009 is kept as a superseded record because *how* it was wrong is the standing rule's whole point.
 - **Air-gapped by construction.** The appliance has no network stack, no cloud, no sync, no broadcasting, no telemetry, no update check. Every feature is designed to work with the machine's networking physically absent.
 - **QR is the only data channel**, both directions, using BC-UR / UR2 (`ur:crypto-psbt`). The physical keyboard handles seed import and passphrase entry. QR decoding happens in Rust (`v4l` → `rqrr`), never in a webview.
 - **Single-sig only** across BIP44/49/84/86, mainnet plus testnet/signet.
