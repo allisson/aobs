@@ -114,6 +114,7 @@ Structural, from `02-core.md` §7:
 | `AOBS-R05` | An input whose script type is outside BIP44/49/84/86 single-sig. |
 | `AOBS-R06` | No input re-derives to our own key material. **Four copy variants, one code** — the passphrase, account 0, the loaded network, and the coin-type mismatch (`02-core.md` §7). |
 | `AOBS-R07` | An output we cannot render as an address. |
+| `AOBS-R15` | More than six outputs, payment and change counted together — the review panel is non-scrolling and holds six rows in the minimum canvas ([#58](https://github.com/allisson/aobs/issues/58)). Numbered after `R14` rather than beside the other structural refusals, because the registry is sequential and never renumbered for tidiness. |
 
 From the derivation check:
 
@@ -137,9 +138,9 @@ From backup restore (`02-core.md` §11, `04-screens.md` §10):
 | `AOBS-R13` | A malformed backup header: reserved flag bits set, an `entropy_len` outside {16, 20, 24, 28, 32}, or a total length that disagrees with it. |
 | `AOBS-R14` | The Poly1305 tag does not authenticate — a wrong password, or a damaged file, and the copy must not claim to know which. |
 
-[#58](https://github.com/allisson/aobs/issues/58)'s output-count refusal takes the next free number when
-it lands. It is not pre-assigned here: a reserved code is a promise made before the decision it
-describes.
+#58's output-count refusal landed as `AOBS-R15`, above — the next free number at the time, listed with
+the structural refusals it belongs to rather than renumbered into their block. The sequence records the
+order decisions were made; the table's grouping is for reading.
 
 ## 7. The registry is enforced by tests, not by discipline
 

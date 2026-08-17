@@ -301,6 +301,17 @@ a check are hostile until proven otherwise — discard, zeroize, no retry with t
 | An input whose script type is outside BIP44/49/84/86 single-sig | We would be signing something we do not model. |
 | An input that does not re-derive to our own key material | Foreign inputs mean the displayed cost is not the user's alone. |
 | An output we cannot render as an address | The user would be approving hex. |
+| **More than six outputs**, payment and change counted together | The review panel is non-scrolling and holds six rows in the minimum canvas (`04-screens.md` §11.2). A seventh output could only be shown by scrolling, clipping or summarising it, and all three mean approving what was not seen. |
+
+**The six-output cap's two rejected alternatives, both of which the field prefers.** Coldcard caps
+*visible* outputs at ten and then prints *"plus N smaller output(s), not shown here, which total: X"* —
+under a comment reading *"we do expect all users to verify these outputs completely; do not hide
+details"* (`docs/research/03-prior-art-survey.md`). Summarising the remainder is approving the unseen,
+which is the compromise our larger screen exists to buy us out of. **Paging** the output list is worse in
+a subtler way: it refuses nothing, and a 200-output batch becomes 200 pages nobody walks — a limit that
+pretends not to be one, where a refusal is a limit that admits it. **Named cost:** a batched payout above
+six outputs cannot be signed here, and the user splits it. That workaround is theirs, it is cheap, and it
+costs no security.
 
 **The `non_witness_utxo` rule is stricter than Krux and that is the point.** Krux refuses a *legacy*
 input without it; we require the full previous transaction for **every non-taproot input**, deleting
@@ -312,7 +323,12 @@ scriptPubKeys, so a lie invalidates the signature. **Accepted cost: a coordinato
 **Three checks deliberately not added:**
 
 - **No absurd-input-count cap.** The 64 KiB transport bound plus mandatory `non_witness_utxo`
-  already caps inputs at a couple of hundred, transitively.
+  already caps inputs at a couple of hundred, transitively. **The asymmetry with the six-output cap is
+  the display model, not the byte count:** `04-screens.md` §11.2 shows inputs *aggregated* — count and
+  total, never a row each — while every output is enumerated on its own row. Inputs cost no rows.
+  Outputs cost one each, and an output is only ~32 bytes (8 value, 1 length, 22 script, 1 map
+  separator), so 64 KiB admits on the order of two thousand of them. The bound has to come from the
+  panel because nothing else bounds it.
 - **No mixed-input-script-type refusal** (Krux hard-refuses this). Mixing P2WPKH and P2TR inputs from
   one seed is legitimate, and the refusal is a *proxy* for per-input re-derivation — which we do
   directly.
