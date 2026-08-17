@@ -106,6 +106,9 @@ smaller claim than ADR-0009's, and stating the smaller one is the point.
   deletion.
 - **Handled:** a machine whose EFI framebuffer format falls outside `LinuxFBDisplay`'s five accepted
   arms reaches `AOBS-E02` on a live console — a reported failure, not blackness.
+  *(Re-coded to `AOBS-E05` by [#56](https://github.com/allisson/aobs/issues/56): this condition and
+  "no framebuffer at all" were sharing one code and cannot, because the diagnostic's third sentence —
+  what to do — differs. `06-codes.md` §5 is the registry; the sentence above is left as written.)*
 - **Accepted, and named:** a driver we *keep* — `i915`, `nouveau`, `ast`, `mgag200`, `gma500`, `udl`,
   `hyperv` — that removes the aperture and then fails for a reason unrelated to firmware. #47 traced
   the firmware failures only; **this class is unquantified**, no cheap control covers it, and

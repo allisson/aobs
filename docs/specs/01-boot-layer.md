@@ -264,7 +264,7 @@ Four consequences, each a named cost rather than a hope:
 - **No vsync on the fbdev tier**, by construction in both Slint and `efifb`. It shows on moving
   content, which is the camera preview only; QR decode runs on the V4L2 frame, not the presented
   buffer, so it costs appearance and never correctness.
-- **A framebuffer format outside `LinuxFBDisplay`'s five accepted arms** reaches `AOBS-E02` on a live
+- **A framebuffer format outside `LinuxFBDisplay`'s five accepted arms** reaches `AOBS-E05` on a live
   console. `efifb` under OVMF reports 32 bpp with r/g/b at 16/8/0 and alpha at 24, which negotiates to
   `Argb8888`; real firmware is covered by the per-release tested-hardware list
   (`05-testing-and-release.md` §6.3), not by an assumption here.
@@ -333,7 +333,7 @@ since QR decoding needs luminance only.
 |---|---|
 | Camera | **Degraded but useful.** Create a wallet, see the identity screen, export the watch-only QR, export the encrypted backup QR. Lost: signing and receive-address verification, both of which need a scan. Those actions are shown **visibly unavailable with a stated reason** — not hidden, not an error. |
 | Keyboard | **Fatal but reportable.** The GUI is up, so there is a screen to say it on. It names the problem and keeps polling, so hot-plug recovers without a reboot. |
-| Display path | **Reportable, not impossible.** No firmware framebuffer, or one in a format the renderer cannot negotiate, halts on `AOBS-E02` with §9's diagnostic on a live console. The population that used to fail *silently* — a UEFI machine with no usable KMS driver — now draws through the fbdev tier. |
+| Display path | **Reportable, not impossible.** No framebuffer at all halts on `AOBS-E02`; one in a format the renderer cannot negotiate on `AOBS-E05`; one below the 800×600 floor on `AOBS-E06` — each with §9's diagnostic on a live console, and each with a different third sentence, which is why they are three codes (`06-codes.md` §5). The population that used to fail *silently* — a UEFI machine with no usable KMS driver — now draws through the fbdev tier. |
 
 V4L2 devices are enumerated **at the point of use, not at startup**, so plugging a camera in later
 simply works. No udev monitoring, no daemon, no reboot.
@@ -390,7 +390,8 @@ block** and halts:
 - one on what it likely means;
 - one on what to do;
 - the version and build date;
-- a short failure code so a bug report is actionable.
+- a short failure code so a bug report is actionable — from the `AOBS-E##` space in `06-codes.md`,
+  which also states why the code is worth printing when the variant name is already there.
 
 Not a stack trace, not systemd's default spew. Halt with the text visible; do not power off.
 

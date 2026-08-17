@@ -35,6 +35,7 @@ The product exists for one reason, and it decides every trade in this spec:
 | `03-transport.md` | The QR boundary in both directions: bounds, scanner, decoder discipline, outbound animation. |
 | `04-screens.md` | Every screen and the flow between them, in the shell. |
 | `05-testing-and-release.md` | Coverage bar, vectors, fuzz targets, adversarial corpus, CI gates, release gates, signing and distribution. |
+| `06-codes.md` | The code registry: the two code spaces, what makes a code stable with no update mechanism, and every startup-failure and refusal code. |
 
 ADRs in `docs/adr/` carry the *why* for the decisions a newcomer would otherwise read as arbitrary —
 including one, ADR-0009, kept as a superseded record because *how* it was wrong is worth reading. `CONTEXT.md` is the glossary.

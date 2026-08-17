@@ -102,7 +102,15 @@ Three we write, one we skip, one deliberate exception.
 ## 5. The adversarial corpus
 
 **A checked-in regression suite, not merely fuzz seeds.** Every refusal gets a named case, plus these
-drawn from the published attacks:
+drawn from the published attacks.
+
+**The name is the code** (`06-codes.md`). Each case asserts the `AOBS-R##` its refusal carries, and the
+suite asserts that the registry and the corpus are **in bijection** — every code in `06-codes.md` §6 has
+exactly one case, and every case names a code that exists there. That is what keeps the *stable* in
+"stable machine-readable code" from being an accident: a refusal added in code with an invented code
+fails the suite instead of shipping, and a code changed by accident fails it too.
+
+The cases:
 
 - a frame declaring `seqLen = 0xFFFFFFFF`;
 - parts with inconsistent `seqLen`/`messageLen`, and parts disagreeing with an established stream's
@@ -154,13 +162,13 @@ would prove only that *something* drew.
 |---|---|
 | **Entropy provenance** — trace the `getrandom` syscall during a seed generation and assert the wallet's entropy bytes are **byte-identical** to what the traced syscall returned; assert `crng init done` in `dmesg`; assert **zero opens of `/dev/urandom`**. | The linkage, not the intention. |
 | OVMF + virtio-gpu | The DRM tier. Asserts `display=drm`. |
-| OVMF + `ramfb`, no GPU | **The fbdev tier** — the fallback the display story now leans on (`01-boot-layer.md` §7, ADR-0016). Asserts `display=fbdev` and a drawn frame. This is the configuration that used to be specified as `simpledrm` and could never pass: Debian builds no `simpledrm`, so `efifb` is what serves this machine, and the assertion is that it **draws**, not that it reports `AOBS-E02`. |
+| OVMF + `ramfb`, no GPU | **The fbdev tier** — the fallback the display story now leans on (`01-boot-layer.md` §7, ADR-0016). Asserts `display=fbdev` and a drawn frame. This is the configuration that used to be specified as `simpledrm` and could never pass: Debian builds no `simpledrm`, so `efifb` is what serves this machine, and the assertion is that it **draws**, not that it reports `AOBS-E02` or `AOBS-E05`. |
 | **`fbcon` regression** — inject two NMIs on the `ramfb` machine after `AOBS_READY` and assert the panel is **byte-identical** across them. | That the console detach still holds. This is [#52](https://github.com/allisson/aobs/issues/52)'s probe as a standing row, and it must count `AOBS_READY` lines and refuse to compare anything unless the appliance started exactly once — a looping service must not pass for a clean run. |
 | RAM at and below the floor | The low-memory GRUB entry degrades rather than bricks. |
 | No camera | The degraded-but-useful path. |
 | No keyboard | The "no input" screen appears. |
 | **The minimum canvas** — the `ramfb` machine at OVMF's default 800×600 GOP, asserting the review panel draws **stacked** with every character of a 62-character P2TR address present and no scroll region anywhere. | That the floor in `04-screens.md` §0 is a floor we actually meet, in the geometry CI already boots by default. |
-| **Below the floor** — force a sub-800×600 mode with `SLINT_DRM_MODE` on the virtio-gpu machine and assert the startup refusal on a live console, not a drawn UI. | That the floor refuses rather than degrades. The index-based env var is unusable as product configuration and is exactly right as a test instrument. |
+| **Below the floor** — force a sub-800×600 mode with `SLINT_DRM_MODE` on the virtio-gpu machine and assert `AOBS-E06` on a live console, not a drawn UI. | That the floor refuses rather than degrades. The index-based env var is unusable as product configuration and is exactly right as a test instrument. |
 | **A large mode** — the virtio-gpu machine at 1920×1080, asserting a logical canvas of 1422×800 and type scaled by 1.35. | That the scale-factor policy runs, rather than the layout growing and the type staying put. |
 
 The seed path calls `getrandom` as a **raw syscall**, with no crate-level indirection a build change

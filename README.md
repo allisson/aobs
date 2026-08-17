@@ -27,7 +27,7 @@ repo currently holds:
 
 | Path | What is in it |
 |---|---|
-| [`docs/specs/`](docs/specs/) | The v1 implementation spec, six files: overview, boot layer, core, transport, screens, testing and release. |
+| [`docs/specs/`](docs/specs/) | The v1 implementation spec, seven files: overview, boot layer, core, transport, screens, testing and release, code registry. |
 | [`docs/adr/`](docs/adr/) | Fifteen architecture decision records — the *why* for the choices a newcomer would otherwise read as arbitrary. |
 | [`docs/research/`](docs/research/) | Research findings, one file per question, every claim carrying a source URL. |
 | [`docs/prototypes/`](docs/prototypes/) | Throwaway HTML prototypes built to settle specific UI questions. |

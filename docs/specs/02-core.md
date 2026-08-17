@@ -281,7 +281,8 @@ click through — after which the one warning that mattered gets clicked through
 
 ### What a refusal is
 
-The specific reason in plain language, a **stable machine-readable code** alongside it, and exactly
+The specific reason in plain language, a **stable machine-readable code** alongside it — from the
+`AOBS-R##` space in `06-codes.md`, which is what makes *stable* mean something — and exactly
 **one action: discard.** No "proceed anyway" — not behind a confirmation, not in an advanced menu.
 Hiding the reason buys nothing: the attacker wrote the PSBT and knows which check they tripped.
 
