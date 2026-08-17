@@ -24,7 +24,7 @@ belongs to neither `aobs-core` nor the boot layer: both spaces are cited from `0
 
 | Space | Reads as | Reached through | Ends in |
 |---|---|---|---|
-| `AOBS-E##` | *The appliance could not start.* | The wrapper, printing §9's diagnostic on a live kernel console | A halt with the text visible |
+| `AOBS-E##` | *The appliance could not start.* | The app printing §9's diagnostic on a live kernel console — or, for `E00` alone, the wrapper printing it because the app never got that far | A halt with the text visible |
 | `AOBS-R##` | *The appliance refused what you gave it.* | A live GUI, with copy, after §7's validation | Discard, and nothing else |
 
 The two answer different user questions — *is my machine broken?* and *is this transaction bad?* — and
@@ -70,6 +70,7 @@ already accepted, for the same reason: someone else's copy of the old behaviour 
 
 | Code | Condition | Note |
 |---|---|---|
+| `AOBS-E00` | **The binary never spoke.** `/usr/lib/aobs/launch` reached the line after running it: a missing shared library, a wrong interpreter, an image built wrong. | The wrapper's own code — the only one printed by something other than the app, and the only one whose remedy is *verify the download and write the medium again*. Found in the tree by [#57](https://github.com/allisson/aobs/issues/57) and added here; it predates this registry and is correct. |
 | `AOBS-E01` | The kernel CSPRNG returned no bytes. | Unchanged. |
 | `AOBS-E02` | **No display at all**: no DRM device and no firmware framebuffer. | Narrowed here — see below. |
 | `AOBS-E03` | The event loop returned. Nothing on this appliance asks it to. | Unchanged. |

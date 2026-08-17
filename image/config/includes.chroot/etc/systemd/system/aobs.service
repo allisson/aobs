@@ -12,46 +12,64 @@
 [Unit]
 Description=aobs — amnesic offline Bitcoin signer
 Documentation=https://github.com/allisson/aobs
-Requires=seatd.service
-After=seatd.service systemd-user-sessions.service
-# There is no getty on tty1 (§2 leaves none anywhere), but claiming the VT is what makes
-# that structural rather than a matter of ordering.
-Conflicts=getty@tty1.service
-After=getty@tty1.service
+After=systemd-user-sessions.service
 
 [Service]
-Type=simple
+# §2: the app sends READY=1 once its window is up, and `Type=notify` is load-bearing —
+# under `simple`, ExecStartPost fires at fork(2), so the console detach would land before
+# there are pixels and a startup failure would print §9's diagnostic to a console that is
+# already gone.
+Type=notify
+# `all`, not `main`: /usr/lib/aobs/launch deliberately does not exec the binary — the §9
+# fallback text after it is the whole reason the wrapper exists — so the notifying process
+# is never the main PID, and `main` drops the datagram silently until the unit times out.
+NotifyAccess=all
 User=signer
 Group=signer
-# video for DRM master, input for libinput. §2 also says `_seatd`, but Debian has no such
-# group — its seatd runs as `seatd -g video`, so video is the seat group here too. The
-# membership is granted in 0100-aobs-signer-user.hook.chroot, which reads the group out of
-# seatd.service rather than trusting either name; these are supplementary to whatever the
-# user database already gives `signer`, not a replacement for it.
+# §2: video and input, and no third group. /dev/fb0 is SUBSYSTEM=="graphics" → root:video,
+# /dev/dri/card0 → root:video, /dev/video0 → root:video, /dev/input/event* → root:input.
+# Read from systemd's own udev rules, not from convention.
 #
 # dialout is for /dev/ttyS0, and it is the QEMU harness that needs it: without it the
 # readiness line never leaves the machine and 05-testing-and-release.md §6.2 has nothing
-# to assert on. It grants no exfiltration the appliance did not already have — this
-# process draws QR codes on a screen for a living — and the alternative was putting
-# `console=ttyS0` on a kernel command line §6 fixes verbatim.
+# to assert on. The alternative was putting `console=ttyS0` on a kernel command line §6
+# fixes verbatim, which would change what every user's machine does to serve CI.
 SupplementaryGroups=video input dialout
-Environment=LIBSEAT_BACKEND=seatd
+# §2 and ADR-0016: no seat daemon. `backend-linuxkms-noseat` makes opening /dev/fb0 a
+# plain open(2) instead of a delegation to a daemon that hands back DRM and evdev nodes
+# only. LIBSEAT_BACKEND is deliberately not set, and seatd is not installed.
 Environment=SLINT_BACKEND=linuxkms
-# §2 names /usr/bin/aobs; §9 names a wrapper. The wrapper execs it and covers the one
-# case the binary cannot report on — never having started.
+# The keymap, #54. Pinned rather than inherited: Slint compiles its keymap with every
+# RMLVO field defaulted, and libxkbcommon fills defaulted fields from XKB_DEFAULT_*
+# before falling back to its build-time defaults. These three lines change nothing about
+# today's behaviour — they make it a decision. XKB_DEFAULT_VARIANT and XKB_DEFAULT_OPTIONS
+# stay unset: setting either to an empty string is not the same as leaving it out, and a
+# second group or a dead key would be an invisible mode.
+Environment=XKB_DEFAULT_RULES=evdev
+Environment=XKB_DEFAULT_MODEL=pc105
+Environment=XKB_DEFAULT_LAYOUT=us
+# §2 names /usr/bin/aobs; §9 names a wrapper. The wrapper runs it as a child rather than
+# exec'ing it, so the fallback text after it is reachable when the binary never speaks.
 ExecStart=/usr/lib/aobs/launch
+# The `+` prefix runs these as root inside this `User=signer` unit, so console toggling is
+# systemd's privilege and never the app's. Verified in #52.
+ExecStartPost=+/usr/lib/aobs/console-detach
+ExecStopPost=+/usr/lib/aobs/console-attach
 Restart=always
 RestartSec=1s
 
-# The kernel console is the one channel that survives a GUI that never came up (§9), and
-# simpledrm guarantees it exists.
-TTYPath=/dev/tty1
-StandardInput=tty
+# §9's channel: /dev/console needs no TTYPath, which is what lets this unit drop its VT1
+# coupling entirely. #52 watched the service die five times behind a black panel with
+# TTYPath=/dev/tty1, StandardInput=tty, TTYReset=yes, TTYVHangup=yes and
+# TTYVTDisallocate=yes present — the last of those clears the VT on stop, and a hangup on
+# that tty kills the process group. §2 now forbids all five by name. Nothing is lost: the
+# app reads no stdin, because input is libinput on /dev/input/*.
+#
+# Do not add TTYVTDisallocate=yes back without re-running #52's probe. Control 1
+# (NAutoVTs=0, ReserveVT=0) leaves no getty to allocate a VT, so there is no VT holding
+# readable text for it to clear.
 StandardOutput=journal+console
 StandardError=journal+console
-TTYReset=yes
-TTYVHangup=yes
-TTYVTDisallocate=yes
 
 [Install]
 WantedBy=multi-user.target

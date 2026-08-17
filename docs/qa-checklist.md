@@ -37,9 +37,11 @@ which carries the evidence and the options. Each way out reverses a settled deci
 
 ### The claim the whole slice exists to retire
 
-- [ ] **It boots on at least one real UEFI machine and draws the screen.** ADR-0009 rests
-      on reading `drivers/gpu/drm/tiny/simpledrm.c`. Nobody has watched it draw a pixel.
-      Record the machine: make, model, year, panel resolution, GPU.
+- [ ] **It boots on at least one real UEFI machine and draws the screen.** The claim moved
+      with ADR-0016: the fbdev tier — `efifb`, not `simpledrm` — is what serves a machine
+      with no native KMS driver, and it has only ever been watched under QEMU + `ramfb`.
+      Record the machine: make, model, year, **panel resolution**, GPU, and which tier won
+      (the readiness line says `display=fbdev` or `display=drm`).
 - [ ] The version string and build date on screen match the ISO that was written to the
       stick (01-boot-layer.md §10).
 
@@ -86,9 +88,75 @@ which carries the evidence and the options. Each way out reverses a settled deci
       block appears and the machine **halts with it visible** rather than rebooting or
       powering off. `Restart=always` must not scroll it away.
 - [ ] **Open question, worth answering here rather than guessing.** The image carries
-      `grub-efi` only, which follows from UEFI-only (ADR-0009) but means a legacy-BIOS
-      machine is refused by its own firmware and never reaches our `DisplayUnavailable`
-      diagnostic. Boot one and record what the user actually sees. If it is worse than
-      ADR-0009's "unexplainable blackness", that is a ticket, not a fix to improvise.
+      `grub-efi` only, so a legacy-BIOS machine is refused by its own firmware and never
+      reaches any diagnostic of ours. UEFI-only now stands on build-and-test surface rather
+      than on "no display path exists" (ADR-0016), which makes this a *product* question
+      rather than a technical one. Boot one and record what the user actually sees; if it is
+      worse than blackness with no explanation, that is a ticket, not a fix to improvise.
+- [ ] The code printed matches `docs/specs/06-codes.md` — `AOBS-E02` for no framebuffer at
+      all, `AOBS-E05` for a format outside the renderer's five arms, `AOBS-E06` for a mode
+      below 800×600, and `AOBS-E00` only when the wrapper prints it because the binary never
+      spoke.
 - [ ] The block is a human-written paragraph and a failure code — not a stack trace, and
       **no formatted program state**.
+
+## Reconciled against ADR-0016 and the panel map — [#57](https://github.com/allisson/aobs/issues/57)
+
+Rows that only exist because `image/` was brought back in line with `docs/specs/`. Each one
+guards a claim the tree used to contradict.
+
+### No seat daemon (§2, ADR-0016)
+
+- [ ] `ps` shows no `seatd`, and the published package manifest lists neither `seatd` nor
+      `libseat1`. If either is back, the image and the crate's `backend-linuxkms-noseat`
+      have drifted apart and the fbdev tier is dead again.
+- [ ] On a machine with **no** DRM device, the readiness line says `display=fbdev`. That is
+      the whole point of `-noseat`: under the seatd backend the `/dev/fb0` open was
+      delegated to a daemon that hands back DRM and evdev nodes only.
+
+### The serial mirror (§2, §9)
+
+- [ ] On a machine **with** a serial port, capture everything that reaches it across a full
+      session — boot, wallet load, a signature, shutdown — and confirm it is **only** the
+      lines that were also on the panel. Anything serial-only is a channel nobody decided on.
+- [ ] No secret material appears there: no mnemonic, no passphrase, no key, no backup
+      password, and no PSBT contents.
+- [ ] On a machine with **no** serial port, nothing changes and nothing fails — the open is
+      allowed to fail silently.
+
+### The console detach (§2, §7, [#52](https://github.com/allisson/aobs/issues/52))
+
+- [ ] On the fbdev tier, provoke kernel output while the app is drawing (an NMI, or a
+      `pr_emerg` from a development build) and confirm **the panel is unchanged**.
+- [ ] Nothing from `console-detach` or `console-attach` ever appears on the panel. They log
+      to the journal; anything written to the unit's stdout after the first frame *stays*
+      on screen, because Slint does not repaint it away.
+- [ ] Stop the service and confirm the console comes back — that is the channel §9 needs
+      exactly when the GUI is gone.
+- [ ] `TTYVTDisallocate=yes` is **not** in the unit. #52 watched the service die five times
+      behind a black panel with it present. Do not add it back without re-running that probe.
+
+### The keymap ([#54](https://github.com/allisson/aobs/issues/54))
+
+- [ ] On a **non-US** physical keyboard, every printable ASCII character can still be typed
+      into the passphrase field — the legends lie, nothing is unreachable, and that
+      reachability is the entire argument for offering no layout picker.
+- [ ] The passphrase and seed-import screens **name the layout** before the user starts.
+- [ ] Dead keys do nothing anywhere: `XKB_DEFAULT_VARIANT` and `XKB_DEFAULT_OPTIONS` are
+      unset, not set to an empty string.
+
+### Panel modes ([#55](https://github.com/allisson/aobs/issues/55))
+
+- [ ] On a panel larger than the design size, type is **larger**, not the layout roomier —
+      1920×1080 and 3840×2160 should both look like a 1422×800 canvas scaled up.
+- [ ] At 800×600 the review panel draws **stacked**, non-scrolling, with a 62-character P2TR
+      address complete on screen.
+- [ ] A mode below 800×600 halts on `AOBS-E06` with the diagnostic on a live console, rather
+      than drawing something cramped.
+
+### The output bound ([#58](https://github.com/allisson/aobs/issues/58))
+
+- [ ] Six outputs fit the review panel at 800×600 with nothing clipped and no scroll region.
+      **This is the measurement the bound rests on** — if it comes back tighter, the number
+      drops before the first ISO ships, and never after.
+- [ ] A seven-output PSBT is refused with `AOBS-R15` before any review screen is drawn.

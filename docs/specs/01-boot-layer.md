@@ -49,10 +49,18 @@ closure. That is the irreducible floor for any GUI on bare KMS, not Slint's over
 size are an owed measurement** (`00-overview.md`): the *22 packages / 21 MiB* measured for ADR-0002
 included `libseat1` and `seatd`, which this image no longer ships.
 
-- Unprivileged user `signer`, in **`video` and `input`, and no third group.** Those two are
-  sufficient and this is read from systemd's own udev rules, not from convention: `/dev/fb0` is
-  `SUBSYSTEM=="graphics"` → `root:video`, `/dev/dri/card0` → `root:video`, `/dev/video0` →
+- Unprivileged user `signer`, in **`video`, `input` and `dialout`, and no fourth group.** The first two
+  are what the appliance needs, read from systemd's own udev rules rather than from convention:
+  `/dev/fb0` is `SUBSYSTEM=="graphics"` → `root:video`, `/dev/dri/card0` → `root:video`, `/dev/video0` →
   `root:video`, `/dev/input/event*` → `root:input`.
+- **`dialout` is for the serial mirror, and it is stated here rather than discovered later.** The app
+  writes its markers to `/dev/ttyS0` as well as to stdout (§9), which is how the QEMU harness asserts
+  anything at all (`05-testing-and-release.md` §6.2). This spec said *no third group* until
+  [#57](https://github.com/allisson/aobs/issues/57) found the tree already had one and the reason was
+  sound. The rejected alternative was `console=ttyS0` on the kernel command line, which would change
+  what **every user's** machine does in order to serve CI, against a cmdline §6 fixes verbatim.
+  Dropping the mirror entirely was rejected too: it costs §6.2 its assertion and pushes CI onto
+  screenshot diffing, and a gate that is painful is a gate that gets skipped.
 - **No `seatd`, no `libseat1`, and `LIBSEAT_BACKEND` is not set.** `libseat` was what stopped
   `/dev/fb0` from being opened at all: under the `seatd` backend the open is delegated to a daemon
   that hands back DRM and evdev nodes only. `-noseat` makes it a plain `open(2)`. Slint's own note
@@ -398,6 +406,23 @@ Not a stack trace, not systemd's default spew. Halt with the text visible; do no
 **The diagnostic prints only fixed strings and typed error-variant names, never formatted program
 state** — the same rule that governs logs and `Debug`, extended to the one output path that survives
 a crash.
+
+**The serial mirror, stated because an undocumented output channel is worse than a documented one.**
+Every line the app writes to the console it also writes to `/dev/ttyS0` when one exists — the readiness
+line, the entropy markers, and this diagnostic. It is what the QEMU harness reads
+(`05-testing-and-release.md` §6.2), and it is a **mirror, not a second behaviour**: the same bytes, on a
+machine that has a serial port, and a silent no-op on one that does not. Three rules bound it, and they
+are the whole of the concession:
+
+1. **Fixed strings and typed variant names only** — the §9 rule above, unchanged. No secret material
+   ever reaches it, because none reaches the console either.
+2. **Nothing is written there that is not also written to the console the user is looking at.** There is
+   no serial-only output, so nothing can be reported to a machine that is hidden from the person.
+3. **It is not a network and does not become one.** No reading, no protocol, no acknowledgement — the
+   file is opened write-only and the failure to open it is ignored.
+
+This is the appliance's only output channel besides the panel and the QR codes it draws, and it is
+listed here so that it is a decision rather than a discovery.
 
 ## 10. Build requirements that come from the app side
 

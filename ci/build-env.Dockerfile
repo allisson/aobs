@@ -22,8 +22,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl build-essential pkg-config \
-    # Slint on backend-linuxkms + renderer-software (01-boot-layer.md §2).
-      libinput-dev libseat-dev libxkbcommon-dev libudev-dev \
+    # Slint on backend-linuxkms-noseat + renderer-software (01-boot-layer.md §2,
+    # ADR-0016). libseat-dev is gone with the seat daemon: -noseat opens /dev/fb0 with a
+    # plain open(2), and a build container that still offered libseat would let the crate
+    # drift back onto it without anyone noticing.
+      libinput-dev libxkbcommon-dev libudev-dev \
       libfontconfig-dev libfreetype-dev \
     # Building and inspecting the image. live-build is version-pinned (01-boot-layer.md
     # §1); image/build.sh refuses to run against any other, so the two must agree.

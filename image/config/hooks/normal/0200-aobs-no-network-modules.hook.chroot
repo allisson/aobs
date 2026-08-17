@@ -1,5 +1,6 @@
 #!/bin/sh
-# No network — enforced, not configured. 01-boot-layer.md §3, the primary control.
+# No network — enforced, not configured — and no firmware-hungry GPU driver.
+# 01-boot-layer.md §3, the primary control for both.
 #
 # Undoing this requires rebuilding the ISO: the rootfs is a read-only squashfs with a
 # tmpfs overlay, so there is no .ko on the medium to insmod, and the QR-only channel
@@ -12,6 +13,7 @@
 set -eu
 
 deleted=0
+gpus_deleted=0
 for modules_dir in /lib/modules/*; do
     [ -d "${modules_dir}" ] || continue
 
@@ -26,8 +28,31 @@ for modules_dir in /lib/modules/*; do
         fi
     done
 
+    # §3 and ADR-0016: amdgpu, xe and radeon go too. This image installs no firmware-*
+    # package, so none of the three can ever initialise here — and each calls
+    # drm_aperture_remove_conflicting_pci_framebuffers() *before* failing on the absent
+    # blob, with no way to put the aperture back. Kept, they would destroy a working
+    # efifb on their way out, turning modern AMD, Radeon HD 2000+, Lunar Lake and
+    # Battlemage from *draws* into unreportable blackness.
+    #
+    # Deleted by file, not by blacklist: a blacklist does not cover aliases, and §3 makes
+    # the same argument about the network modules.
+    for gpu in amdgpu xe radeon; do
+        for ko in $(find "${modules_dir}/kernel" -name "${gpu}.ko*" 2>/dev/null); do
+            rm -f "${ko}"
+            gpus_deleted=$((gpus_deleted + 1))
+        done
+    done
+
     depmod -a "$(basename "${modules_dir}")"
 done
+
+if [ "${gpus_deleted}" -eq 0 ]; then
+    echo "0200-aobs-no-network-modules: found no amdgpu/xe/radeon module to delete." >&2
+    echo "ADR-0016 rests on their absence; a kernel that no longer ships them by these" >&2
+    echo "names needs a deliberate look, not a silent pass." >&2
+    exit 1
+fi
 
 if [ "${deleted}" -eq 0 ]; then
     echo "0200-aobs-no-network-modules: found nothing to delete under /lib/modules." >&2
@@ -36,7 +61,7 @@ if [ "${deleted}" -eq 0 ]; then
 fi
 
 # §3: "The initramfs must be stripped too" — initramfs-tools defaults to MODULES=most,
-# which bundles network drivers independently of the squashfs.
+# which bundles network drivers, and amdgpu/xe/radeon, independently of the squashfs.
 #
 # §3 offers two ways: MODULES=dep, or prune the same paths. We take the pruning arm, and
 # it comes free: the modules are already gone from /lib/modules by the time this runs, so
@@ -46,4 +71,5 @@ fi
 update-initramfs -u -k all
 
 # The stated build check runs against the built artifact, in CI, not here
-# (05-testing-and-release.md §6.1): lsinitramfs shows no drivers/net entries.
+# (05-testing-and-release.md §6.1): lsinitramfs shows no drivers/net entries, and no
+# amdgpu, xe or radeon.

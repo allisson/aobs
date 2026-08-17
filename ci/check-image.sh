@@ -44,9 +44,36 @@ else
         good "the initramfs contains no drivers/bluetooth or net entries"
     fi
 
+    # §3 and ADR-0016: amdgpu, xe and radeon are deleted for the same reason the network
+    # modules are — firmware-less they take the framebuffer aperture and then fail, and
+    # each one kept is a machine that boots to unreportable blackness instead of drawing.
+    if grep -qE '/(amdgpu|xe|radeon)\.ko' "${work}/initramfs.txt"; then
+        bad "the initramfs contains amdgpu, xe or radeon"
+        grep -E '/(amdgpu|xe|radeon)\.ko' "${work}/initramfs.txt" | head -20 >&2
+    else
+        good "the initramfs contains no amdgpu, xe or radeon"
+    fi
+
     # The initramfs is only half of §3. The squashfs is the other half, and it is the one
     # that persists after boot. It came out of the same extraction above.
     unsquashfs -l "${work}/live/filesystem.squashfs" > "${work}/squashfs.txt" 2>/dev/null
+
+    if grep -qE '/(amdgpu|xe|radeon)\.ko' "${work}/squashfs.txt"; then
+        bad "the squashfs still carries amdgpu, xe or radeon"
+        grep -E '/(amdgpu|xe|radeon)\.ko' "${work}/squashfs.txt" | head -20 >&2
+    else
+        good "the squashfs carries no amdgpu, xe or radeon"
+    fi
+
+    # ADR-0016 again, from the other direction: no seat daemon anywhere. libseat is what
+    # stopped /dev/fb0 from being opened at all, so its presence would mean the image and
+    # the crate's `backend-linuxkms-noseat` had drifted apart.
+    if grep -qE '/(usr/)?s?bin/seatd$|/libseat\.so' "${work}/squashfs.txt"; then
+        bad "the squashfs carries seatd or libseat"
+        grep -E '/(usr/)?s?bin/seatd$|/libseat\.so' "${work}/squashfs.txt" | head -20 >&2
+    else
+        good "the squashfs carries no seatd or libseat"
+    fi
 
     if grep -qE 'lib/modules/[^/]+/kernel/(drivers/net|drivers/bluetooth|net)/' "${work}/squashfs.txt"; then
         bad "the squashfs still carries network driver modules"
