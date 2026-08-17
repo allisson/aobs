@@ -51,6 +51,15 @@ shell.
 **Refusal** — a decision that a payload will not be acted on, taken before any screen showing it is
 drawn. A refusal names its reason, carries a stable code, and offers **only discard**.
 
+**Code space** — one of the two families a code belongs to: `AOBS-E##` says *the appliance could not
+start* and ends in a halt on a console; `AOBS-R##` says *the appliance refused what you gave it* and
+ends in discard. The letter is the information — it answers *is my machine broken?* versus *is this
+transaction bad?* without a lookup. The registry of both is `docs/specs/06-codes.md`.
+
+**Stable (of a code)** — permanent from the moment a signed ISO carrying it ships, because there is no
+update mechanism and old ISOs stay in circulation. Add-only: retired codes are never reused, gaps stay
+gaps, and nothing is renumbered for tidiness.
+
 **Warning (advisory)** — a statement on the review screen that never blocks. **A warning is only
 legitimate when the user knows something we don't.** Exactly one exists in v1.
 

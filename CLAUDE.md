@@ -4,11 +4,11 @@ A Bitcoin signing appliance shipped as a bootable Debian LiveCD (`bitcoin-signer
 
 ## Status: the spec is closed; a walking skeleton exists and now lags it
 
-The v1 implementation spec is written and merged — `docs/specs/` (six files), `docs/adr/` (sixteen ADRs, one of them superseded) and `CONTEXT.md`, assembled from 27 closed decision tickets plus the display-path map ([#42](https://github.com/allisson/aobs/issues/42)).
+The v1 implementation spec is written and merged — `docs/specs/` (seven files, the last being the code registry added by [#56](https://github.com/allisson/aobs/issues/56)), `docs/adr/` (sixteen ADRs, one of them superseded) and `CONTEXT.md`, assembled from 27 closed decision tickets plus the display-path map ([#42](https://github.com/allisson/aobs/issues/42)).
 
 **A walking skeleton is on `main`** ([#39](https://github.com/allisson/aobs/issues/39)): `aobs/` and `aobs-core/`, `ci/`, and `image/` with the live-build config, hooks and the `aobs.service` unit. It is what falsified ADR-0009 by building an ISO and booting it.
 
-**It predates ADR-0016 and contradicts the spec in named places** — the unit still `Requires=seatd.service`, sets `LIBSEAT_BACKEND=seatd` and `Type=simple`, and still carries `TTYVTDisallocate=yes`, which [#52](https://github.com/allisson/aobs/issues/52) proved kills the appliance the moment `fbcon` unbinds; the package list still installs `seatd` and `libseat1`; the module hook deletes no GPU drivers; there is no `console-detach`. **`docs/specs/` is the authority, not the tree.** Reconcile before building on any of it.
+**It predates ADR-0016 and contradicts the spec in named places** — the unit still `Requires=seatd.service`, sets `LIBSEAT_BACKEND=seatd` and `Type=simple`, and still carries `TTYVTDisallocate=yes`, which [#52](https://github.com/allisson/aobs/issues/52) proved kills the appliance the moment `fbcon` unbinds; the package list still installs `seatd` and `libseat1`; the module hook deletes no GPU drivers; there is no `console-detach`; and `aobs/src/fail.rs` carries the pre-split `AOBS-E02`, whose copy still blames legacy BIOS — a cause ADR-0016 falsified — where `docs/specs/06-codes.md` §5 now splits it into `E02`/`E05`/`E06`. **`docs/specs/` is the authority, not the tree.** Reconcile before building on any of it.
 
 **`docs/specs/` is the authority — build from it.** The rule it states about itself governs here too: *if you find yourself deciding something the spec does not answer, that is a ticket, not a gap in the prose to fill in with judgement. Say so and stop.* The exception is the routine mechanics of Rust — module names, error enum shapes, function signatures — which are yours.
 
