@@ -48,6 +48,44 @@ Starting palette, from the prototype — a starting point, not a mandate:
 the emphasis carried by weight and ink, not luminance. **Payment addresses are never truncated.**
 Change and input addresses may be, because they are verified or ours.
 
+### The panel: one design canvas, a scale factor, and a floor
+
+**The layout is designed once, at 1280×800 logical pixels, and every panel is expressed in that
+canvas.** The appliance cannot choose its mode — the DRM tier takes the connector's preferred mode
+(Slint's `drmoutput.rs` picks `max_by(PREFERRED, then area)`) and the fbdev tier takes whatever the
+firmware handed `efifb` — so the mode is an input, and the only free variable is what we draw into it.
+
+- **Above the design size, scale; do not grow the layout.** The shell computes
+  `scale = max(1, min(width / 1280, height / 800))` from the mode it just learned and dispatches
+  `WindowEvent::ScaleFactorChanged`. Consequence: the logical canvas is **never smaller than 1280×800**
+  on any panel at or above that size, and physical type grows with the panel — 1920×1080 and 3840×2160
+  both land on a 1422×800 logical canvas. A 4K panel therefore gets 2.7× larger type, not 2.7× more
+  content. **The prototype's `max-width: 1120px` is not the policy**: content-capping a 4K panel leaves
+  a small island of unreadable text, which is the opposite failure to the one §0 is defending against.
+- **Below the design size, reflow — two breakpoints and no third.** Above a logical width threshold the
+  review panel is the fixed rail beside the outputs (§11.2); below it, the money facts stack above the
+  outputs and the full width goes to the address column. Two states are testable and describable; a
+  cascade of five is neither.
+- **Type never shrinks below the floor in the palette above.** Addresses stay at 17–22 px logical. That
+  floor *is* the legibility argument this whole section rests on, so shrinking type is the one bend
+  that attacks the reason the visual system exists. Reflow and wrapping bend instead.
+- **Minimum supported mode: 800×600 physical.** Below it the appliance refuses at startup, on a live
+  console, in the shape `01-boot-layer.md` §9 specifies — the same class as a framebuffer format
+  outside the renderer's five accepted arms, because it is the same failure: the panel is there and we
+  cannot draw honestly on it. 800×600 is not a guess — it is edk2's default GOP mode
+  (`MdeModulePkg.dec`: `PcdVideoHorizontalResolution|800`, `PcdVideoVerticalResolution|600`, where `0`
+  would mean *highest available*), so it is what OVMF hands our own CI and what a BMC or an older
+  firmware hands a user. **Named cost:** 640×480-class firmware is excluded, on machines at or below
+  the ~2012 line `01-boot-layer.md` §7 already excludes.
+
+**Addresses wrap; they are never truncated.** Wrapping in 4-character groups keeps every character on
+screen, and it is owed **at the design size**, not only at the floor: a BIP86 P2TR address is 62
+characters, which with 4-character grouping is 77 monospace cells ≈ 787 px at 17 px in DejaVu Sans
+Mono — wider than the review panel's output column at 1280×800. The in-tree prototype renders only
+42-character P2WPKH addresses, so **nothing in-tree has been measured against the widest address class
+we ship**; §11.3's screen already wraps at 30 characters, so the treatment is established rather than
+invented here.
+
 **Keyboard only.** The software renderer draws no mouse cursor and the appliance has no pointer; the
 UI is fully keyboard-navigable by design, not by retrofit. Escape cancels wherever a cancel exists.
 
@@ -112,7 +150,9 @@ other half. A 4×6 grid fits but has no natural reading order.
 
 An instructional banner above the words stays; it carries information.
 
-*Owed: that two columns of 12 fit a 1280×800 panel at the settled type size. Measured in a 16:10
+*Owed: that two columns of 12 fit the **minimum canvas** — 800×600 — at the settled type size. The
+binding case moved there when §0 fixed the floor: at or above the design size the logical canvas is
+never smaller than 1280×800, so 800×600 is the only geometry where this can fail. Measured in a 16:10
 browser frame, not on hardware.*
 
 ## 4. Create — the confirmation
@@ -170,6 +210,21 @@ is where people take the wrong one, and it makes the passphrase feel like a mode
   the field is empty, **"Use this passphrase"** when it is not. An accidental empty confirm cannot
   pass as a deliberate one.
 - Printable ASCII only; a rejected keystroke says so.
+- **The keymap is a US layout, always, and no picker is offered.** The field is printable ASCII only,
+  and group 1 of `us` reaches all 95 of those characters, so on a German, French or Brazilian keyboard
+  nothing is *unreachable* — the legends are simply wrong. So **the screen names the layout before the
+  user starts**, the way §6 names English; a stated fact beats a mystery under the fingers. A picker
+  was rejected twice over. It would be answered on the start menu, before the user has typed a
+  character or seen any evidence of a mismatch — the shape §5.2 rejects when it argues that a control
+  answered before the device knows the path is in the wrong place. And its own failure is worse: a
+  wrongly-picked `de` or `fr` swaps keys in the *other* direction and imports **dead keys**, where `^`
+  produces nothing until the next keystroke. A wrong legend is a visible mode, because the clear-text
+  render above shows exactly what landed; a dead key is an invisible one. The mechanism — three
+  `XKB_DEFAULT_*` lines on the unit, no package, no code — is `01-boot-layer.md` §2.
+- **Named cost:** a user on a non-US physical keyboard types the passphrase by hunt-and-peck against
+  that render, with wrong legends under their fingers. Nothing is bought back by a choice: a
+  passphrase containing a character outside printable ASCII is already unenterable here on any
+  layout.
 
 ### 5.2 Network
 
@@ -198,7 +253,10 @@ A fixed 24-slot grid on one screen, driven by core's reducer. All six behaviours
 `02-core.md` §4); the shell owns only the keyboard and the drawing.
 
 On screen: the matches for the current prefix, the single remaining word ghosted inline, and the
-committed words. **The screen names English before the user starts.**
+committed words. **The screen names English and the US keymap before the user starts** — the keymap for the reason in
+§5.1, and here it degrades more gently than there: the wordlist is `a`–`z`, the pinned keymap puts
+those on the same physical keys on every board, and only the legends can mislead — an off-list
+keystroke then names itself, below.
 
 Off-list keystroke → the key does not land, and the screen names the key that was ignored.
 Failed checksum → the words stay, and the screen states plainly that the check covers the phrase as a
@@ -362,7 +420,12 @@ advantage it actually has: every surveyed device compromises its review screen b
 
 - **A fixed left rail with the money facts:** amount leaving, amount paying, **fee — absolute, as a
   rate, and as a percentage of the amount** — input count, input total, amount returning.
-- **The outputs at full address width on the right.**
+- **The outputs at full address width on the right** — *full width* meaning every character, wrapped in
+  4-character groups where the column is narrower than the address, never truncated and never scrolled.
+  A P2TR address needs the wrap at 1280×800 already (§0).
+- **Below the design width the rail stops being beside the outputs and stacks above them** (§0's second
+  breakpoint), which hands the whole width to the address column. Nothing is dropped in the stacked
+  state: it is the same panel, in one column instead of two.
 - **Change is presented as settled, not as a thing to check** — labelled as re-derived from the seed
   at its path and matched byte for byte. That is only honest if the re-derivation actually ran, which
   is what makes it a security boundary rather than a display detail.
@@ -374,6 +437,13 @@ advantage it actually has: every surveyed device compromises its review screen b
   sure?"*, no *"I understand"* acknowledgement. There is nothing to acknowledge and no key to press.
 - Nothing that should stop a transaction appears here. Refusals happen before this screen is drawn at
   all.
+
+*Owed, and it is a hole rather than a number: **how many outputs this panel must hold.** "The whole
+transaction, non-scrolling" has no bound behind it at any mode — `02-core.md` §7 caps inputs
+transitively through the 64 KiB transport bound and mandatory `non_witness_utxo`, but a renderable
+output costs ~44 bytes, so a structurally valid PSBT can carry on the order of a thousand of them.
+Decided by [#58](https://github.com/allisson/aobs/issues/58); until it is, do not implement this panel
+as if scrolling or clipping were available — neither is.*
 
 ### 11.3 Per-address confirmation
 

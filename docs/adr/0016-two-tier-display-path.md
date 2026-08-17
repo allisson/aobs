@@ -69,6 +69,12 @@ The compatibility statement stops being a hardware list and becomes a floor: **U
 machine whose firmware hands over a framebuffer.** The empirical claim lives in the per-release
 tested-hardware list (`05-testing-and-release.md` §6.3), not here.
 
+> **Qualifier added by [#55](https://github.com/allisson/aobs/issues/55), not a change to this
+> decision:** *…a framebuffer **of at least 800×600***. This ADR widened the population of panel
+> geometries — the fbdev tier draws at whatever mode the firmware handed over — and the layout policy
+> that followed (`04-screens.md` §0) set a minimum canvas. Below it, the startup diagnostic reports
+> rather than the UI drawing. The display-path choice itself is untouched.
+
 ### Why not the candidates that would have restored `simpledrm` itself
 
 **Candidate 3 is dominated by candidate 2**: Alpine buys exactly the property a custom Debian kernel

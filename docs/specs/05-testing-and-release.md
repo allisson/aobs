@@ -159,6 +159,9 @@ would prove only that *something* drew.
 | RAM at and below the floor | The low-memory GRUB entry degrades rather than bricks. |
 | No camera | The degraded-but-useful path. |
 | No keyboard | The "no input" screen appears. |
+| **The minimum canvas** — the `ramfb` machine at OVMF's default 800×600 GOP, asserting the review panel draws **stacked** with every character of a 62-character P2TR address present and no scroll region anywhere. | That the floor in `04-screens.md` §0 is a floor we actually meet, in the geometry CI already boots by default. |
+| **Below the floor** — force a sub-800×600 mode with `SLINT_DRM_MODE` on the virtio-gpu machine and assert the startup refusal on a live console, not a drawn UI. | That the floor refuses rather than degrades. The index-based env var is unusable as product configuration and is exactly right as a test instrument. |
+| **A large mode** — the virtio-gpu machine at 1920×1080, asserting a logical canvas of 1422×800 and type scaled by 1.35. | That the scale-factor policy runs, rather than the layout growing and the type staying put. |
 
 The seed path calls `getrandom` as a **raw syscall**, with no crate-level indirection a build change
 can silently re-resolve. That is what leaves the harness exactly one site to trace.
@@ -171,7 +174,9 @@ can silently re-resolve. That is what leaves the harness exactly one site to tra
   `efifb`'s reported format negotiates, and that the console detach behaves as it did under QEMU. Both
   were verified against `ramfb` only, where the vtcon index and the pixel format came from that
   kernel and that firmware (`01-boot-layer.md` §7).
-- Physical keyboards through libinput.
+- Physical keyboards through libinput — including **one non-US board**, to confirm that the pinned
+  `us` keymap (`01-boot-layer.md` §2) still reaches all 95 printable ASCII characters on it, since
+  that reachability is the whole argument for offering no layout choice (`04-screens.md` §5.1).
 
 The camera being untestable in CI costs less than it appears, because of where the seam sits: core
 receives *decoded strings*, so camera→frame is entirely shell, and the decode path is covered by a
@@ -193,7 +198,8 @@ become measured. None of them blocks implementation.
 | Argon2id wall clock on low-end amd64 (derived ~1.2–2.5 s) | None; the wait screen is already indeterminate. |
 | 8,000-derivation address search | Narrow the index window, and say what was searched. |
 | The four-descriptor `crypto-account` payload fits one QR at ECC H | **Narrow what we export. Never animate it.** |
-| Two columns of 12 words on a 1280×800 panel | Type size, not layout. |
+| Two columns of 12 words in the 800×600 **minimum canvas** (the binding geometry since `04-screens.md` §0 fixed the floor; 1280×800 is no longer the tight case) | Type size, not layout. |
+| A 62-character P2TR payment address, 4-character grouped, wrapped and non-scrolling in the minimum canvas — and in the design canvas, where the arithmetic says it already needs the wrap | Wrap to a third line before anything else moves. Never truncate. |
 | A phone camera reads our v27 output at arm's length | **v40 is the documented fallback.** |
 | The inbound capture-resolution floor | The resolution fallback chain already handles it. |
 

@@ -116,8 +116,11 @@ as `entropy` exists.
 ### Wordlist
 
 **English only in v1.** CJK wordlists are excluded by the font argument (roughly 100 MiB of glyph
-coverage against a 21 MiB stack); French, Spanish, Italian, Portuguese and Czech need diacritics
-from a physical keyboard layout we cannot know.
+coverage against a 21 MiB stack); French, Spanish, Italian, Portuguese and Czech need diacritics that
+**the keymap cannot produce**. That is now a fact rather than an unknown: the appliance pins a `us`
+keymap with no variant and no dead keys (`01-boot-layer.md` §2, `04-screens.md` §5.1), so `é` and `ř`
+have no keystroke on any physical keyboard, and offering a layout that did have them was refused on
+its own merits.
 
 **Named cost:** a non-English mnemonic cannot be imported at all. The failure is loud and immediate —
 the first word simply will not type — but it is a wall rather than a message, so the import screen

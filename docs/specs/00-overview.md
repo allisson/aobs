@@ -135,7 +135,8 @@ None of these blocks implementation. All of them block the release gate
 | Argon2id wall clock on low-end amd64 (derived: ~1.2–2.5 s at 64 MiB). | [#6](https://github.com/allisson/aobs/issues/6) |
 | Address-search time across 4 accounts × 2 branches × 1000 indices (8,000 derivations). | [#21](https://github.com/allisson/aobs/issues/21), [#27](https://github.com/allisson/aobs/issues/27) |
 | That the four-descriptor `crypto-account` payload fits one QR at ECC H (estimated ~460 B CBOR → ~1,000 UR chars). | [#27](https://github.com/allisson/aobs/issues/27) |
-| That two columns of 12 words fit a 1280×800 panel at the settled type size (measured in a 16:10 browser frame, not on hardware). | [#17](https://github.com/allisson/aobs/issues/17) |
+| That two columns of 12 words fit the **800×600 minimum canvas** at the settled type size (measured in a 16:10 browser frame, not on hardware; the binding geometry moved from 1280×800 to the floor with `04-screens.md` §0). | [#17](https://github.com/allisson/aobs/issues/17), [#55](https://github.com/allisson/aobs/issues/55) |
+| That a 62-character P2TR payment address, 4-character grouped, wraps non-scrolling in both the minimum and the design canvas. The arithmetic says it needs the wrap at 1280×800 already, and the in-tree prototype only ever rendered 42-character P2WPKH. | [#55](https://github.com/allisson/aobs/issues/55) |
 | That a phone camera reads our v27 output at arm's length (v40 is the documented fallback). | [#30](https://github.com/allisson/aobs/issues/30) |
 | The capture-resolution floor for reading an inbound v40 symbol. | [#31](https://github.com/allisson/aobs/issues/31) |
 
