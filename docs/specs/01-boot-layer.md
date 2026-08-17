@@ -62,6 +62,9 @@ included `libseat1` and `seatd`, which this image no longer ships.
 
   ```
   User=signer
+  Environment=XKB_DEFAULT_RULES=evdev
+  Environment=XKB_DEFAULT_MODEL=pc105
+  Environment=XKB_DEFAULT_LAYOUT=us
   Type=notify
   NotifyAccess=all
   ExecStart=/usr/lib/aobs/launch
@@ -71,6 +74,21 @@ included `libseat1` and `seatd`, which this image no longer ships.
   StandardOutput=journal+console
   ```
 
+  - **The keymap is pinned to `evdev`/`pc105`/`us`, and no layout choice is offered.** Slint's
+    linuxkms backend compiles its keymap with every RMLVO field defaulted —
+    `Keymap::new_from_names(&ctx, "", "", "", "", None, 0)` in `calloop_backend/input.rs`, under a
+    context created with `CONTEXT_NO_FLAGS` — and libxkbcommon fills defaulted fields from
+    `XKB_DEFAULT_*`, falling back to its build-time defaults, upstream `evdev`/`pc105`/`us`. The three
+    lines therefore change nothing about today's behaviour; they make it a **decision** rather than an
+    inherited default that a distribution build flag or a stray environment could move under us.
+    `pc105` is that upstream default and the superset geometry: the extra ISO key it carries is
+    unmapped in `us` and reaches nothing that is not reachable elsewhere.
+  - **`XKB_DEFAULT_VARIANT` and `XKB_DEFAULT_OPTIONS` stay unset.** No dead keys, and no
+    group-switch toggle — a second group would be an invisible mode with nothing on screen to name
+    it, in a field where a wrong character is the whole risk.
+  - **No package is owed for any of this.** `libxkbcommon0` **depends on** `xkb-data`, so the entire
+    layout database is already inside the floor above. Which layout, and why no picker, is
+    `04-screens.md` §5.1, where the cost is named.
   - **`Type=notify` is load-bearing.** The app sends `READY=1` once its window is up. With
     `Type=simple` the console detach would fire before the app is drawing, and a startup failure
     would print §9's diagnostic to a console that is already gone.
@@ -217,7 +235,8 @@ random.trust_cpu=off vt.global_cursor_default=0 toram
 
 ## 7. Hardware floor
 
-**UEFI amd64 only. `toram` by default. 2 GiB minimum, 4 GiB recommended (provisional).**
+**UEFI amd64 only. `toram` by default. 2 GiB minimum, 4 GiB recommended (provisional). A framebuffer
+of at least 800×600.**
 
 ### Two display tiers, and that is what deletes the worst failure
 
@@ -262,8 +281,19 @@ build-and-test surface, not on "no display path exists".**
 unnecessary rather than structural — which is the honest way to state it.
 
 **The compatibility statement is a floor, not a hardware list:** *UEFI amd64, any machine whose
-firmware hands over a framebuffer.* The empirical claim belongs to the tested-hardware list published
-with each release.
+firmware hands over a framebuffer **of at least 800×600**.* The empirical claim belongs to the
+tested-hardware list published with each release.
+
+**The resolution qualifier, and why the floor owes one.** A mode below 800×600 reaches the startup
+diagnostic of §9 on a live console rather than a drawn UI, in the same class as a pixel format outside
+`LinuxFBDisplay`'s five arms: the panel is there and the review screen cannot be drawn honestly on it,
+so booting into it would sell the one property the appliance exists for. 800×600 is edk2's default GOP
+mode (`MdeModulePkg.dec`: `PcdVideoHorizontalResolution|800`, `PcdVideoVerticalResolution|600` — `0`
+there would mean *highest available*), which is what OVMF hands the CI rows in
+`05-testing-and-release.md` §6.2 and what a BMC or older firmware hands a user, so the floor sits
+exactly on the common case rather than above it. The layout policy that makes 800×600 sufficient — one
+design canvas, a scale factor above it, reflow below it — is `04-screens.md` §0. **Named cost:**
+640×480-class firmware is excluded, on machines at or below the ~2012 line already excluded above.
 
 No CPU feature is required. `random.trust_cpu=off` already made RDRAND/RDSEED a performance question
 rather than a correctness one.
