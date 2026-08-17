@@ -1,30 +1,37 @@
-# The 22-package floor (01-boot-layer.md §2), as direct dependencies — apt resolves the
-# closure, and `--apt-recommends false` keeps it from widening.
+# The GUI floor (01-boot-layer.md §2), as direct dependencies — apt resolves the closure,
+# and `--apt-recommends false` keeps it from widening.
 #
-# This is the irreducible floor for any KMS GUI, not Slint's overhead: libinput, libseat,
-# libxkbcommon, freetype, fontconfig, fonts-dejavu and their closure, at 21 MiB. The
-# competing measurement was Tauri at 268 packages / 650 MiB
-# (docs/research/05-tauri-viability.md).
+# This is the irreducible floor for any GUI on bare KMS, not Slint's overhead: libinput,
+# libxkbcommon, freetype, fontconfig, fonts-dejavu and their closure. The competing
+# measurement was Tauri at 268 packages / 650 MiB (docs/research/05-tauri-viability.md).
+#
+# **The count and size are an owed measurement** (00-overview.md): the 22 packages / 21 MiB
+# measured for ADR-0002 included libseat1 and seatd, which this image no longer ships. Do
+# not restate the old number here as though it still held.
 #
 # The published package manifest (ADR-0012) is what makes this auditable without
 # building the image.
 
-# Slint on backend-linuxkms + renderer-software. No X server, no Wayland compositor, no
-# cage, no display manager, no GPU driver.
+# Slint on backend-linuxkms-noseat + renderer-software. No X server, no Wayland
+# compositor, no cage, no display manager, no seat daemon, no GPU driver.
+#
+# xkb-data arrives transitively — libxkbcommon0 depends on it — which is why the pinned
+# us keymap (#54, the unit's XKB_DEFAULT_* lines) costs no package here.
 libinput10
-libseat1
 libxkbcommon0
 libfontconfig1
 libfreetype6
 fonts-dejavu-core
 
-# seatd, 104 KiB, with LIBSEAT_BACKEND=seatd. greetd is rejected: its initial_session
-# runs exactly once per boot by design, which is the opposite of what a restarting kiosk
-# needs.
-seatd
-
 # Deliberately absent, each for a reason recorded in the spec:
 #
+#   seatd, libseat1   §2, ADR-0016 — libseat is what stopped /dev/fb0 from being opened
+#                          at all: under the seatd backend the open is delegated to a
+#                          daemon that hands back DRM and evdev nodes only. -noseat makes
+#                          it a plain open(2), and LIBSEAT_BACKEND is not set anywhere
+#   amdgpu, xe,       §3, ADR-0016 — deleted from the module tree and the initramfs by
+#   radeon (modules)       0200-aobs-no-network-modules; firmware-less they take the
+#                          framebuffer aperture and then fail
 #   network-manager   §3 — 7.6 MiB, and worthless as a guarantee on its own
 #   firmware-*        §3 — no network driver gets firmware because none is installed
 #   udisks2, gvfs     §4 — nothing exists to mount anything

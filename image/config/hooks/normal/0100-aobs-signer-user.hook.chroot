@@ -1,5 +1,5 @@
 #!/bin/sh
-# The unprivileged kiosk user, and the two services that make up the appliance.
+# The unprivileged kiosk user, and the one service that is the appliance.
 # 01-boot-layer.md §2.
 set -eu
 
@@ -8,31 +8,17 @@ adduser --system --group --disabled-login \
     --home /var/lib/aobs --shell /usr/sbin/nologin \
     signer
 
-# video for DRM master, input for libinput.
+# video for DRM master, input for libinput, and **no third group** (§2). Those two are
+# sufficient, and this is read from systemd's own udev rules rather than from convention:
+# /dev/fb0 is SUBSYSTEM=="graphics" → root:video, /dev/dri/card0 → root:video,
+# /dev/video0 → root:video, /dev/input/event* → root:input.
+#
+# The seat group this hook used to read out of seatd.service is gone with ADR-0016. There
+# is no seatd, no libseat1, and `backend-linuxkms-noseat` opens /dev/fb0 with a plain
+# open(2) — so there is no socket to own and nothing left to guard.
 adduser signer video
 adduser signer input
 
-# And the group that owns the seatd socket.
-#
-# §2 says `_seatd`, which is the upstream and Arch convention. **Debian has no such
-# group**: its seatd.service is `ExecStart=seatd -g video`, so on this distribution the
-# seat group and the DRM group are the same one. Rather than hardcode either name, read
-# it out of the unit that will actually run — a future Debian that switched to a
-# dedicated group would otherwise leave `signer` unable to open a seat, and the appliance
-# would fail at runtime instead of here.
-seat_group="$(sed -n 's/^ExecStart=.*[[:space:]]-g[[:space:]]\+\([A-Za-z0-9_-]\+\).*/\1/p' \
-    /usr/lib/systemd/system/seatd.service)"
-
-if [ -z "${seat_group}" ]; then
-    echo "0100-aobs-signer-user: seatd.service names no -g group; the seat group is unknown." >&2
-    echo "Read the unit and decide deliberately rather than guessing at a group name." >&2
-    exit 1
-fi
-
-adduser signer "${seat_group}"
-echo "0100-aobs-signer-user: seat group is '${seat_group}'"
-
-systemctl enable seatd.service
 systemctl enable aobs.service
 
 # greetd is rejected (§2): its initial_session runs exactly once per boot by design,

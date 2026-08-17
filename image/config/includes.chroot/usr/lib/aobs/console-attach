@@ -1,0 +1,30 @@
+#!/bin/sh
+# Give the console back when the app stops. 01-boot-layer.md §2, §9.
+#
+# The `lastclose` half of console-detach: §9 wants the kernel console to exist exactly
+# when the GUI does not, so the channel returns the moment the appliance is no longer
+# holding the panel — including the *app ran, then died* case, where systemd restarts it
+# and the diagnostic needs somewhere to go. Run as `ExecStopPost=+`.
+set -u
+
+# Same rule as console-detach: nothing on stdout or stderr. By the time this runs the app
+# is gone, but the unit's file descriptors are unchanged and a stray line would still land
+# on the panel.
+say() {
+    logger -t aobs-console-attach -- "$1"
+}
+
+for vtcon in /sys/class/vtconsole/vtcon*; do
+    [ -r "${vtcon}/name" ] || continue
+    case "$(cat "${vtcon}/name")" in
+        *"frame buffer device"*) ;;
+        *) continue ;;
+    esac
+    if echo 1 >"${vtcon}/bind" 2>/dev/null; then
+        say "reattached ${vtcon}"
+    else
+        say "could not reattach ${vtcon}"
+    fi
+done
+
+exit 0

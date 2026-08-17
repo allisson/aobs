@@ -1,0 +1,45 @@
+#!/bin/sh
+# Detach fbcon from the framebuffer while the app is drawing. 01-boot-layer.md §2, §7.
+#
+# On the fbdev tier there is one framebuffer and no owner: Slint and fbcon write the same
+# memory, and #48 photographed two pr_emerg lines sitting permanently on top of the UI.
+# The DRM tier is immune for free — the console client owns a different buffer and the
+# kernel never steals the display from an active DRM master, restoring the console on
+# lastclose (#51). This reproduces that semantic on fbdev with sysfs: detached exactly
+# while the app draws, reattached by console-attach when it stops, because §9 needs the
+# channel precisely then.
+#
+# Run as `ExecStartPost=+`, i.e. as root inside a `User=signer` unit, so the app never
+# gains a privilege. Verified in #52.
+set -u
+
+# §2: this script writes NOTHING to the unit's stdout or stderr. Both inherit
+# journal+console, so a status line from here would land on the panel the app has already
+# painted — and Slint does not repaint it away. Anything worth saying goes to the journal
+# directly.
+say() {
+    logger -t aobs-console-detach -- "$1"
+}
+
+found=0
+for vtcon in /sys/class/vtconsole/vtcon*; do
+    [ -r "${vtcon}/name" ] || continue
+    name="$(cat "${vtcon}/name")"
+    # The index is not fixed — fbcon is found by name, never by a hardcoded vtcon1.
+    case "${name}" in
+        *"frame buffer device"*) ;;
+        *) continue ;;
+    esac
+    found=1
+    if echo 0 >"${vtcon}/bind" 2>/dev/null; then
+        say "detached ${vtcon} (${name})"
+    else
+        say "could not detach ${vtcon} (${name})"
+    fi
+done
+
+[ "${found}" -eq 1 ] || say "no fbcon vtcon found; nothing to detach"
+
+# Always succeed. A console that would not detach is the accepted case (§7's named cost),
+# not a reason to refuse to sign — and failing here would tear down a working appliance.
+exit 0

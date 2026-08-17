@@ -5,9 +5,11 @@
 # screenshot diffing. That line doubles as the marker whose absence triggers the
 # crash-diagnostic path (01-boot-layer.md §9).
 #
-# OVMF + ramfb, no GPU, on purpose: that is the row that proves `simpledrm` specifically
-# — the fallback the entire display story leans on (ADR-0009). A virtio-gpu run would
-# exercise a native KMS driver and mask its absence.
+# OVMF + ramfb, no GPU, on purpose: that is the row that proves the **fbdev tier**, which
+# is what the display story leans on now (01-boot-layer.md §7, ADR-0016). It was specified
+# as `simpledrm` and could never pass — Debian builds none, so `efifb` serves this machine
+# — and the assertion is that it *draws* (`display=fbdev`), not that it reports a failure.
+# A virtio-gpu run would exercise a native KMS driver and mask the whole question.
 #
 #   ci/qemu-boot.sh bitcoin-signer-amd64.iso [memory-MiB] [timeout-seconds]
 set -eu

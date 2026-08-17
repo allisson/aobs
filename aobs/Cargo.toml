@@ -9,15 +9,21 @@ description = "The aobs appliance: Slint on KMS, the camera loop, and the raw ge
 [dependencies]
 aobs-core = { path = "../aobs-core" }
 
-# Slint on backend-linuxkms + renderer-software, rendering straight to KMS/DRM
-# (01-boot-layer.md §2, ADR-0002). No X server, no Wayland compositor, no display
-# manager, no GPU driver requirement. `default-features = false` is what keeps
-# `backend-default` — and with it winit, and a windowing stack this appliance has no use
-# for — out of the closure.
+# Slint on backend-linuxkms-noseat + renderer-software, rendering straight to the display
+# (01-boot-layer.md §2, ADR-0002, ADR-0016). No X server, no Wayland compositor, no display
+# manager, no seat daemon, no GPU driver requirement. `default-features = false` is what
+# keeps `backend-default` — and with it winit, and a windowing stack this appliance has no
+# use for — out of the closure.
+#
+# **-noseat is load-bearing, not a size saving.** libseat is what stopped /dev/fb0 from
+# being opened at all: under the seatd backend the open is delegated to a daemon that hands
+# back DRM and evdev nodes only, so the fbdev tier could never work. Proved in #48; the
+# image ships no seatd and sets no LIBSEAT_BACKEND, so this feature and that image are one
+# decision in two files.
 [dependencies.slint]
 version = "1.17"
 default-features = false
-features = ["compat-1-2", "std", "backend-linuxkms", "renderer-software"]
+features = ["compat-1-2", "std", "backend-linuxkms-noseat", "renderer-software"]
 
 [build-dependencies]
 slint-build = "1.17"
