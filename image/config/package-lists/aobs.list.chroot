@@ -32,6 +32,10 @@ fonts-dejavu-core
 #   amdgpu, xe,       §3, ADR-0016 — deleted from the module tree and the initramfs by
 #   radeon (modules)       0200-aobs-no-network-modules; firmware-less they take the
 #                          framebuffer aperture and then fail
+#   dbus, dbus-daemon,
+#   dbus-broker       §2, ADR-0017 — a bus is what would start systemd-logind, and the
+#                          appliance answers its own power button instead. The absence is
+#                          load-bearing, so 0400-aobs-no-shell-escape checks it (#87)
 #   network-manager   §3 — 7.6 MiB, and worthless as a guarantee on its own
 #   firmware-*        §3 — no network driver gets firmware because none is installed
 #   udisks2, gvfs     §4 — nothing exists to mount anything

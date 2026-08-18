@@ -170,12 +170,13 @@ capture panel-3-after-nmi
 # §9 has a channel again. This is the one stop the harness can ask for, and it exercises
 # that whole path.
 #
-# Ctrl-Alt-Del and not the ACPI power button: the power button reaches nobody on this
-# image. `systemd-logind` is what would handle it, it declares
-# `BusName=org.freedesktop.login1`, and the image ships no D-Bus at all — so
-# `system_powerdown` sits there and the machine keeps running (observed: 120 s, no
-# reaction). Ctrl-Alt-Del goes to PID 1 from the kernel with nothing in between, and
-# `-no-reboot` turns the reboot into an exit here.
+# Ctrl-Alt-Del and not the ACPI power button. No `systemd-logind` runs on this image and
+# none ever will (ADR-0017), so the button is the app's to answer — and until #69 builds
+# the confirm-then-exit path there is nothing to answer it, which is what `system_powerdown`
+# sitting for 120 s with no reaction showed. The button itself is not the problem: #89
+# measured `Power Button` / `KEY_POWER` reaching the app. Ctrl-Alt-Del goes to PID 1 from
+# the kernel with nothing in between, and `-no-reboot` turns the reboot into an exit here.
+# Once #69 lands, this stop could become the power button and §6.2's row asserts it.
 #
 # **What this asserts is that the stop path completes, not that the console came back.**
 # The panel does not change during the stop, and it cannot: `quiet` on the cmdline
