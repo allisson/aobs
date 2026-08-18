@@ -149,6 +149,14 @@ catches this is **provenance**, not statistics.
 - **No `amdgpu.ko`, `xe.ko` or `radeon.ko` anywhere** — neither in the squashfs module tree nor in the
   initramfs. Each of them removes the framebuffer aperture before failing firmware-less, so on this
   image their presence is what turns a working `efifb` into blackness (`01-boot-layer.md` §3, §7).
+- **No D-Bus in the package manifest** — ADR-0017 makes that absence load-bearing, so it is checked
+  against the artifact that ships and not only by the build hook that refuses to install one.
+- **The shutdown contract is in the unit on the squashfs**: `SuccessExitStatus=42`,
+  `RestartPreventExitStatus=42`, and `SuccessAction=poweroff` **in `[Unit]`**. §5's RAM wipe rests on
+  the app dying before the machine goes down, and these three directives are the whole mechanism — a
+  unit that lost them still boots, still draws, and passes every other row. The section is checked
+  too, because systemd discards `SuccessAction=` from `[Service]` as an unknown key and starts the
+  unit anyway (ADR-0017).
 
 ### 6.2 The QEMU harness
 

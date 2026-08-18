@@ -103,15 +103,45 @@ else
     fi
 fi
 
+# --- ADR-0017: the shutdown contract is in the unit that ships ----------------
+#
+# §5's RAM wipe rests on the app dying before the machine goes down, and these three
+# directives are the whole mechanism. A unit that lost them still boots, still draws and
+# still passes every other row here — it just never powers off, or powers off with the
+# process still alive. That is the shape of failure this file exists for.
+#
+# It also catches SuccessAction= drifting back into [Service], where systemd discards it
+# as an unknown key: the section is checked, not just the line.
+unsquashfs -d "${work}/unit" -n "${work}/live/filesystem.squashfs" \
+    /etc/systemd/system/aobs.service >/dev/null 2>&1 || true
+unit="${work}/unit/etc/systemd/system/aobs.service"
+if [ -f "${unit}" ]; then
+    unit_section="$(sed -n '/^\[Unit\]/,/^\[Service\]/p' "${unit}")"
+    if printf '%s' "${unit_section}" | grep -q '^SuccessAction=poweroff$' \
+        && grep -q '^SuccessExitStatus=42$' "${unit}" \
+        && grep -q '^RestartPreventExitStatus=42$' "${unit}"; then
+        good "the shipped unit carries the shutdown contract, SuccessAction in [Unit]"
+    else
+        bad "the shipped unit is missing the shutdown contract (ADR-0017)"
+    fi
+else
+    bad "no aobs.service on the squashfs"
+fi
+
 # --- ADR-0012 / §7.4: the package manifest ships alongside --------------------
 manifest="${iso%.iso}.packages"
 if [ -f "${manifest}" ]; then
     good "package manifest present: $(wc -l < "${manifest}" | tr -d ' ') packages"
-    if grep -qE '^(firmware-|network-manager|udisks2|gvfs|kdump-tools|v4l-utils|libv4l)' "${manifest}"; then
-        bad "the package manifest lists a package §3/§4/§7 rules out"
-        grep -E '^(firmware-|network-manager|udisks2|gvfs|kdump-tools|v4l-utils|libv4l)' "${manifest}" >&2
+    # dbus is on this pattern for ADR-0017, not for §3: a bus is what would start
+    # systemd-logind, and the appliance answers its own power button instead. The
+    # shell-escape hook fails the build if one is installed; this is the same claim
+    # checked against the artifact that ships, which is the rule that finding exists for.
+    ruled_out='^(firmware-|network-manager|udisks2|gvfs|kdump-tools|v4l-utils|libv4l|dbus)'
+    if grep -qE "${ruled_out}" "${manifest}"; then
+        bad "the package manifest lists a package §3/§4/§7 or ADR-0017 rules out"
+        grep -E "${ruled_out}" "${manifest}" >&2
     else
-        good "the package manifest lists nothing §3/§4/§7 rules out"
+        good "the package manifest lists nothing §3/§4/§7 or ADR-0017 rules out"
     fi
 else
     bad "no package manifest beside the image (${manifest})"
