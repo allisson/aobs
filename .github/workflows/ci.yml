@@ -39,6 +39,47 @@ jobs:
       - name: Mechanical checks
         run: docker run --rm -v "$PWD:/src" -w /src "$BUILD_IMAGE" ci/check-source.sh
 
+      # The test on the test: §1's ban on per-function coverage opt-outs is only enforced
+      # while the check above still bites, and a typo in its regex turns that row green
+      # forever without anything noticing.
+      - name: The mechanical checks still bite
+        run: docker run --rm -v "$PWD:/src" -w /src "$BUILD_IMAGE" ci/check-source-test.sh
+
+  # 05-testing-and-release.md §1: >= 95% region coverage on aobs-core, >= 98% on each of
+  # the nine components in ci/coverage-components.tsv.
+  #
+  # Its own job, not a step in `source`, because §1 says so in its own words: coverage is
+  # necessary and not sufficient, and the other gates are not a subset of the coverage run.
+  # Keeping them separate is also what stops a red coverage number from being read as a
+  # failing test suite, or the reverse.
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the build environment
+        run: docker build -f ci/build-env.Dockerfile -t "$BUILD_IMAGE" ci
+
+      - name: Region coverage
+        run: docker run --rm -v "$PWD:/src" -w /src "$BUILD_IMAGE" ci/check-coverage.sh
+
+  # 05-testing-and-release.md §4. The three targets are ours to write and none of the code
+  # they fuzz exists yet, so what this job proves today is the harness — cargo-fuzz builds
+  # in the one build environment and a target runs to completion. Also its own job: it
+  # needs a nightly toolchain and a sanitizer that the test run has no business carrying.
+  fuzz:
+    name: fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the build environment
+        run: docker build -f ci/build-env.Dockerfile -t "$BUILD_IMAGE" ci
+
+      - name: Build and run the fuzz targets
+        run: docker run --rm -v "$PWD:/src" -w /src "$BUILD_IMAGE" ci/check-fuzz.sh
+
   image:
     name: image
     runs-on: ubuntu-latest

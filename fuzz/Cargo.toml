@@ -1,0 +1,36 @@
+# The fuzz crate (05-testing-and-release.md §4).
+#
+# The root manifest excludes `fuzz/` rather than listing it as a member: as a member it
+# would drag libfuzzer-sys and a nightly-only build into `cargo test --workspace`. Being
+# outside the workspace is also why this crate carries its own lockfile.
+[package]
+name = "aobs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+license = "GPL-3.0-only"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+# §4's three targets all fuzz core: the fountain decoder through our clamping wrapper, the
+# PSBT parser on raw bytes, and the validator seeded with our own key material. The edge
+# is declared now so the first one of them is a file and not a manifest argument.
+[dependencies.aobs-core]
+path = "../aobs-core"
+
+# 01-boot-layer.md §10 and 05 §6.1: never `panic = "abort"`. libFuzzer catches an unwinding
+# panic perfectly well, and ci/check-source.sh fails the build on any manifest that sets
+# abort — this one included.
+[profile.release]
+panic = "unwind"
+
+[[bin]]
+name = "placeholder"
+path = "fuzz_targets/placeholder.rs"
+test = false
+doc = false
+bench = false

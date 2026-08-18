@@ -2,6 +2,11 @@
 members = ["aobs-core", "aobs"]
 resolver = "2"
 
+# `fuzz/` is a crate, not a member. libfuzzer-sys links libFuzzer and cargo-fuzz needs a
+# nightly toolchain for the sanitizer, neither of which belongs in `cargo test
+# --workspace`; 05-testing-and-release.md §4's targets run as their own CI gate.
+exclude = ["fuzz"]
+
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
