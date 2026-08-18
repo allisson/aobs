@@ -32,7 +32,8 @@ Electrum is unreachable by animated QR whatever we chose: no `ur:`, no BBQr, no 
 
 ### The cost we took, stated plainly
 
-`ur-rs` is the riskier parser and we adopted it knowingly:
+`ur` 0.5.x — the crate behind the `dspicher/ur-rs` repository, and **not** the unrelated crates.io
+package named `ur-rs` — is the riskier parser, and we adopted it knowingly:
 
 - `Decoder::receive` adopts `sequence_count` from the **first part it sees, unvalidated**. One frame
   declaring `seqLen = 0xFFFFFFFF` asks for a `Vec<usize>` and a `Vec<f64>` of 4.29 billion elements
@@ -76,7 +77,7 @@ payload-class guarantee inside the 98% bar instead of in the untested layer.
 
 ## 3. The four bounds, enforced at our call site
 
-Before any part reaches `ur-rs`:
+Before any part reaches `ur`:
 
 | Bound | Value | What it stops |
 |---|---|---|

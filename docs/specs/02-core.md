@@ -25,7 +25,7 @@ Sources: [#6](https://github.com/allisson/aobs/issues/6),
 | `secp256k1` | CC0. Implements **RFC6979 deterministic nonces**, which is the Dark Skippy mitigation for free. Writing our own nonce generation would be volunteering for the attack. |
 | `argon2` (RustCrypto) | **No published audit — say so out loud.** It is the unaudited half of the backup crypto and carries the 98% bar with RFC 9106 known-answer vectors and differential testing against the PHC reference. |
 | `chacha20poly1305` (RustCrypto) | NCC Group audit, no significant findings. |
-| `ur-rs` | UR/BC-UR codec. **The riskiest parser in the tree**, adopted knowingly; see `03-transport.md`. |
+| `ur` 0.5.x | UR/BC-UR codec. MIT, GPL-3.0-compatible. **The riskiest parser in the tree**, adopted knowingly; see `03-transport.md`. **The crate is `ur`; `ur-rs` is only the repository name** (`dspicher/ur-rs`) — and it is separately taken on crates.io by an unrelated LLM-agent framework, so `cargo add ur-rs` resolves to a real crate that is not this one. |
 | `qrcodegen` 1.8.x | The outbound QR symbol. MIT, GPL-3.0-compatible. Zero dependencies, `#![forbid(unsafe_code)]`, one source file. It is Project Nayuki's reference implementation, the one ported line-for-line across six languages against a shared conformance suite — the same borrowed instinct as `secp256k1`, applied to a 2006 standard with a published test corpus. `encode_segments_advanced` takes a **maximum version** and returns `Err` rather than exceeding it, which is `03-transport.md` §6's two rules — smallest version that fits, hard cap above it — as the library's behaviour instead of ours. |
 | `zeroize` | `ZeroizeOnDrop`. |
 
