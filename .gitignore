@@ -25,6 +25,10 @@ target
 *.iso.zsync
 *.packages
 
+# Panel captures from ci/qemu-boot.sh and ci/fbcon-probe.sh. They are evidence about one
+# run of one image, which is why CI uploads them as artifacts rather than keeping them.
+*.ppm
+
 # ci/build-binary.sh stages the compiled binary here for live-build to pick up.
 /image/config/includes.chroot/usr/bin/aobs
 

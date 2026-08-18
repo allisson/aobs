@@ -5,11 +5,20 @@
 # screenshot diffing. That line doubles as the marker whose absence triggers the
 # crash-diagnostic path (01-boot-layer.md §9).
 #
-# OVMF + ramfb, no GPU, on purpose: that is the row that proves the **fbdev tier**, which
-# is what the display story leans on now (01-boot-layer.md §7, ADR-0016). It was specified
-# as `simpledrm` and could never pass — Debian builds none, so `efifb` serves this machine
-# — and the assertion is that it *draws* (`display=fbdev`), not that it reports a failure.
-# A virtio-gpu run would exercise a native KMS driver and mask the whole question.
+# Two display rows, because there are two tiers (01-boot-layer.md §7, ADR-0016), and
+# `AOBS_QEMU_GPU` picks which one this run exercises:
+#
+#   ramfb        OVMF + ramfb with no GPU — the **fbdev tier**, the fallback the display
+#                story leans on. It was specified as `simpledrm` and could never pass:
+#                Debian builds none, so `efifb` serves this machine, and the assertion is
+#                that it *draws*, not that it reports a failure. The default, because it
+#                is the row that can fail.
+#   virtio-gpu   a native KMS driver, i.e. the DRM tier — the machines already covered.
+#
+# The rows assert the readiness line only. `display=fbdev|drm` is specified for that line
+# (§2) and the appliance does not yet report a tier, so neither row can tell the tiers
+# apart yet; the field arrives with the panel work and this harness gets its `display=`
+# assertion then.
 #
 #   ci/qemu-boot.sh bitcoin-signer-amd64.iso [memory-MiB] [timeout-seconds]
 set -eu
@@ -17,6 +26,13 @@ set -eu
 iso="${1:-bitcoin-signer-amd64.iso}"
 memory="${2:-4096}"
 deadline="${3:-600}"
+gpu="${AOBS_QEMU_GPU:-ramfb}"
+
+case "${gpu}" in
+    ramfb) display_args="-vga none -device ramfb" ;;
+    virtio-gpu) display_args="-vga none -device virtio-gpu-pci" ;;
+    *) echo "AOBS_QEMU_GPU must be ramfb or virtio-gpu, not ${gpu}" >&2; exit 1 ;;
+esac
 
 [ -f "${iso}" ] || { echo "no such image: ${iso}" >&2; exit 1; }
 
@@ -64,7 +80,7 @@ if [ -z "${firmware_args}" ]; then
     exit 1
 fi
 
-echo "booting ${iso} with ${memory} MiB, ramfb and no GPU"
+echo "booting ${iso} with ${memory} MiB on ${gpu}"
 echo "firmware: ${firmware_args}"
 
 # A monitor, for diagnostics only — the assertion is still the readiness line, and this
@@ -77,14 +93,14 @@ echo "firmware: ${firmware_args}"
 # on tty0 — and a CI failure that carries no information is a CI failure nobody can act
 # on.
 monitor_port="${AOBS_QEMU_MONITOR_PORT:-45455}"
-screendump="${iso%.iso}-panel.ppm"
+screendump="${iso%.iso}-panel-${gpu}.ppm"
 
 # shellcheck disable=SC2086
 qemu-system-x86_64 \
     -machine q35 \
     -m "${memory}" \
     ${firmware_args} \
-    -vga none -device ramfb \
+    ${display_args} \
     -cdrom "${iso}" \
     -boot d \
     -display none \

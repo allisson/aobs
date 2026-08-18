@@ -8,7 +8,9 @@ The v1 implementation spec is written and merged — `docs/specs/` (seven files,
 
 **A walking skeleton is on `main`** ([#39](https://github.com/allisson/aobs/issues/39)): `aobs/` and `aobs-core/`, `ci/`, and `image/` with the live-build config, hooks and the `aobs.service` unit. It is what falsified ADR-0009 by building an ISO and booting it.
 
-**`image/`, `ci/` and the crate's backend feature were reconciled against ADR-0016 and the panel map by [#57](https://github.com/allisson/aobs/issues/57)** — no seatd, no `libseat1`, `backend-linuxkms-noseat`, `Type=notify`, `console-detach`/`console-attach`, the GPU modules deleted, the keymap pinned, and `TTYVTDisallocate=yes` gone for the reason [#52](https://github.com/allisson/aobs/issues/52) proved. None of it has been rebuilt or rebooted since; **the ISO that proves it is owed.**
+**`image/`, `ci/` and the crate's backend feature were reconciled against ADR-0016 and the panel map by [#57](https://github.com/allisson/aobs/issues/57)** — no seatd, no `libseat1`, `backend-linuxkms-noseat`, `Type=notify`, `console-detach`/`console-attach`, the GPU modules deleted, the keymap pinned, and `TTYVTDisallocate=yes` gone for the reason [#52](https://github.com/allisson/aobs/issues/52) proved.
+
+**That reconciliation has now been built and booted** ([#65](https://github.com/allisson/aobs/issues/65)): the ISO builds from `main` with no manual steps, `ci/check-image.sh` passes, and it draws and prints `AOBS_READY` on both QEMU machine types — `ramfb` with no GPU, which is the fbdev tier ADR-0016 rests on, and virtio-gpu. #52's `fbcon` probe is a standing row (`ci/fbcon-probe.sh`): two NMIs after readiness leave the panel byte-identical on a boot where the appliance started exactly once. Building it found one defect and fixed it — the unit was `Type=notify` and nothing in the crate ever sent `READY=1`, so `aobs/src/notify.rs` now does.
 
 **What still lags, and all of it is Rust:**
 
