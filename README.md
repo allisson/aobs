@@ -57,7 +57,14 @@ docker build --platform linux/amd64 -f ci/build-env.Dockerfile -t aobs-build ci
 
 # Tests and the mechanical gates that read the tree.
 docker run --rm --platform linux/amd64 -v "$PWD:/src" -w /src aobs-build \
-    sh -c 'cargo test --workspace && ci/check-source.sh'
+    sh -c 'cargo test --workspace && ci/check-source.sh && ci/check-source-test.sh'
+
+# The two gates that are deliberately not part of the test run: region coverage
+# (>= 95% on aobs-core, >= 98% on each of the nine components in
+# ci/coverage-components.tsv) and the fuzz harness. Separate CI jobs, for the reason
+# 05-testing-and-release.md §1 gives: coverage is necessary, not sufficient.
+docker run --rm --platform linux/amd64 -v "$PWD:/src" -w /src aobs-build ci/check-coverage.sh
+docker run --rm --platform linux/amd64 -v "$PWD:/src" -w /src aobs-build ci/check-fuzz.sh
 
 # The ISO. Both steps, in this order.
 docker run --rm --platform linux/amd64 -v "$PWD:/src" -w /src aobs-build ci/build-binary.sh

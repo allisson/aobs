@@ -1,0 +1,24 @@
+# The nine components 05-testing-and-release.md §1 holds to 98% region coverage.
+#
+# This is the one place in the repo they are named. Each row maps a component to the
+# source it is measured over; ci/check-coverage.sh reads this file and nothing else.
+#
+# A component whose module does not exist yet matches no file, so it has no regions and
+# the gate says so — a name with no regions, never a hole in the list. That is the whole
+# point of wiring the gate before core has code: no later slice negotiates a gate with
+# the code it is supposed to judge.
+#
+# The paths are ours (module names are routine Rust mechanics), the names are the spec's.
+# Renaming a module means editing the regex here in the same commit, or the component
+# silently drops back to "no regions yet" and the 98% floor stops applying to it.
+#
+# Format: name<TAB>regex, matched against the absolute path llvm-cov reports.
+PSBT validation and the whole rejection policy	/aobs-core/src/psbt(/|\.rs$)
+Derivation and the change re-derivation byte-compare	/aobs-core/src/derive(/|\.rs$)
+Sighash computation and the signing call into secp256k1	/aobs-core/src/sign(/|\.rs$)
+The entropy mixing function	/aobs-core/src/entropy(/|\.rs$)
+BIP39 mnemonic ↔ entropy conversion and checksum (including passphrase handling and NFKD)	/aobs-core/src/bip39(/|\.rs$)
+Backup crypto — Argon2id parameters, ChaCha20-Poly1305, header and AAD framing	/aobs-core/src/backup(/|\.rs$)
+The UR decode clamping wrapper and the payload-class check	/aobs-core/src/ur(/|\.rs$)
+The zeroizing secret types	/aobs-core/src/secret(/|\.rs$)
+Address and amount formatting	/aobs-core/src/format(/|\.rs$)

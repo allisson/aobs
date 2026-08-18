@@ -33,6 +33,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       "live-build=${LIVE_BUILD_VERSION}" \
       debootstrap xorriso squashfs-tools initramfs-tools-core \
       dosfstools mtools grub-efi-amd64-bin grub-common \
+    # ci/check-coverage.sh reads llvm-cov's JSON export. The alternative was a summary
+    # parsed out of formatted text, which is a gate that breaks on a tooling reflow.
+      jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Pinned to the same toolchain rust-toolchain.toml names, so the container does not
@@ -41,5 +44,29 @@ ARG RUST_VERSION=1.97.1
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --no-modify-path --profile minimal \
         --default-toolchain "${RUST_VERSION}" \
-        --component rustfmt --component clippy \
+        --component rustfmt --component clippy --component llvm-tools \
     && chmod -R a+w "${RUSTUP_HOME}" "${CARGO_HOME}"
+
+# The two gates 05-testing-and-release.md §1 and §4 require, in the same environment as
+# everything else. A gate that runs in a container of its own is a gate that can resolve a
+# different compiler than the code it judges, and this repository exists because of a
+# defect of exactly that shape (§6).
+#
+# `llvm-tools` above is what `cargo llvm-cov` calls; rust-toolchain.toml already asks for
+# it, and naming it here keeps CI from reaching the network for a component mid-run.
+#
+# nightly is the one unpinned toolchain in this repo. cargo-fuzz's sanitizer and its
+# default `-Zbuild-std` are nightly-only, and a dated nightly pinned here would go stale
+# silently between releases; ci/check-fuzz.sh takes AOBS_FUZZ_TOOLCHAIN when one has to be
+# pinned. `rust-src` is what `-Zbuild-std` needs.
+ARG NIGHTLY_VERSION=nightly
+RUN rustup toolchain install "${NIGHTLY_VERSION}" --profile minimal \
+        --component rust-src --component llvm-tools \
+    && chmod -R a+w "${RUSTUP_HOME}"
+
+ARG CARGO_LLVM_COV_VERSION=0.8.7
+ARG CARGO_FUZZ_VERSION=0.13.2
+RUN cargo install --locked \
+        "cargo-llvm-cov@${CARGO_LLVM_COV_VERSION}" \
+        "cargo-fuzz@${CARGO_FUZZ_VERSION}" \
+    && chmod -R a+w "${CARGO_HOME}"
