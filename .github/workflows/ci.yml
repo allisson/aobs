@@ -43,6 +43,11 @@ jobs:
     name: image
     runs-on: ubuntu-latest
     needs: source
+    # The default is GitHub's six hours, and a job that boots three machines under TCG has
+    # no honest reason to approach it. Run 32084441517 sat in `apt-get update` for five
+    # and a half hours before the platform killed it; a build plus every row below is
+    # roughly forty minutes.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -66,10 +71,15 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src "$BUILD_IMAGE"
           ci/check-image.sh bitcoin-signer-amd64.iso
 
+      # The acquire options are what make a stalled mirror fail instead of hang — the run
+      # above lost its whole budget to one, with no timeout on the socket to end it — and
+      # the step timeout is the backstop for whatever they do not cover.
       - name: Install QEMU and OVMF
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get install -y --no-install-recommends \
+            -o Acquire::Retries=3 -o Acquire::http::Timeout=30 qemu-system-x86 ovmf
 
       # 05-testing-and-release.md §6.2, the fbdev tier: OVMF + ramfb with no GPU. This is
       # the row that can fail — the machines with a DRM driver were never the question.
