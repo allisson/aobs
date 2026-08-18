@@ -78,6 +78,9 @@ included `libseat1` and `seatd`, which this image no longer ships.
   ExecStart=/usr/lib/aobs/launch
   ExecStartPost=+/usr/lib/aobs/console-detach
   ExecStopPost=+/usr/lib/aobs/console-attach
+  SuccessExitStatus=42
+  RestartPreventExitStatus=42
+  SuccessAction=poweroff          # [Unit], not [Service]
   Restart=always
   StandardOutput=journal+console
   ```
@@ -103,6 +106,16 @@ included `libseat1` and `seatd`, which this image no longer ships.
   - **`NotifyAccess=all`, never `main`.** `launch` deliberately does not `exec` the binary — the §9
     fallback text after it is the whole reason the wrapper exists — so the notifying process is never
     the main PID, and `main` drops the datagram silently until the unit times out.
+  - **The exit status is the shutdown mechanism, and it is the whole of it** (§5, ADR-0017).
+    `exit 42` is *shut down*: declared successful, restart prevented, so the unit reaches inactive
+    and `SuccessAction=poweroff` takes the machine down. `exit 0` is *restart* — a fresh process
+    with a fresh `OnceLock` (ADR-0010), not a reboot. Any other exit is a crash and restarts, which
+    is the product fact below, unchanged. A **startup** failure reaches none of the three: §9's
+    diagnostic parks the process rather than exiting.
+  - **`SuccessAction=` is a `[Unit]` key.** Stated because it was written into `[Service]` first,
+    where the image's own systemd (`257.13-1~deb13u1`) discards it as an unknown key while the unit
+    still starts — a silent no-op of exactly the kind control 1 was. `systemd-analyze verify`
+    catches it, and catches a bad value for either of the other two.
   - **The `+` prefix is what keeps the app unprivileged.** systemd runs the two console scripts as
     root inside a `User=signer` unit; the app never gains a capability. Verified in
     [#52](https://github.com/allisson/aobs/issues/52).
@@ -124,16 +137,49 @@ included `libseat1` and `seatd`, which this image no longer ships.
 - `greetd` is rejected: its `initial_session` runs exactly once per boot by design, which is the
   opposite of what a restarting kiosk needs.
 
+**The power button is the app's, and it is read from evdev.** No `systemd-logind` runs here, so
+nothing else can answer it (§4). The kernel presents the ACPI button as its own input device — named
+`Power Button`, carrying `KEY_POWER` (116) — and `signer`'s `input` group already reaches it, so a
+press routes to `04-screens.md` §13's confirm-then-exit path and the physical button does exactly
+what the on-screen action does. **Measured, not assumed**
+([#89](https://github.com/allisson/aobs/issues/89)): both that device and that key reached the app on
+the built ISO.
+
+- **Read the device, not Slint's key path.** Slint *does* deliver the key, but with **no identity**:
+  the text is a single NUL byte, which is what any keysym with no UTF-8 form yields. Matching on that
+  would make every unnamed key end the session, and a USB keyboard's volume and brightness keys are
+  that class. On the `Power Button` node the identity is exact.
+- **What the button cannot reach is stated rather than engineered around**: before the GUI is up, and
+  on §9's parked diagnostic screen, there is no app to receive it. There the four-second hold is the
+  only way off the machine, and §5 records what that costs.
+- **This is why no D-Bus is in the package floor.** ADR-0017 has the argument; the shell-escape
+  hook's forbidden-package list below carries `dbus`, `dbus-daemon` and `dbus-broker`, so the absence
+  is checked at build time rather than merely intended.
+
 **Crash behaviour is a stated product fact, not an incident.** The app dies → systemd restarts it →
 a blank signer with no wallet. That is correct amnesic behaviour: the in-memory wallet is gone and
 the user re-enters the seed. Document it; do not engineer around it.
 
-**No shell escape.** Three controls, all cheap, all required, plus one that had to be dropped:
+**No shell escape.** Four controls, all cheap, all required, plus one that had to be dropped:
 
-1. `NAutoVTs=0` and `ReserveVT=0` in `logind.conf` — no gettys at all, not even the default.
+1. **No gettys at all, not even the default** — `0400-aobs-no-shell-escape.hook.chroot` masks
+   `getty.target`, `getty@`, `serial-getty@`, `console-getty`, `autovt@` and `debug-shell`, and
+   removes the `getty.target.wants` symlinks.
 2. `kernel.sysrq=0`.
-3. No terminal emulator, no SSH server, no login prompt on any tty.
+3. No terminal emulator, no SSH server, no login prompt on any tty — the same hook fails the build
+   if one is installed, because a package list is a statement of intent and this is the check. Its
+   list also carries `dbus`, `dbus-daemon` and `dbus-broker`, which are not shell escapes: they are
+   what would start `systemd-logind`, and ADR-0017 makes that absence load-bearing.
 4. `vt.global_cursor_default=0` on the cmdline.
+
+**Control 1 used to be `NAutoVTs=0` and `ReserveVT=0` in `logind.conf`, and that mechanism never
+ran** ([#87](https://github.com/allisson/aobs/issues/87)). `systemd-logind` declares
+`BusName=org.freedesktop.login1`, the image ships no D-Bus at all, so logind never starts and never
+reads that file. The property held anyway — the masking above is what delivered it — but it was
+credited to a file nobody read, at a load-bearing moment: this is the control the sentence below
+leans on. The file is **deleted**, not left in place with a comment, for ADR-0016's reason: an inert
+mechanism is worse than an absent one, and a config file is the first thing someone edits to change
+behaviour. The intent was always right; only the mechanism was dead.
 
 **`TTYVTDisallocate=yes` is gone, deliberately.** It was listed here as a control, and on this unit it
 **kills the appliance the moment `fbcon` unbinds** — [#52](https://github.com/allisson/aobs/issues/52)
@@ -188,9 +234,13 @@ belt-and-braces marker.
 Beyond that:
 
 - Neuter `/sbin/swapon` in a hook, and `systemctl mask swap.target`.
-- `nohibernate` on the cmdline; `AllowHibernation=no` in `sleep.conf`;
-  `HandleLidSwitch=ignore` and `HandleSuspendKey=ignore`, so a closed lid cannot suspend a machine
-  holding a seed.
+- `nohibernate` on the cmdline and `AllowHibernation=no` in `sleep.conf`. **A closed lid cannot
+  suspend a machine holding a seed, and the reason is an absence rather than a setting**: the lid
+  switch, the suspend key and the hibernate key are all handled by `systemd-logind`, and no logind
+  runs here (§2). This used to read `HandleLidSwitch=ignore` and `HandleSuspendKey=ignore` in
+  `logind.conf` — unread, like control 1, and deleted with it
+  ([#87](https://github.com/allisson/aobs/issues/87)). The claim is *stronger* now than the settings
+  made it: nothing is configured to ignore these events because nothing exists to act on them.
 - **There is no `noswap` kernel parameter.** Do not cargo-cult it onto the cmdline.
 - Kernel crash dumps: no `kdump-tools` package, no `crashkernel=`.
 - Userspace crash dumps: `Storage=none` **and** `ProcessSizeMax=0` in `coredump.conf.d/`. This
@@ -206,9 +256,25 @@ Beyond that:
 steady-state allocator overhead, not a startup or shutdown pass.
 
 **What actually protects the wallet is the process dying.** The wallet lives in the app's anonymous
-memory, never on a filesystem. `04-screens.md` §13's *end the session* is a shutdown: systemd stops the
-unit, the process dies, and **process death frees its pages** — which is what `init_on_free=1` poisons.
-That path holds however the process dies, and it does not involve the overlay at all.
+memory, never on a filesystem. `04-screens.md` §13's *end the session* is a shutdown, and **the app
+dies first**: it exits 42, the unit reaches inactive, and `SuccessAction=poweroff` takes the machine
+down after the process is already gone (§2, ADR-0017). **Process death frees its pages** — which is
+what `init_on_free=1` poisons. That path holds however the process dies, and it does not involve the
+overlay at all.
+
+**The ordering is the guarantee, and it is deliberate.** Freeing happens before anything begins
+shutting the machine down, so the wipe holds even if what follows is forced, hangs, or is a mechanism
+a later change gets wrong. The rejected shape is the app asking something still running to take the
+machine down and waiting to be stopped: the seed then sits in RAM while the request is in flight, and
+a guarantee becomes a claim about someone else's ordering.
+
+**The app must never call `reboot(2)` itself, and could not anyway.** `reboot(RB_POWER_OFF)` powers
+the machine off from inside the kernel **without killing userspace**, so nothing is freed and
+`init_on_free=1` never fires — it is case 1 below, executed by our own hand, on the one path that
+exists to avoid it. It is also unreachable: the unit is `User=signer` with no `AmbientCapabilities`,
+and `reboot(2)` needs `CAP_SYS_BOOT`. Both halves are recorded because the first is the reason and
+the second is only an accident of the current unit
+([#87](https://github.com/allisson/aobs/issues/87)).
 
 **The overlayfs upper dir is deliberately not claimed**, and this is a correction
 ([#62](https://github.com/allisson/aobs/issues/62)) rather than an omission. This section used to read
@@ -238,8 +304,13 @@ upstream for "severe usability and reliability problems"; do not resurrect it.
 
 **What it does not survive, stated in the user docs rather than buried:**
 
-1. **A hard power cut.** Poisoning fires when memory is *freed*. Cut power and nothing is freed.
-   This is a clean-shutdown guarantee only. **It is not a panic button.**
+1. **A hard power cut** — including **holding the power button for four seconds**, which is the
+   firmware cutting power with the kernel never involved. Poisoning fires when memory is *freed*.
+   Cut power and nothing is freed. This is a clean-shutdown guarantee only. **It is not a panic
+   button.** The hold is named here rather than left to be discovered because it is the one gesture
+   a user reaches for when the appliance is not answering, and §2's power-button handling cannot
+   reach it: before the GUI is up, and on §9's parked diagnostic screen, a short press does nothing
+   and the hold is the only way off the machine.
 2. **Physical remanence.** Data can remain in RAM for minutes after shutdown. The wipe narrows the
    window; it does not close it.
 3. **Kernel memory**, some of which is not erased at all.

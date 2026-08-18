@@ -525,6 +525,22 @@ nothing.
 **Restart is offered alongside shutdown, explicitly labelled as the way to load a different wallet.**
 That turns the accepted cost of one-wallet-per-boot from a dead end into a discoverable affordance.
 
+**Restart is a promise about the wallet, not the machine.** It is delivered by the app exiting and
+systemd restarting it — a fresh process with a fresh `OnceLock` (ADR-0010), in about a second, on the
+path `01-boot-layer.md` §2 already documents as crash behaviour and which is therefore the
+best-tested path in the image. A machine reboot would buy nothing: the kernel holds no wallet state,
+and §5 there records that a reboot frees neither the overlay upper dir nor the page cache either.
+**The cost is the label**, and it is paid rather than hidden: the entry says what it does — *start
+over with a different wallet* — instead of borrowing the machine's word for it and meaning something
+narrower (ADR-0017).
+
+**The physical power button is the same action as the menu entry**, confirmation included. It is not
+a second, faster path to shutdown: a press lands on the same confirm, so an accidental knock costs a
+press to undo rather than a session. The appliance receives it directly from its own input device —
+no `systemd-logind`, no D-Bus (`01-boot-layer.md` §2, ADR-0017). **Where it cannot reach**, before
+the GUI is up or on a parked diagnostic screen, the four-second hold is the only way off the machine,
+and it is a hard power cut with what that costs recorded in `01-boot-layer.md` §5.
+
 Both confirm once, with a **press rather than a hold**. An accidental shutdown mid-review is now the
 most expensive accident in the product — it costs a 24-word retype — and one press is the cheapest
 guard proportional to it.

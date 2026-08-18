@@ -166,6 +166,7 @@ would prove only that *something* drew.
 | OVMF + virtio-gpu | The DRM tier. Asserts `display=drm`. |
 | OVMF + `ramfb`, no GPU | **The fbdev tier** — the fallback the display story now leans on (`01-boot-layer.md` §7, ADR-0016). Asserts `display=fbdev` and a drawn frame. This is the configuration that used to be specified as `simpledrm` and could never pass: Debian builds no `simpledrm`, so `efifb` is what serves this machine, and the assertion is that it **draws**, not that it reports `AOBS-E02` or `AOBS-E05`. |
 | **`fbcon` regression** — inject two NMIs on the `ramfb` machine after `AOBS_READY` and assert the panel is **byte-identical** across them. | That the console detach still holds. This is [#52](https://github.com/allisson/aobs/issues/52)'s probe as a standing row, and it must count `AOBS_READY` lines and refuse to compare anything unless the appliance started exactly once — a looping service must not pass for a clean run. |
+| **The power button** — `system_powerdown` on the `ramfb` machine after `AOBS_READY`, asserting the confirm appears and that confirming it powers the machine off. | That the button reaches the app at all, and that the exit-status contract fires. [#89](https://github.com/allisson/aobs/issues/89) measured the first half with a throwaway build — `Power Button` / `KEY_POWER` reached an unprivileged app — and a control press first, without which a silent run cannot be told from a broken probe. **This row waits for a shutdown to assert on**; until then the measurement stands and the row does not. |
 | RAM at and below the floor | The low-memory GRUB entry degrades rather than bricks. |
 | No camera | The degraded-but-useful path. |
 | No keyboard | The "no input" screen appears. |
@@ -184,6 +185,9 @@ can silently re-resolve. That is what leaves the harness exactly one site to tra
   `efifb`'s reported format negotiates, and that the console detach behaves as it did under QEMU. Both
   were verified against `ramfb` only, where the vtcon index and the pixel format came from that
   kernel and that firmware (`01-boot-layer.md` §7).
+- **The power button on real firmware.** #89 measured it under QEMU's ACPI implementation only, and
+  the device name and key code came from that kernel and that firmware — the same limit
+  `01-boot-layer.md` §7 records for the fbdev tier.
 - Physical keyboards through libinput — including **one non-US board**, to confirm that the pinned
   `us` keymap (`01-boot-layer.md` §2) still reaches all 95 printable ASCII characters on it, since
   that reachability is the whole argument for offering no layout choice (`04-screens.md` §5.1).

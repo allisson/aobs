@@ -142,7 +142,7 @@ None of these blocks implementation. All of them block the release gate
 | That a phone camera reads our v27 output at arm's length (v40 is the documented fallback). | [#30](https://github.com/allisson/aobs/issues/30) |
 | The capture-resolution floor for reading an inbound v40 symbol. | [#31](https://github.com/allisson/aobs/issues/31) |
 
-Six verification obligations, distinct from measurements:
+Eight verification obligations, distinct from measurements:
 
 - **The fbdev display tier on real firmware**, verified only under QEMU + `ramfb` so far: that
   `efifb`'s reported pixel format negotiates against the renderer's five accepted arms, and that
@@ -161,6 +161,16 @@ Six verification obligations, distinct from measurements:
   ([#62](https://github.com/allisson/aobs/issues/62)). The check is `docs/qa-checklist.md`'s row: after
   a full session, the writable layer holds nothing the app wrote. Until it is run, the strongest claim
   in that section is an assumption.
+
+- **The power button on real firmware.** [#89](https://github.com/allisson/aobs/issues/89) measured
+  it under QEMU's ACPI implementation only — `Power Button` / `KEY_POWER` reaching an unprivileged
+  app — and the device name and key code came from that kernel and that firmware, the same limit the
+  fbdev tier carries above (ADR-0017).
+- **That the exit-status contract fires end to end.** `SuccessExitStatus=42`,
+  `RestartPreventExitStatus=42` and `SuccessAction=poweroff` are accepted by the image's own systemd
+  (`systemd-analyze verify`, `257.13-1~deb13u1`), but nothing in the crate exits 42 yet, so no boot
+  has ever powered off through them. It is what `04-screens.md` §13's *end the session* rests on
+  ([#69](https://github.com/allisson/aobs/issues/69), ADR-0017).
 
 - **Pin whether BIP-174 explicitly forbids a Signer removing fields**, rather than resting on the
   role separation alone ([#30](https://github.com/allisson/aobs/issues/30)).

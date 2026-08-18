@@ -1,9 +1,16 @@
 #!/bin/sh
 # No shell escape. 01-boot-layer.md §2, controls 1, 3 and 4.
 #
-# Control 1 (NAutoVTs=0, ReserveVT=0) and control 2 (kernel.sysrq=0) are declarative and
-# live in config/includes.chroot. This hook is the part that has to run: masking the
-# units, and failing the build if a login path was pulled in by a dependency.
+# Control 2 (kernel.sysrq=0) is declarative and lives in config/includes.chroot. This hook
+# is the part that has to run: masking the units, and failing the build if a login path was
+# pulled in by a dependency.
+#
+# Control 1 is the masking below, and that is a correction (#87). It used to be NAutoVTs=0
+# and ReserveVT=0 in logind.conf — a file nothing on this image ever reads, because
+# systemd-logind declares BusName=org.freedesktop.login1 and no D-Bus is installed, so
+# logind never starts. The file is deleted rather than left to read like a working control.
+# The intent was always right; only the mechanism was dead. The masking is what leaves no
+# getty, and therefore what licenses dropping TTYVTDisallocate=yes from the unit (#52).
 set -eu
 
 systemctl mask \
@@ -21,9 +28,14 @@ rm -f /usr/lib/systemd/system/getty.target.wants/* \
 # list is a statement of intent; this is the check. Nothing here is meant to be driven
 # from a shell, so one is only a mistake surface — and it advertises a capability the
 # appliance does not offer.
+#
+# dbus is on this list for a different reason than the rest: it is not a shell escape, it
+# is what would start systemd-logind. ADR-0017 decides the appliance answers its own power
+# button instead, so the absence of a bus is now load-bearing and is checked here rather
+# than merely intended.
 for forbidden in openssh-server dropbear-bin telnetd inetutils-telnetd \
                  xterm rxvt-unicode network-manager udisks2 gvfs kdump-tools \
-                 v4l-utils libv4l-0t64
+                 v4l-utils libv4l-0t64 dbus dbus-daemon dbus-broker
 do
     if dpkg-query -W -f='${Status}' "${forbidden}" 2>/dev/null | grep -q "install ok installed"; then
         echo "0400-aobs-no-shell-escape: ${forbidden} is installed and must not be." >&2

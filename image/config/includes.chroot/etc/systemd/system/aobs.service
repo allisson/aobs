@@ -13,6 +13,19 @@
 Description=aobs — amnesic offline Bitcoin signer
 Documentation=https://github.com/allisson/aobs
 After=systemd-user-sessions.service
+# §13 and ADR-0017: the app dies first, and its death takes the machine down. Exit 42 is
+# a user-requested shutdown — declared successful below, restart prevented below, so the
+# unit reaches inactive and this fires. By then the process is gone and its pages are
+# freed and poisoned, which is what makes §5's guarantee unconditional rather than a
+# claim about the ordering of whatever runs next.
+#
+# `poweroff`, not `poweroff-force`: ExecStopPost has already rebound `fbcon` by the time
+# this runs, and there is nothing to gain from skipping the shutdown transaction.
+#
+# This key belongs to [Unit], not [Service]. `systemd-analyze verify` on the image's own
+# systemd (257.13-1~deb13u1) rejects it in [Service] as an unknown key, and it was
+# written there first.
+SuccessAction=poweroff
 
 [Service]
 # §2: the app sends READY=1 once its window is up, and `Type=notify` is load-bearing —
@@ -55,6 +68,19 @@ ExecStart=/usr/lib/aobs/launch
 # systemd's privilege and never the app's. Verified in #52.
 ExecStartPost=+/usr/lib/aobs/console-detach
 ExecStopPost=+/usr/lib/aobs/console-attach
+# The exit-status contract (§2, ADR-0017). Three cases, and only one of them is new:
+#
+#   exit 42        the user chose *shut down*. Declared successful so the machine powers
+#                  off through SuccessAction above rather than through a failed unit.
+#   exit 0         the user chose *restart* — a different wallet (ADR-0010), delivered by
+#                  a fresh process with a fresh OnceLock, not by rebooting the machine.
+#   anything else  a crash. §2's stated product fact: systemd restarts it and the user
+#                  gets a blank signer. Unchanged by any of this.
+#
+# A *startup* failure reaches none of these: §9's diagnostic parks the process forever
+# rather than exiting, so neither the restart nor the poweroff can scroll it away.
+SuccessExitStatus=42
+RestartPreventExitStatus=42
 Restart=always
 RestartSec=1s
 
@@ -65,9 +91,10 @@ RestartSec=1s
 # that tty kills the process group. §2 now forbids all five by name. Nothing is lost: the
 # app reads no stdin, because input is libinput on /dev/input/*.
 #
-# Do not add TTYVTDisallocate=yes back without re-running #52's probe. Control 1
-# (NAutoVTs=0, ReserveVT=0) leaves no getty to allocate a VT, so there is no VT holding
-# readable text for it to clear.
+# Do not add TTYVTDisallocate=yes back without re-running #52's probe. Control 1 leaves no
+# getty to allocate a VT, so there is no VT holding readable text for it to clear — and
+# since #87, control 1 is 0400-aobs-no-shell-escape.hook.chroot masking every getty unit,
+# not the NAutoVTs=0 in logind.conf that never ran.
 StandardOutput=journal+console
 StandardError=journal+console
 
