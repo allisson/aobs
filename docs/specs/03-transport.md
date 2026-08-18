@@ -9,7 +9,8 @@ Sources: [#2](https://github.com/allisson/aobs/issues/2),
 [#27](https://github.com/allisson/aobs/issues/27),
 [#30](https://github.com/allisson/aobs/issues/30),
 [#31](https://github.com/allisson/aobs/issues/31),
-[#5](https://github.com/allisson/aobs/issues/5).
+[#5](https://github.com/allisson/aobs/issues/5),
+[#67](https://github.com/allisson/aobs/issues/67).
 
 ## 1. Format
 
@@ -31,7 +32,8 @@ Electrum is unreachable by animated QR whatever we chose: no `ur:`, no BBQr, no 
 
 ### The cost we took, stated plainly
 
-`ur-rs` is the riskier parser and we adopted it knowingly:
+`ur` 0.5.x — the crate behind the `dspicher/ur-rs` repository, and **not** the unrelated crates.io
+package named `ur-rs` — is the riskier parser, and we adopted it knowingly:
 
 - `Decoder::receive` adopts `sequence_count` from the **first part it sees, unvalidated**. One frame
   declaring `seqLen = 0xFFFFFFFF` asks for a `Vec<usize>` and a `Vec<f64>` of 4.29 billion elements
@@ -75,7 +77,7 @@ payload-class guarantee inside the 98% bar instead of in the untested layer.
 
 ## 3. The four bounds, enforced at our call site
 
-Before any part reaches `ur-rs`:
+Before any part reaches `ur`:
 
 | Bound | Value | What it stops |
 |---|---|---|
@@ -165,3 +167,61 @@ this flips.
 
 The multi-part path is **forbidden by rule** on both prompts, which is what keeps the restore path
 out of the fountain decoder entirely.
+
+## 8. The encoder, and where it lives
+
+`qrcodegen` 1.8.x — named, licensed and argued in `02-core.md` §1 alongside every other dependency,
+including why its age reads differently on this side of the boundary than `bardecoder`'s did on the
+other.
+
+**It lives in `aobs-core`.** ADR-0004's seam is one question — *does this touch hardware* — and a QR
+symbol is a matrix of bits. Drawing one touches hardware; **computing one does not**. So core emits
+the module matrix and the shell paints it, which is the review-model seam again: *core produces a
+model; tests assert on the model, never on pixels.* The consequence is the point — version
+selection, the ECC level, the cap and the refusal all sit under core's 95% region gate and all test
+from a byte fixture, and the shell keeps no branch on whether a payload fit. It does **not** add a
+tenth 98% component: the nine are ADR-0004's and this is not one of them.
+
+**Both of §6's rules are one call**, not a loop we maintain:
+
+```
+QrCode::encode_segments_advanced(segs, ecl, Version::MIN, cap, None, false)
+```
+
+The smallest version that fits is the library's search; the cap is `maxversion`; exceeding it is
+`Err(DataTooLong)` rather than a larger symbol. `boostecl` is pinned **`false`**: it would raise the
+ECC level whenever a payload left slack in its version, which costs nothing in density but makes the
+emitted level a function of payload size, and §6 and §7 name the level rather than a floor.
+
+**The UR text is uppercased before encoding**, which §1 already requires for a different reason —
+Specter's scanner regexes match `UR:CRYPTO-*`. `QrSegment::make_segments` then picks alphanumeric
+mode on its own, and that is what §7's sizing in *characters* rather than bytes assumes. Lowercase
+would fall to byte mode and cost about a third of the capacity: measured, a v27 symbol at ECC L
+carries **2 132 alphanumeric characters** but only **1 465 bytes**.
+
+### Measured, against the acceptance criteria
+
+`qrcodegen` 1.8.0, release build, on an arm64 development machine — **not floor hardware**, so the
+timings indicate rather than discharge anything.
+
+| Check | Result |
+|---|---|
+| §7's backup QR: 529 alphanumeric characters at ECC H | **version 20, 97×97** — reproduces §7's stated figure independently |
+| Headroom at that version | 557 characters is the v20-H ceiling, so the largest backup sits 28 below it |
+| §6's cap: 2 132 characters at ECC L | **version 27**; 2 133 refuses rather than growing |
+| Smallest-that-fits | a 40-character single-part UR lands on **version 2** |
+| Encode time, v27 at ECC L, automatic mask | **~2.4 ms**, against the 250 ms that 4 fps allows |
+
+The watch-only export is the one that does not fit the same envelope: **~1 000 alphanumeric
+characters at ECC H needs version 29**, past §6's v27 cap. That is not a conflict — the cap is §6's
+rule for the animated signing path and §7 states no version limit on the static pair — but it is the
+number the owed obligation in `05-testing-and-release.md` §6.4 will be judged against, and the ~460 B
+CBOR estimate underneath it is still derived rather than measured, so the obligation stands.
+
+**Not settled here, and not ours to settle quietly:** the maximum *fragment length* handed to the UR
+encoder. §6 says the version follows the part size, so the part size is what decides whether the
+encoder can ever refuse on the signing path — and §6's *"no outbound size cap"* holds only if that
+length is chosen under the 2 132-character v27 budget. Nothing in `docs/specs/` names it, so it is
+[#94](https://github.com/allisson/aobs/issues/94) — which carries the arithmetic, the
+single-fragment worst case, and the measured fact that an indefinite loop grows the part string as
+the sequence number does.

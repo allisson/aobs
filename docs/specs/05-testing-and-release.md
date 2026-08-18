@@ -93,7 +93,7 @@ Three we write, one we skip, one deliberate exception.
 3. **The validator**, structure-aware and seeded with our own test key material, asserting the one
    invariant that matters: *it never accepts a transaction containing an output classified as ours
    whose scriptPubKey we did not ourselves produce.*
-4. **Skipped: Bytewords and CBOR encode/decode** — `ur-rs` fuzzes those three targets upstream.
+4. **Skipped: Bytewords and CBOR encode/decode** — `ur` fuzzes those three targets upstream.
    Recorded so a later reviewer does not read the gap as an oversight.
 5. **Deliberate exception: the address-verification path gets no fuzz target.** Its "parser" is a
    prefix strip, a truncate and two comparisons — all total, allocation-free and non-indexing. A fuzz

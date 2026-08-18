@@ -14,7 +14,8 @@ Sources: [#6](https://github.com/allisson/aobs/issues/6),
 [#22](https://github.com/allisson/aobs/issues/22),
 [#25](https://github.com/allisson/aobs/issues/25),
 [#27](https://github.com/allisson/aobs/issues/27),
-[#32](https://github.com/allisson/aobs/issues/32).
+[#32](https://github.com/allisson/aobs/issues/32),
+[#67](https://github.com/allisson/aobs/issues/67).
 
 ## 1. Dependencies
 
@@ -24,12 +25,30 @@ Sources: [#6](https://github.com/allisson/aobs/issues/6),
 | `secp256k1` | CC0. Implements **RFC6979 deterministic nonces**, which is the Dark Skippy mitigation for free. Writing our own nonce generation would be volunteering for the attack. |
 | `argon2` (RustCrypto) | **No published audit — say so out loud.** It is the unaudited half of the backup crypto and carries the 98% bar with RFC 9106 known-answer vectors and differential testing against the PHC reference. |
 | `chacha20poly1305` (RustCrypto) | NCC Group audit, no significant findings. |
-| `ur-rs` | UR/BC-UR codec. **The riskiest parser in the tree**, adopted knowingly; see `03-transport.md`. |
+| `ur` 0.5.x | UR/BC-UR codec. MIT, GPL-3.0-compatible. **The riskiest parser in the tree**, adopted knowingly; see `03-transport.md`. **The crate is `ur`; `ur-rs` is only the repository name** (`dspicher/ur-rs`) — and it is separately taken on crates.io by an unrelated LLM-agent framework, so `cargo add ur-rs` resolves to a real crate that is not this one. |
+| `qrcodegen` 1.8.x | The outbound QR symbol. MIT, GPL-3.0-compatible. Zero dependencies, `#![forbid(unsafe_code)]`, one source file. It is Project Nayuki's reference implementation, the one ported line-for-line across six languages against a shared conformance suite — the same borrowed instinct as `secp256k1`, applied to a 2006 standard with a published test corpus. `encode_segments_advanced` takes a **maximum version** and returns `Err` rather than exceeding it, which is `03-transport.md` §6's two rules — smallest version that fits, hard cap above it — as the library's behaviour instead of ours. |
 | `zeroize` | `ZeroizeOnDrop`. |
 
 Rejected and why: `ring` (no Argon2, no XChaCha), `libsodium` bindings (drags a C toolchain into the
 ISO against the v2 reproducible-build goal), `age` (see ADR-0007), `nokhwa` (shell-side; pulls
-`mozjpeg`, a C library built from source).
+`mozjpeg`, a C library built from source), `qrcode` 0.14.x (kennytm; pure Rust and better maintained
+— July 2024 against `qrcodegen`'s April 2022 — but its default features pull `image`, it exposes no
+maximum-version parameter, so `03-transport.md` §6's v27 cap becomes a loop we write and a refusal
+we define, and it is not the reference implementation), `fast_qr` (MIT, but its `image` feature pulls
+`resvg`, and it optimises for throughput and wasm, neither of which is a problem we have at 4 fps),
+and **writing the encoder ourselves** — ISO/IEC 18004 is Reed–Solomon over GF(256), eight mask
+patterns and a penalty score, none of it hard and all of it silently wrong in ways only a scanner
+finds, which is `secp256k1`'s instinct in a second domain: a symbol nobody can read is a signature
+nobody can broadcast.
+
+**On `qrcodegen`'s age.** No release since 2022 is the thing that rejected `bardecoder` in
+`03-transport.md` §5, so it has to be answered rather than waved past. It reads differently here
+because of which side of the QR boundary the code sits on: `bardecoder` would have parsed hostile
+input, where an unfixed defect is an attack surface. **The encoder consumes only bytes we
+produced** — a PSBT we signed, a descriptor set we built, a ciphertext we sealed — and emits to a
+screen. There is no adversary on its input. Against a frozen 2006 standard with a published
+conformance corpus, no releases means finished, and `bardecoder`'s staleness never travelled
+alone: it came attached to a mandated `image ^0.24` and no raw-buffer entry point.
 
 `secp256k1`'s own contribution policy is *"no crypto should be implemented in Rust"*. That instinct
 is correct and worth borrowing rather than contradicting: **do not hand-roll the Bitcoin layer.**
