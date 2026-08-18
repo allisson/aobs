@@ -10,7 +10,8 @@ Sources: [#2](https://github.com/allisson/aobs/issues/2),
 [#30](https://github.com/allisson/aobs/issues/30),
 [#31](https://github.com/allisson/aobs/issues/31),
 [#5](https://github.com/allisson/aobs/issues/5),
-[#67](https://github.com/allisson/aobs/issues/67).
+[#67](https://github.com/allisson/aobs/issues/67),
+[#94](https://github.com/allisson/aobs/issues/94).
 
 ## 1. Format
 
@@ -122,7 +123,8 @@ Both are spec requirements alongside the bounds in §3, not implementation hygie
 
 ## 6. Outbound: the signed PSBT
 
-**ECC L, capped at version 27, 4 fps, looping indefinitely with fresh fountain parts.**
+**ECC L, capped at version 27, maximum UR fragment length 960 bytes, 4 fps, looping indefinitely
+with fresh fountain parts.**
 
 - **ECC L** is the backup QR's decision run in the opposite direction on the same evidence: BBQr's
   ECC-L advice is premised on *"a perfect LCD screen"*, which is false for paper and **exactly true
@@ -131,8 +133,16 @@ Both are spec requirements alongside the bounds in §3, not implementation hygie
   plus quiet zone gives ≈3.8 px/module against v27's 133 → ≈5.3. Buying that back costs two extra
   frames on the 3 744 B case, priced at ~1 s even at 50% capture loss. **Always the smallest version
   that fits the part size, never a fixed version.**
+- **Maximum UR fragment length 960 bytes** — `Encoder::new`'s second argument, and the number that
+  makes *"no outbound size cap"* below true rather than aspirational. The version follows the part
+  size, so the part size is the only thing that can make the QR encoder refuse. **The largest part
+  960 can ever produce is 2 013 characters against v27's 2 132**, with every CBOR field at its `u32`
+  maximum and the sequence number ten digits wide — so the refusal is unreachable by arithmetic, not
+  merely unlikely. It costs **no extra frame on any transaction in §1's capacity table**. The
+  arithmetic, the rejected candidates and the three traps are §9.
 - *Owed measurement: what a phone camera actually reads at arm's length. **v40 is the documented
-  fallback** if v27 proves needlessly conservative.*
+  fallback** if v27 proves needlessly conservative — and the fragment length is then **re-derived
+  from the new cap, never kept**.*
 - **4 fps** is the frame rate the recovery-time maths was computed at; keeping it keeps those numbers
   valid.
 - **Loop indefinitely.** With no feedback channel, no stop condition can be anything but arbitrary.
@@ -142,6 +152,9 @@ Both are spec requirements alongside the bounds in §3, not implementation hygie
   component**, not `1-1`.
 - **No outbound size cap.** The inbound 64 KiB bound already constrains what can arrive, and refusing
   to emit a signature we have already produced would be the worst failure available to this device.
+  This holds *because of* the fragment length above, not alongside it: a signed PSBT is larger than
+  the one that arrived, so 64 KiB is a floor on what we may have to emit rather than a ceiling, and
+  960's bound is stated over every message length a `u32` can describe.
 
 **No ticking counter and no percentage.** BC-UR is **rateless**, so looping properly means generating
 *fresh* parts rather than cycling a fixed set — *"part 3 of 4"* becomes a lie on the second pass, and
@@ -218,10 +231,141 @@ rule for the animated signing path and §7 states no version limit on the static
 number the owed obligation in `05-testing-and-release.md` §6.4 will be judged against, and the ~460 B
 CBOR estimate underneath it is still derived rather than measured, so the obligation stands.
 
-**Not settled here, and not ours to settle quietly:** the maximum *fragment length* handed to the UR
-encoder. §6 says the version follows the part size, so the part size is what decides whether the
-encoder can ever refuse on the signing path — and §6's *"no outbound size cap"* holds only if that
-length is chosen under the 2 132-character v27 budget. Nothing in `docs/specs/` names it, so it is
-[#94](https://github.com/allisson/aobs/issues/94) — which carries the arithmetic, the
-single-fragment worst case, and the measured fact that an indefinite loop grows the part string as
-the sequence number does.
+## 9. The maximum UR fragment length: 960 bytes
+
+§6 says the version follows the part size, so the part size is the only thing that can make the
+encoder refuse on the signing path — which makes this number, not the v27 cap, what §6's *"no
+outbound size cap"* actually rests on ([#94](https://github.com/allisson/aobs/issues/94)).
+
+### 9.1 The arithmetic
+
+A part string is not measured, it is computed. `ur` 0.5.2 emits
+
+```
+ur:crypto-psbt/{seq}-{seqLen}/{bytewords_minimal(cbor)}
+```
+
+where the CBOR is `[seq, seqLen, messageLen, checksum, fragment]` and bytewords minimal costs
+`2n + 8` characters — two per byte, plus a four-byte CRC-32 that is doubled too. So, in characters:
+
+```
+15 + digits(seq) + 1 + digits(seqLen) + 1 + 2·(1 + w(seq) + w(seqLen) + w(messageLen) + 5 + h + F) + 8
+```
+
+`F` is the fragment length, `h` its CBOR byte-string header (3 for any `F` in 256..65 535), `w` the
+minimal CBOR width of a uint, and the `5` is the CRC-32 checksum field. **Every integer field is
+written `as u32`** (`fountain::Part`'s `Encode` impl, four `.u32()` calls), so no `w` ever exceeds 5.
+That is what turns a sweep into a bound: charge all four fields their `u32` maximum and both decimals
+ten digits, and the result is the largest part the animation can *ever* emit.
+
+At `F = 960` that ceiling is **2 013 characters against v27-L's 2 132** — 119 spare.
+
+The formula is not asserted, it was checked character-for-character against what `ur` 0.5.2 actually
+emits:
+
+- every message size from 1 B to 8 KiB at each candidate below — which covers `w` at 1, 2 and 3 on
+  `seqLen` and `messageLen`, and the byte-string header at 2 and 3;
+- every sequence number from 1 to 10⁶ (§9.3) — `w` at 1, 2, 3 and **5** on `seq`, and `digits(seq)`
+  from 1 to 7;
+- one 245 759 B message, emitted at **1 985** characters, which the formula predicts exactly — that is
+  `messageLen` at `w = 5` and `seqLen` at `w = 3`.
+
+**Two terms are extrapolated, and are stated rather than hidden.** `seqLen` at `w = 5` needs 65 536
+fragments, so a message above 60 MiB. `digits(seq)` past 7 needs 10⁷ parts, a month of animation at
+4 fps. Each is the same `.u32()` call, and the same `usize` formatting, already exercised on a
+neighbouring field of the same array — and each is charged **against** us in every figure below.
+
+### 9.2 The candidates, and why 960 rather than 1 024
+
+`qrcodegen` 1.8.0 and `ur` 0.5.2, arm64 development machine — but unlike §8's timings these are
+character counts against capacity tables, so nothing here is machine-dependent. Measured ECC-L
+alphanumeric capacities: **v24 1 704 · v25 1 853 · v26 1 990 · v27 2 132 · v40 4 296.**
+
+| `max_fragment_length` | Worst part, message 1 B..64 KiB, `seq` at `u32::MAX` | Ceiling, every field at its `u32` widest | §1's 3 744 B PSBT |
+|---|---|---|---|
+| 4 096 (effectively unbounded) | 8 269 → **refuses** | 8 285 → **refuses** | **refuses**, one part of 7 517 chars |
+| 1 024 | 2 127 → v27, 5 spare | 2 141 → **refuses** | 4 parts, v26, 1.00 s |
+| 1 000 | 2 075 → v27, 57 spare | 2 093 → v27, 39 spare | 4 parts, v26, 1.00 s |
+| **960** | **1 995 → v27, 137 spare** | **2 013 → v27, 119 spare** | **4 parts, v26, 1.00 s** |
+| 896 | 1 867 → v26 | 1 885 → v26, 247 spare | 5 parts, v23, 1.25 s |
+
+**Leaving it unbounded is §6's forbidden failure on an ordinary transaction**, and worse than a
+made-up example: at 4 096 the *witness-only* 10-in/2-out P2WPKH from §1 — 1 494 B, a plain
+consolidation — is one part of 3 017 characters and refuses at the cap. So does the 3 744 B row. A
+signature we already produced, unemittable.
+
+**1 024 is rejected on measurement, and it is the candidate a reader will reach for**: it is round, and
+64 KiB divides into exactly 64 fragments at it, which looks like §3's `seqLen ≤ 64` bound falling out
+of the encoder for free. That symmetry is not a property, and would buy nothing if it were — §3 bounds what
+*arrives*, sized for a coordinator packing v27 to its ceiling of ~1 040 B per fragment, which we are
+deliberately not; nothing we emit ever re-enters our own decoder; and a *signed* 64 KiB PSBT exceeds
+64 fragments at 1 024 anyway. What decides it is the headroom: **5 characters** inside §3's bound and
+**9 characters short** at the arithmetic ceiling. 1 024 is exactly the number §9.3's traps are about.
+
+The corollary is worth stating so nobody reaches for it later: at 960 a 64 KiB message is **69**
+fragments, not 64. That is not a reason to raise §3's inbound bound. The two numbers face opposite
+directions, and the clamp is a security property.
+
+**960 clears the ceiling by 119 characters, 5.6% of the budget** — and that, not the roundness, is the
+criterion. 1 000 clears it too, by 39; 960 is the choice because it is the largest **64-byte-aligned**
+value that clears it at all, which is the tie-break rather than the reason. Its named cost is nothing:
+every row of §1's capacity table splits into the same part count and lands on the same version as
+1 024 does. The headroom is bought entirely out of the pathological sizes nobody transacts at.
+
+**It also reproduces §6's own price rather than quietly changing it.** §6 says buying v27's module
+pitch back from v40 costs *two extra frames on the 3 744 B case*. Run the same formula at v40-L's
+4 296 characters and the fragment length it admits is ~2 100 B, which splits that PSBT into 2 parts
+against 960's 4. Two extra frames, arrived at from the other direction.
+
+**896 is rejected for going the other way.** It buys another 128 characters of ceiling and pays a
+fifth frame on §1's worst realistic PSBT, dropping it three versions below the cap. That is not a
+worse trade so much as a *different decision*: §6 caps the version to bound module pitch and spends
+the budget up to that cap, and choosing a fragment length that never approaches it re-prices module
+pitch against frames a second time. §6.4's owed measurement — a phone camera at arm's length — is
+where that gets re-priced, on evidence rather than on caution.
+
+### 9.3 The three traps it had to survive
+
+**The worst case is not the largest message, it is a maximal single fragment.** `ur`'s fragment length
+is `ceil(len / ceil(len / max))`, so a full-`F` fragment happens only where the even split lands on
+`F` exactly — at 64 KiB and `F = 960` the split gives 950 B, not 960. The worst message inside §3's
+bound is **23 017 B**, whose 24-way split leaves exactly 960; §1's 3 744 B row is nowhere near it. The
+sibling case is the boundary itself: a message of exactly 960 B is one fragment, and §6 emits it as the
+single-part form with no `seq` component, which at **1 943 characters is v26** — the largest single
+symbol we ever draw. One byte more splits in two and the symbol collapses to 1 017 characters at v18.
+
+**The fragment is not the only field that widens.** `seqLen` and `messageLen` sit in the same CBOR
+array, and each crosses a minimal-uint boundary at 24, 256 and 65 536 — two characters, two, then four,
+because CBOR has no three-byte uint. This is why the sweep alone is not the argument: §9.1's ceiling,
+which charges every field its widest, is.
+
+**The part string grows for as long as the animation runs.** §6 loops indefinitely, so the sequence
+number grows in both the CBOR and the decimal prefix. Measured exactly, for **every** sequence number
+from 1 to 10⁶ on a 4 000 B message: 14 characters, and §9.1's closed form predicts every one of them.
+Past that the CBOR term stops — `Part` writes `self.sequence as u32`, so it never widens beyond five
+bytes — and only the decimal prefix keeps growing, one character per decade. **Over the whole `u32`
+range the total is 17 characters**, which is 34 years of animation at 4 fps and is charged in full in
+every figure above. (Past `u32::MAX` that cast wraps and the parts stop being unambiguous, which is
+upstream's problem 34 years in, not a length problem.)
+
+A part **can** cross a version boundary mid-loop — at 960 the 245 KiB pathological case starts at v26
+and reaches v27 — and no choice of `F` prevents that, since some message size always sits within 17
+characters of some boundary. What 960 guarantees is the only boundary that matters: it can never cross
+the **cap**.
+
+### 9.4 Where it lives, and what it owes
+
+**In `aobs-core`, as a parameter to the function that builds the animation** — not a shell constant.
+§8's seam answers it and more sharply than it answered the encoder: this number *is* the safety
+argument in §9.1, so it belongs where the 95% region gate, the property test and the fuzz corpus can
+reach it. Core names it once; the constructor takes it as an argument so
+`05-testing-and-release.md` §3's property test can sweep other values and watch this one hold. Nothing
+in `aobs/` names it — a shell constant would put the only number that can make the signing path
+refuse outside every gate that judges code, and §8 already forbids the shell a branch on whether a
+payload fit.
+
+**Nothing is owed.** Every figure here is arithmetic over `ur`'s CBOR shape and `qrcodegen`'s capacity
+table; §8's arm64 caveat bites on timings and there are none in this section. The one dependency is
+outward: if §6.4's owed measurement flips the cap to **v40** — 4 296 alphanumeric characters — this
+number is **re-derived from the new cap rather than kept**, which is that measurement's job and not
+this section's.

@@ -139,7 +139,7 @@ None of these blocks implementation. All of them block the release gate
 | That two columns of 12 words fit the **800×600 minimum canvas** at the settled type size (measured in a 16:10 browser frame, not on hardware; the binding geometry moved from 1280×800 to the floor with `04-screens.md` §0). | [#17](https://github.com/allisson/aobs/issues/17), [#55](https://github.com/allisson/aobs/issues/55) |
 | That a 62-character P2TR payment address, 4-character grouped with `04-screens.md` §0's sub-cell gaps, holds **one line** in the minimum canvas (derived: 62 cells + 15 gaps ≈ 698 px against ~768 px usable). The in-tree prototype only ever rendered 42-character P2WPKH, so nothing in-tree has been measured against it. | [#55](https://github.com/allisson/aobs/issues/55), [#58](https://github.com/allisson/aobs/issues/58) |
 | That **six output rows** fit the minimum canvas non-scrolling, below the stacked money facts (derived: ~320 px of rows at ~57 px each). The six-output cap rests on it, and the number can only move before the first signed ISO. | [#58](https://github.com/allisson/aobs/issues/58) |
-| That a phone camera reads our v27 output at arm's length (v40 is the documented fallback). | [#30](https://github.com/allisson/aobs/issues/30) |
+| That a phone camera reads our v27 output at arm's length (v40 is the documented fallback — and the maximum UR fragment length is re-derived from the new cap, `03-transport.md` §9). | [#30](https://github.com/allisson/aobs/issues/30) |
 | The capture-resolution floor for reading an inbound v40 symbol. | [#31](https://github.com/allisson/aobs/issues/31) |
 
 Eight verification obligations, distinct from measurements:
