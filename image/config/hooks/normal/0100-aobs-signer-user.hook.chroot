@@ -8,10 +8,14 @@ adduser --system --group --disabled-login \
     --home /var/lib/aobs --shell /usr/sbin/nologin \
     signer
 
-# video for DRM master, input for libinput, and **no third group** (§2). Those two are
-# sufficient, and this is read from systemd's own udev rules rather than from convention:
-# /dev/fb0 is SUBSYSTEM=="graphics" → root:video, /dev/dri/card0 → root:video,
-# /dev/video0 → root:video, /dev/input/event* → root:input.
+# video for DRM master, input for libinput (§2), read from systemd's own udev rules rather
+# than from convention: /dev/fb0 is SUBSYSTEM=="graphics" → root:video, /dev/dri/card0 →
+# root:video, /dev/video0 → root:video, /dev/input/event* → root:input.
+#
+# The third is `dialout`, for the serial mirror (§2, §9), and it is granted by the unit's
+# SupplementaryGroups= rather than here: systemd sets the credentials directly, so a group
+# named there needs no membership in /etc/group. Named here anyway, because "no third
+# group" is what this comment used to say and the unit next to it says otherwise.
 #
 # The seat group this hook used to read out of seatd.service is gone with ADR-0016. There
 # is no seatd, no libseat1, and `backend-linuxkms-noseat` opens /dev/fb0 with a plain

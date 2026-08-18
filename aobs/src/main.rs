@@ -12,6 +12,7 @@ mod buildinfo;
 mod console;
 mod entropy;
 mod fail;
+mod notify;
 
 use fail::Failure;
 
@@ -59,6 +60,22 @@ fn run() -> Result<(), Failure> {
             buildinfo::build_date(),
         ));
     });
+
+    // Readiness for `Type=notify` (01-boot-layer.md §2), and it must land **after** the
+    // first frame. The detach it releases unbinds `fbcon` from the framebuffer the app
+    // draws into, and unbinding may clear that memory on the way out — Slint does not
+    // repaint pixels it believes unchanged, so a detach landing before the first frame
+    // would be indistinguishable from a working one until a machine somewhere showed a
+    // black panel. Nothing is written to the console here either: after the first paint
+    // anything printed stays on the panel (§2), which is what makes this a bare datagram
+    // rather than a marker line.
+    //
+    // The delay is the crude part. Slint's software renderer supports no rendering
+    // notifier, so there is no "first frame presented" callback to hook; three seconds is
+    // far longer than a first software-rendered frame takes even under TCG, and it costs
+    // three seconds of boot. If Slint grows a presented-frame signal on this backend,
+    // this becomes that signal.
+    slint::Timer::single_shot(std::time::Duration::from_secs(3), notify::ready);
 
     ui.run().map_err(|_| Failure::DisplayUnavailable)?;
     Ok(())
