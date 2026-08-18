@@ -220,5 +220,7 @@ CBOR estimate underneath it is still derived rather than measured, so the obliga
 **Not settled here, and not ours to settle quietly:** the maximum *fragment length* handed to the UR
 encoder. §6 says the version follows the part size, so the part size is what decides whether the
 encoder can ever refuse on the signing path — and §6's *"no outbound size cap"* holds only if that
-length is chosen under the 2 132-character v27 budget. Nothing in `docs/specs/` names it. That is a
-ticket.
+length is chosen under the 2 132-character v27 budget. Nothing in `docs/specs/` names it, so it is
+[#94](https://github.com/allisson/aobs/issues/94) — which carries the arithmetic, the
+single-fragment worst case, and the measured fact that an indefinite loop grows the part string as
+the sequence number does.
