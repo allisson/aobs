@@ -80,6 +80,11 @@ the shell or is deleted.
 - BIP39 round-trip: `entropy → mnemonic → entropy` at every accepted length.
 - Address formatting: chunking is lossless, and the concatenation of the rendered groups equals the
   address.
+- **The outbound animation never refuses.** For every message length, at the fragment length
+  `03-transport.md` §9 settles, no emitted part exceeds v27-L's 2 132-character budget — charging the
+  sequence number its full `u32` width rather than the one it happens to be emitted at. This is the
+  assertion that catches a fragment length raised without redoing §9.1's arithmetic, and it is why the
+  length is a parameter rather than a constant the test cannot vary.
 
 ## 4. Fuzz targets
 
@@ -223,7 +228,7 @@ become measured. None of them blocks implementation.
 | Two columns of 12 words in the 800×600 **minimum canvas** (the binding geometry since `04-screens.md` §0 fixed the floor; 1280×800 is no longer the tight case) | Type size, not layout. |
 | A 62-character P2TR payment address, 4-character grouped with §0's sub-cell gaps, on **one line** in the minimum canvas (derived: 62 cells + 15 gaps ≈ 698 px against ~768 px usable) | Wrap it, and drop the output bound to what still fits. Never truncate. |
 | **Six output rows fit the minimum canvas**, non-scrolling, with the stacked money facts above them (derived: ~320 px of rows at ~57 px each) | Lower the bound before the first ISO ships — after that it is fixed. |
-| A phone camera reads our v27 output at arm's length | **v40 is the documented fallback.** |
+| A phone camera reads our v27 output at arm's length | **v40 is the documented fallback** — and the maximum UR fragment length is re-derived from the new cap, never kept (`03-transport.md` §9). |
 | The inbound capture-resolution floor | The resolution fallback chain already handles it. |
 
 ## 7. Release
