@@ -16,7 +16,7 @@
 //!
 //! | Shape | Invariant | Types |
 //! |---|---|---|
-//! | exact | exactly `N` bytes, always | [`Csprng32`], [`Supplement`], [`Seed`] |
+//! | exact | exactly `N` bytes, always | [`Csprng32`], [`Supplement`], [`Seed`], [`MasterXprv`] |
 //! | slice | a length only the caller knows, allocated once at that size | [`Dice`], [`Luma`] |
 //! | its own | a cap plus a rule that is the type's whole point | [`Entropy`], [`Passphrase`] |
 //!
@@ -130,6 +130,17 @@ exact_secret! {
 exact_secret! {
     /// The 512-bit BIP-39 seed: `PBKDF2-HMAC-SHA512`, 2048 iterations.
     Seed, 64
+}
+
+exact_secret! {
+    /// The BIP-32 master extended private key, as the 78-byte serialisation BIP-32 defines.
+    ///
+    /// Stored as the serialisation rather than as a `bitcoin::bip32::Xpriv` because that type
+    /// is the dependency's: it is not `ZeroizeOnDrop`, and its chain code sits behind a
+    /// private field that no safe code can clear.
+    /// [`crate::derive::Wallet::with_master`] is the only way back to an `Xpriv`, and it
+    /// erases the private key of the copy it decodes.
+    MasterXprv, 78
 }
 
 slice_secret! {

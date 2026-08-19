@@ -17,15 +17,16 @@ use crate::bip39::Mnemonic;
 ///
 /// **Adding a secret type means adding a row.** The list is the only thing that makes
 /// "every" true, so `02-core.md` §2's wrapped list and this block are one decision in two
-/// places. The four still unwritten — the master xprv, the decrypted backup plaintext, the
-/// 8 EFF backup words, and the mnemonic's own text form if one ever exists — join it with
-/// the slice that introduces them.
+/// places. The three still unwritten — the decrypted backup plaintext, the 8 EFF backup
+/// words, and the mnemonic's own text form if one ever exists — join it with the slice that
+/// introduces them.
 const fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
 
 const _: () = {
     assert_zeroize_on_drop::<Csprng32>();
     assert_zeroize_on_drop::<Supplement>();
     assert_zeroize_on_drop::<Seed>();
+    assert_zeroize_on_drop::<MasterXprv>();
     assert_zeroize_on_drop::<Dice>();
     assert_zeroize_on_drop::<Luma>();
     assert_zeroize_on_drop::<Entropy>();
@@ -40,11 +41,14 @@ fn both_formatters_are_redacted_for_every_type() {
     thirty_two[..4].copy_from_slice(&material);
     let mut sixty_four = [0u8; 64];
     sixty_four[..4].copy_from_slice(&material);
+    let mut seventy_eight = [0u8; 78];
+    seventy_eight[..4].copy_from_slice(&material);
 
     let formatted: Vec<(String, String)> = vec![
         render(&Csprng32::new(thirty_two)),
         render(&Supplement::new(thirty_two)),
         render(&Seed::new(sixty_four)),
+        render(&MasterXprv::new(seventy_eight)),
         render(&Dice::new(b"6533214")),
         render(&Luma::new(&material)),
         render(&Entropy::new(&thirty_two).expect("32 bytes fit")),

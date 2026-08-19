@@ -271,7 +271,7 @@ version bytes. So the fingerprint cannot catch a network mistake and **the netwo
 signal**. It is stated in both directions, never encoded as an absence.
 
 **Those four accounts are the definition of "ours"** — for change re-derivation (§7), for receive
-verification (§9), and for the watch-only export (§10).
+verification (§10), and for the watch-only export (`03-transport.md` §7, `04-screens.md` §8).
 
 No script-type choice and no account-index choice is offered. *"Is your old wallet BIP44 or BIP84?"*
 is a question the user cannot referee, asked at the moment of least attention, with no way to check
