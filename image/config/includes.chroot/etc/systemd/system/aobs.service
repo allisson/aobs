@@ -33,6 +33,19 @@ SuccessAction=poweroff
 # there are pixels and a startup failure would print §9's diagnostic to a console that is
 # already gone.
 Type=notify
+# And the other half of `Type=notify`, without which §9's whole mechanism is a lie: a
+# service that never sends READY=1 is killed at TimeoutStartSec and, with Restart=always,
+# started again. **Every startup failure is exactly that service** — fail::halt parks the
+# process forever rather than exiting, and deliberately never notifies — so the default 90
+# seconds would take the one explanation the user is ever going to get off the screen, on a
+# loop, which is the failure mode parking exists to prevent. Found by building #68's
+# below-the-floor row; it arrived with Type=notify in #57 and was unobserved because a
+# failing boot was never watched for 90 seconds.
+#
+# The cost, named: a boot that hangs *before* the diagnostic — the entropy wait is the only
+# candidate (§8) — now hangs forever instead of restarting forever. Neither shows the user
+# anything; the difference is that this one does not also scroll away the cases that do.
+TimeoutStartSec=infinity
 # `all`, not `main`: /usr/lib/aobs/launch deliberately does not exec the binary — the §9
 # fallback text after it is the whole reason the wrapper exists — so the notifying process
 # is never the main PID, and `main` drops the datagram silently until the unit times out.

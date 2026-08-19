@@ -124,6 +124,16 @@ if [ -f "${unit}" ]; then
     else
         bad "the shipped unit is missing the shutdown contract (ADR-0017)"
     fi
+
+    # 01-boot-layer.md §2 and §9, and the same shape of failure: a unit that lost this key
+    # still boots and still draws. What it no longer does is let a startup diagnostic stay
+    # on the panel — `Type=notify` plus the 90-second default means systemd kills the
+    # parked process and `Restart=always` starts it again, on a loop.
+    if grep -q '^TimeoutStartSec=infinity$' "${unit}"; then
+        good "the shipped unit lets a parked §9 diagnostic outlive the start timeout"
+    else
+        bad "the shipped unit has no TimeoutStartSec=infinity (01-boot-layer.md §2)"
+    fi
 else
     bad "no aobs.service on the squashfs"
 fi

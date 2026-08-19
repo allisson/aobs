@@ -124,15 +124,42 @@ jobs:
 
       # 05-testing-and-release.md §6.2, the fbdev tier: OVMF + ramfb with no GPU. This is
       # the row that can fail — the machines with a DRM driver were never the question.
+      #
+      # The panel assertion is OVMF's default GOP mode, which is the floor itself: the
+      # appliance's minimum supported mode is what CI boots by default (04-screens.md §0).
       - name: Boot it on ramfb, no GPU
         env:
           AOBS_QEMU_GPU: ramfb
+          AOBS_QEMU_EXPECT_PANEL: mode=800x600 scale=1.00 logical=800x600
         run: ci/qemu-boot.sh bitcoin-signer-amd64.iso 4096 900
 
-      # §6.2's other display row: a native KMS driver, i.e. the DRM tier.
+      # §6.2's other display row: a native KMS driver, i.e. the DRM tier. QEMU's default
+      # virtio-gpu mode is 1280x800 — the design canvas itself, so this row also pins the
+      # scale at 1.00 where no scaling is meant to happen.
       - name: Boot it on virtio-gpu
         env:
           AOBS_QEMU_GPU: virtio-gpu
+          AOBS_QEMU_EXPECT_PANEL: mode=1280x800 scale=1.00 logical=1280x800
+        run: ci/qemu-boot.sh bitcoin-signer-amd64.iso 4096 900
+
+      # §6.2's large-mode row: that the scale-factor policy runs, rather than the layout
+      # growing and the type staying put (04-screens.md §0).
+      - name: Boot it at 1920x1080
+        env:
+          AOBS_QEMU_GPU: virtio-gpu
+          AOBS_QEMU_RES: 1920x1080
+          AOBS_QEMU_EXPECT_PANEL: mode=1920x1080 scale=1.35 logical=1422x800
+        run: ci/qemu-boot.sh bitcoin-signer-amd64.iso 4096 900
+
+      # §6.2's below-the-floor row: that the floor refuses rather than degrades. The
+      # geometry is the instrument here rather than `SLINT_DRM_MODE`'s mode-list index —
+      # ci/qemu-boot.sh says why.
+      - name: Refuse a mode below the floor
+        env:
+          AOBS_QEMU_GPU: virtio-gpu
+          AOBS_QEMU_RES: 640x480
+          AOBS_QEMU_EXPECT: AOBS-E06
+          AOBS_QEMU_EXPECT_PANEL: mode=640x480
         run: ci/qemu-boot.sh bitcoin-signer-amd64.iso 4096 900
 
       # §6.2's fbcon regression row — #52's probe, standing. It is also where `Type=notify`

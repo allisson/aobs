@@ -173,6 +173,10 @@ path.
 (`01-boot-layer.md` §2). Without the tier neither display row below can fail honestly — a green row
 would prove only that *something* drew.
 
+**The mode the appliance learned is a second line**, printed before the first paint and beside the
+entropy markers: `AOBS_PANEL mode=…x… scale=… logical=…x…`. The three panel rows below assert
+against it, because the alternative is reading a scale factor off a screenshot.
+
 | Row | Proves |
 |---|---|
 | **Entropy provenance** — trace the `getrandom` syscall during a seed generation and assert the wallet's entropy bytes are **byte-identical** to what the traced syscall returned; assert `crng init done` in `dmesg`; assert **zero opens of `/dev/urandom`**. | The linkage, not the intention. |
@@ -183,9 +187,9 @@ would prove only that *something* drew.
 | RAM at and below the floor | The low-memory GRUB entry degrades rather than bricks. |
 | No camera | The degraded-but-useful path. |
 | No keyboard | The "no input" screen appears. |
-| **The minimum canvas** — the `ramfb` machine at OVMF's default 800×600 GOP, asserting the review panel draws **stacked** with every character of a 62-character P2TR address present and no scroll region anywhere. | That the floor in `04-screens.md` §0 is a floor we actually meet, in the geometry CI already boots by default. |
-| **Below the floor** — force a sub-800×600 mode with `SLINT_DRM_MODE` on the virtio-gpu machine and assert `AOBS-E06` on a live console, not a drawn UI. | That the floor refuses rather than degrades. The index-based env var is unusable as product configuration and is exactly right as a test instrument. |
-| **A large mode** — the virtio-gpu machine at 1920×1080, asserting a logical canvas of 1422×800 and type scaled by 1.35. | That the scale-factor policy runs, rather than the layout growing and the type staying put. |
+| **The minimum canvas** — the `ramfb` machine at OVMF's default 800×600 GOP, asserting the review panel draws **stacked** with every character of a 62-character P2TR address present and no scroll region anywhere. | That the floor in `04-screens.md` §0 is a floor we actually meet, in the geometry CI already boots by default. **This row waits for the review panel**; until it exists, the default `ramfb` row asserts only that 800×600 draws and reports `scale=1.00`. |
+| **Below the floor** — the virtio-gpu machine at `xres=640,yres=480`, asserting `AOBS-E06` on a live console, **no readiness line at all**, and — after holding the machine past the old 90-second start timeout — that the appliance **started exactly once**, which is what keeps `TimeoutStartSec=infinity` (`01-boot-layer.md` §2) honest. | That the floor refuses rather than degrades. `SLINT_DRM_MODE` was specified here and is not what runs: it is a mode-*list index*, so QEMU and the kernel are free to change what it selects, and injecting an environment variable into `aobs.service` needs a boot path that is no longer GRUB-on-the-ISO. QEMU's own `xres`/`yres` name the geometry and set the connector's preferred mode, which is what Slint picks ([#68](https://github.com/allisson/aobs/issues/68)). **Asserted on the DRM tier only** — nothing in CI can hand `efifb` a sub-floor mode, since that tier's mode is OVMF's GOP. |
+| **A large mode** — the virtio-gpu machine at `xres=1920,yres=1080`, asserting `scale=1.35` and a `logical=1422x800` canvas on the panel line. | That the scale-factor policy runs, rather than the layout growing and the type staying put. Its sibling is the plain virtio-gpu row above: QEMU's default is 1280×800, the design canvas itself, so that row pins `scale=1.00` where no scaling is meant to happen. |
 
 The seed path calls `getrandom` as a **raw syscall**, with no crate-level indirection a build change
 can silently re-resolve. That is what leaves the harness exactly one site to trace.

@@ -14,11 +14,9 @@ The v1 implementation spec is written and merged — `docs/specs/` (seven files,
 
 **The two gates that judge code are wired before the code exists** ([#66](https://github.com/allisson/aobs/issues/66)): `ci/check-coverage.sh` holds `aobs-core` to 95% **region** coverage and each of the nine components named in `ci/coverage-components.tsv` to 98%, and `ci/check-fuzz.sh` builds and runs the fuzz harness on a placeholder target. Both are separate CI jobs from the test run, because §1 says coverage is necessary and not sufficient. A component whose module does not exist yet is a name with no regions rather than a hole in the list — which is the point of wiring them now: a gate added afterwards is a gate negotiated with the code it is supposed to judge. `ci/check-source-test.sh` is the test on the test, planting each forbidden coverage opt-out attribute in the tree and asserting `ci/check-source.sh` still refuses it.
 
-**What still lags, and all of it is Rust:**
+**The appliance learns its mode at startup and acts on it** ([#68](https://github.com/allisson/aobs/issues/68)): `aobs/src/display.rs` computes `scale = max(1, min(w/1280, h/800))` from the mode the display handed back and dispatches `ScaleFactorChanged`, refuses below the 800×600 floor with `AOBS-E06` before any UI is shown, and names the tier on the readiness line by **observing** which device Slint actually opened. `fail.rs` now carries `E01`–`E06` as `06-codes.md` §5 defines them, with `E02` narrowed and its legacy-BIOS copy gone. Four CI rows assert it, geometry set with QEMU's `xres`/`yres` rather than `SLINT_DRM_MODE` — `05-testing-and-release.md` §6.2 records why.
 
-- `aobs/src/fail.rs` carries four variants and the pre-split `AOBS-E02`, whose copy blames legacy BIOS — a cause ADR-0016 falsified. `docs/specs/06-codes.md` §5 splits it into `E02`/`E05`/`E06` and adds `E00`, which the wrapper already prints.
-- `aobs/src/console.rs`'s doc comment still explains the channel through `simpledrm` and ADR-0009.
-- Nothing implements the panel-mode policy, the six-output bound, or the refusal codes — those are an implementation session's, and the spec names them.
+**What still lags, and all of it is Rust:** nothing implements the six-output bound or the `AOBS-R##` refusal codes — those are an implementation session's, and the spec names them.
 
 **`docs/specs/` is the authority, not the tree.** Reconcile before building on any of it.
 

@@ -74,6 +74,7 @@ included `libseat1` and `seatd`, which this image no longer ships.
   Environment=XKB_DEFAULT_MODEL=pc105
   Environment=XKB_DEFAULT_LAYOUT=us
   Type=notify
+  TimeoutStartSec=infinity
   NotifyAccess=all
   ExecStart=/usr/lib/aobs/launch
   ExecStartPost=+/usr/lib/aobs/console-detach
@@ -103,6 +104,18 @@ included `libseat1` and `seatd`, which this image no longer ships.
   - **`Type=notify` is load-bearing.** The app sends `READY=1` once its window is up. With
     `Type=simple` the console detach would fire before the app is drawing, and a startup failure
     would print §9's diagnostic to a console that is already gone.
+  - **`TimeoutStartSec=infinity`, and it is what makes §9's parking work at all.** A `Type=notify`
+    service that never sends `READY=1` is killed at the start timeout and, under `Restart=always`,
+    started again — and **every startup failure is that service**: `fail::halt` parks forever rather
+    than exiting and deliberately never notifies. Debian's default 90 seconds would therefore put the
+    §9 diagnostic on a 90-second loop, which is the exact failure the parking exists to prevent. Found
+    by building [#68](https://github.com/allisson/aobs/issues/68)'s below-the-floor row; it arrived
+    with `Type=notify` in [#57](https://github.com/allisson/aobs/issues/57) and went unobserved
+    because no failing boot had been watched for 90 seconds. **Named cost:** a boot that hangs
+    *before* the diagnostic — §8's entropy wait is the only candidate — now hangs forever instead of
+    restarting forever. Neither shows the user anything, and only one of them also scrolls away the
+    cases that do. `05-testing-and-release.md` §6.2's below-the-floor row asserts the appliance
+    started exactly once, which is what keeps this honest.
   - **`NotifyAccess=all`, never `main`.** `launch` deliberately does not `exec` the binary — the §9
     fallback text after it is the whole reason the wrapper exists — so the notifying process is never
     the main PID, and `main` drops the datagram silently until the unit times out.
@@ -133,7 +146,16 @@ included `libseat1` and `seatd`, which this image no longer ships.
   first frame covers it.
 - **The readiness line is `AOBS_READY version=… build=… display=fbdev|drm`.** It names the tier that
   won, which is what lets CI's two display rows fail honestly (`05-testing-and-release.md` §6.2), and
-  its absence is what triggers the crash-diagnostic path.
+  its absence is what triggers the crash-diagnostic path. The tier is **observed** — the open file
+  descriptor, `/dev/dri/*` or `/dev/fb*` — because Slint picks between the tiers in its own `or_else`
+  and exposes no way to ask which arm it took; re-deriving its choice here would be a second
+  implementation of it, free to disagree with the first. Neither found prints `display=unknown`, which
+  fails both display rows rather than guessing the likelier answer.
+- **The mode it learned is a second line: `AOBS_PANEL mode=…x… scale=… logical=…x…`.** Printed before
+  the first paint, from the mode the display handed back, and the panel rows of
+  `05-testing-and-release.md` §6.2 assert against it — a scale factor is otherwise only readable off a
+  screenshot. Nothing in it is program state in §9's sense: it is the panel's own geometry and the
+  arithmetic of `04-screens.md` §0 applied to it.
 - `greetd` is rejected: its `initial_session` runs exactly once per boot by design, which is the
   opposite of what a restarting kiosk needs.
 
@@ -510,7 +532,7 @@ a crash.
 
 **The serial mirror, stated because an undocumented output channel is worse than a documented one.**
 Every line the app writes to the console it also writes to `/dev/ttyS0` when one exists — the readiness
-line, the entropy markers, and this diagnostic. It is what the QEMU harness reads
+line, the panel line, the entropy markers, and this diagnostic. It is what the QEMU harness reads
 (`05-testing-and-release.md` §6.2), and it is a **mirror, not a second behaviour**: the same bytes, on a
 machine that has a serial port, and a silent no-op on one that does not. Three rules bound it, and they
 are the whole of the concession:

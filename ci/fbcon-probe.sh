@@ -224,7 +224,9 @@ done
 # `+`-prefixed console scripts are also asserted here and nowhere else: a unit that never
 # received READY=1, or an ExecStartPost that failed, restarts — and restarting is what this
 # count refuses.
-starts="$(grep -c '^AOBS_READY ' "${log}" 2>/dev/null || echo 0)"
+# `|| true`: grep -c prints its 0 and *then* exits non-zero, so `|| echo 0` appended a
+# second line and reported "0 0" starts.
+starts="$(grep -c '^AOBS_READY ' "${log}" 2>/dev/null || true)"
 if [ "${starts}" != "1" ]; then
     echo "FAIL  the appliance started ${starts} times — it did not come up and stay up," >&2
     echo "      so the captures above are of a restarting machine, not of an assertion." >&2
