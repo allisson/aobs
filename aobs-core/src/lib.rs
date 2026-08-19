@@ -2,8 +2,9 @@
 //!
 //! BIP39, derivation, PSBT validation and signing, entropy mixing, backup crypto, UR
 //! encode/decode, the review model and the watch-only export model all land here as
-//! modules. Three of them exist: [`secret`], [`entropy`] and [`bip39`]
-//! ([#70](https://github.com/allisson/aobs/issues/70)). The rest do not — the walking
+//! modules. Five of them exist: [`secret`], [`entropy`] and [`bip39`]
+//! ([#70](https://github.com/allisson/aobs/issues/70)), then [`derive`] and the address half
+//! of [`format`] ([#71](https://github.com/allisson/aobs/issues/71)). The rest do not — the walking
 //! skeleton ([#39](https://github.com/allisson/aobs/issues/39)) built the boot layer first,
 //! because the boot layer is where the unproven claims were.
 //!
@@ -20,5 +21,7 @@
 #![warn(missing_docs)]
 
 pub mod bip39;
+pub mod derive;
 pub mod entropy;
+pub mod format;
 pub mod secret;
