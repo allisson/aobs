@@ -138,15 +138,10 @@ fn entropy_prefix_keeps_the_first_bytes_and_clamps() {
 
 #[test]
 fn a_passphrase_is_normalised_nfkd_at_construction() {
-    // `㍍` is a *compatibility* character: NFKD decomposes it to the four katakana below,
-    // and NFD leaves it alone. The buffer must hold the NFKD form, because that is the only
-    // form PBKDF2 may see.
-    //
-    // **The code point is U+334D**, SQUARE MEETORU. `05-testing-and-release.md` §2 and
-    // ADR-0014 both write it as U+3350, which is SQUARE YUAN — a different character that
-    // happens to make the same point (it too decomposes under NFKD only). The character in
-    // the bip32JP passphrase is this one; the spec's parenthetical is a typo, and the
-    // argument it supports is untouched.
+    // `㍍` — U+334D SQUARE MEETORU, the first character of the bip32JP passphrase — is a
+    // *compatibility* character: NFKD decomposes it to the four katakana below, and NFD
+    // leaves it alone. The buffer must hold the NFKD form, because that is the only form
+    // PBKDF2 may see.
     let passphrase = Passphrase::new("\u{334D}").expect("fits");
     assert_eq!(
         passphrase.as_bytes(),

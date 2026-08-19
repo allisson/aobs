@@ -96,7 +96,7 @@ fn the_japanese_vectors_pin_nfkd_rather_than_nfd() {
 }
 
 /// And the other half of that claim: the vectors above genuinely *discriminate*. Under NFD —
-/// the form that leaves U+3350 alone — every one of them is wrong, which is what makes them
+/// the form that leaves U+334D alone — every one of them is wrong, which is what makes them
 /// worth carrying rather than 24 more rows that any normalisation would pass.
 #[test]
 fn nfd_fails_the_japanese_vectors() {
@@ -483,7 +483,7 @@ const ENGLISH_15_21: &[(&str, &str, &str)] = &[
 
 /// The bip32JP Japanese vectors: `(entropy_hex, mnemonic, seed_hex)`, passphrase
 /// [`JP_PASSPHRASE`]. **Mandatory, not optional** (`05-testing-and-release.md` §2): `㍍`
-/// (U+3350) is a *compatibility* character, so it decomposes under NFKD and is left
+/// (U+334D) is a *compatibility* character, so it decomposes under NFKD and is left
 /// untouched by NFD. These are the only vectors in the suite that tell the two apart — an
 /// implementation reaching for NFD passes everything else in this file.
 ///
