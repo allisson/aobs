@@ -16,16 +16,26 @@ use crate::console;
 ///
 /// Each variant is a *typed* name that the diagnostic prints verbatim, so a bug report
 /// carries the arm that was taken rather than a rendering of what went through it.
+///
+/// The codes are `06-codes.md` §5's registry, which is the authority: they are permanent
+/// from the first signed ISO, never renumbered, and never reused for another condition.
+/// `AOBS-E00` is not here because it is not ours — the wrapper prints it when this binary
+/// never spoke at all, which is the one code the app cannot report.
 #[derive(Debug)]
 pub enum Failure {
     /// The kernel CSPRNG refused to fill a buffer.
     EntropyUnavailable,
-    /// No KMS display was available to draw on.
+    /// No display at all: no DRM device and no firmware framebuffer.
     DisplayUnavailable,
     /// The event loop returned. Nothing on this appliance asks it to.
     EventLoopExited,
     /// The program unwound out of an internal error.
     Panicked,
+    /// A display device exists and the renderer could not negotiate a pixel format with
+    /// it — `LinuxFBDisplay`'s five accepted arms (01-boot-layer.md §7).
+    PixelFormatUnsupported,
+    /// A framebuffer exists and its mode is below the 800×600 floor (04-screens.md §0).
+    ModeBelowFloor,
 }
 
 impl Failure {
@@ -37,6 +47,8 @@ impl Failure {
             Self::DisplayUnavailable => "DisplayUnavailable",
             Self::EventLoopExited => "EventLoopExited",
             Self::Panicked => "Panicked",
+            Self::PixelFormatUnsupported => "PixelFormatUnsupported",
+            Self::ModeBelowFloor => "ModeBelowFloor",
         }
     }
 
@@ -47,6 +59,8 @@ impl Failure {
             Self::DisplayUnavailable => "AOBS-E02",
             Self::EventLoopExited => "AOBS-E03",
             Self::Panicked => "AOBS-E04",
+            Self::PixelFormatUnsupported => "AOBS-E05",
+            Self::ModeBelowFloor => "AOBS-E06",
         }
     }
 
@@ -57,6 +71,11 @@ impl Failure {
             Self::DisplayUnavailable => "aobs found no display it could draw on.",
             Self::EventLoopExited => "The screen closed on its own.",
             Self::Panicked => "aobs stopped on an internal error.",
+            Self::PixelFormatUnsupported => {
+                "This machine has a display, and aobs could not agree with it on a pixel \
+                 format."
+            }
+            Self::ModeBelowFloor => "This screen is smaller than aobs can draw on.",
         }
     }
 
@@ -67,9 +86,12 @@ impl Failure {
                 "A request that is not supposed to be refusable was refused, so this \
                  machine cannot be trusted to generate a wallet."
             }
+            // What was observed, and no guess at a cause: this copy used to blame legacy
+            // BIOS, which ADR-0016 falsified — `vesafb` means such a machine would have
+            // had a framebuffer too (06-codes.md §5).
             Self::DisplayUnavailable => {
-                "This machine most likely booted in legacy BIOS mode. aobs requires UEFI, \
-                 which is what guarantees a display without a graphics driver."
+                "This machine's firmware handed over no framebuffer, and it has no \
+                 graphics driver aobs could use instead."
             }
             Self::EventLoopExited => {
                 "Nothing in this appliance asks the screen to close, so something ended \
@@ -78,6 +100,14 @@ impl Failure {
             Self::Panicked => {
                 "Any wallet held in memory was erased as the program unwound, and nothing \
                  survives a boot in any case."
+            }
+            Self::PixelFormatUnsupported => {
+                "This is a bug we can fix once we know which format your firmware \
+                 reports, and it is worth reporting."
+            }
+            Self::ModeBelowFloor => {
+                "aobs needs 800 by 600 pixels to show a transaction honestly, and it \
+                 refuses to sign on a screen where it cannot."
             }
         }
     }
@@ -89,10 +119,19 @@ impl Failure {
                 "Do not use this machine as a signer. Report the failure code below."
             }
             Self::DisplayUnavailable => {
-                "Reboot, enter the firmware settings, and select UEFI boot."
+                "Use another machine as your signer. Report the failure code below."
             }
             Self::EventLoopExited | Self::Panicked => {
                 "Power the machine off, boot it again, and report the failure code below."
+            }
+            // Not "boot it again": the format is what the firmware reports every time, so
+            // rebooting changes nothing. 06-codes.md §5 — this is the one display failure
+            // whose remedy is a bug report.
+            Self::PixelFormatUnsupported => {
+                "Use another machine as your signer, and report the failure code below."
+            }
+            Self::ModeBelowFloor => {
+                "Use a screen of at least 800 by 600, or another machine as your signer."
             }
         }
     }
@@ -133,11 +172,13 @@ pub fn halt(failure: Failure) -> ! {
 mod tests {
     use super::Failure;
 
-    const ALL: [Failure; 4] = [
+    const ALL: [Failure; 6] = [
         Failure::EntropyUnavailable,
         Failure::DisplayUnavailable,
         Failure::EventLoopExited,
         Failure::Panicked,
+        Failure::PixelFormatUnsupported,
+        Failure::ModeBelowFloor,
     ];
 
     #[test]
@@ -147,6 +188,19 @@ mod tests {
         let before = codes.len();
         codes.dedup();
         assert_eq!(codes.len(), before, "two failures share a code");
+    }
+
+    #[test]
+    fn the_codes_are_exactly_the_registrys_startup_space() {
+        // 06-codes.md §5's table, and §7: a variant added in code with an invented code
+        // fails a test rather than shipping. `AOBS-E00` is the wrapper's own — the app
+        // cannot report the case where it never spoke — so its absence here is the point.
+        let mut codes: Vec<&str> = ALL.iter().map(|f| f.code()).collect();
+        codes.sort_unstable();
+        assert_eq!(
+            codes,
+            ["AOBS-E01", "AOBS-E02", "AOBS-E03", "AOBS-E04", "AOBS-E05", "AOBS-E06"]
+        );
     }
 
     #[test]

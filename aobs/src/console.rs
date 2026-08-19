@@ -1,7 +1,9 @@
 //! The one output channel that survives a GUI that never came up.
 //!
-//! Because `simpledrm` is guaranteed on UEFI (ADR-0009), the kernel console always
-//! exists — there is always a channel (01-boot-layer.md §9). The systemd unit puts this
+//! The kernel console always exists, so there is always a channel (01-boot-layer.md §9) —
+//! provided by `efifb` on a machine with no DRM driver and by the native driver's `fbcon`
+//! where there is one. Neither is `simpledrm`: Debian builds none, which is what falsified
+//! ADR-0009 and left ADR-0016's two tiers in its place. The systemd unit puts this
 //! process's stdout on it.
 //!
 //! The serial mirror is what lets the QEMU harness (05-testing-and-release.md §6.2) read

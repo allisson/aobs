@@ -98,9 +98,19 @@ have had a framebuffer, and UEFI-only now stands on build-and-test surface rathe
 path. The honest sentence names what was observed — no framebuffer was handed over — and stops guessing
 at a cause.
 
-**The tree lags this section.** `aobs/src/fail.rs` carries four variants, one code each, and the stale
-`E02` copy. Reconciling it is an implementation session's work, not this file's — the registry is the
-authority.
+**The tree carries this section** as of [#68](https://github.com/allisson/aobs/issues/68):
+`aobs/src/fail.rs` holds six variants for `E01`–`E06`, `E02`'s copy names what was observed rather than
+guessing at a cause, and a test asserts the code set is exactly this table's — a variant added later
+with an invented code fails it. `E00` is deliberately absent from the enum, because the app cannot
+report the case where it never spoke; the wrapper prints it.
+
+**One inference the code makes, stated here because the registry is where it would be missed.** Slint
+reports a failed window as a formatted string, which §9 forbids us to print and an upstream reword is
+free to change, so `E02` and `E05` are told apart by **device presence**: nothing to draw on at all is
+`E02`, and a display device that exists while the window still failed is `E05`. A display we could not
+open for some third reason therefore prints `E05`. That is the safe direction — it asks for a bug
+report we can act on, where the other direction would tell a user their firmware handed over nothing
+when it did.
 
 ## 6. Refusals — `AOBS-R##`
 
