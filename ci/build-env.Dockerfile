@@ -33,6 +33,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       "live-build=${LIVE_BUILD_VERSION}" \
       debootstrap xorriso squashfs-tools initramfs-tools-core \
       dosfstools mtools grub-efi-amd64-bin grub-common \
+    # `v4l2-sys-mit` generates its V4L2 bindings with bindgen at build time, and bindgen
+    # needs libclang plus the kernel's own uapi headers. 03-transport.md §5 settles the
+    # crate — raw V4L2 ioctls, default features, no `libv4l` — so this is what that
+    # decision costs the build environment. Nothing of it reaches the image: the bindings
+    # are constants and struct layouts, and the binary links no new library.
+      libclang-dev linux-libc-dev \
     # ci/check-coverage.sh reads llvm-cov's JSON export. The alternative was a summary
     # parsed out of formatted text, which is a gate that breaks on a tooling reflow.
       jq \

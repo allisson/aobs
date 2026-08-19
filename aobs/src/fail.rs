@@ -21,7 +21,7 @@ use crate::console;
 /// from the first signed ISO, never renumbered, and never reused for another condition.
 /// `AOBS-E00` is not here because it is not ours — the wrapper prints it when this binary
 /// never spoke at all, which is the one code the app cannot report.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Failure {
     /// The kernel CSPRNG refused to fill a buffer.
     EntropyUnavailable,

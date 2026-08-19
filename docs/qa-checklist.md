@@ -174,3 +174,24 @@ the practical way to run them, since the shipped image offers no shell.
       **This is the measurement the bound rests on** — if it comes back tighter, the number
       drops before the first ISO ships, and never after.
 - [ ] A seven-output PSBT is refused with `AOBS-R15` before any review screen is drawn.
+
+### Creating a wallet ([#72](https://github.com/allisson/aobs/issues/72))
+
+- [ ] At 800×600, **two columns of 12 words are all on screen at once** — 1–12 left, 13–24
+      right — with the banner above and nothing clipped at the foot. The appliance prints
+      `AOBS_WORDS required=… available=… fits=yes` on every boot and CI asserts it, but the
+      number is a sum of the heights the layout is built from; this row is a person looking
+      at the panel it produced.
+- [ ] **The fill is column-major.** Word 13 is the top of the right-hand column, not the
+      second row of the left one. A row-flow grid renders 1,2 / 3,4 and passes every
+      arithmetic check while inverting the reason the shape was chosen.
+- [ ] The dice screen shows a **roll count and nothing else** — no bit counter, no progress
+      meter, no percentage, and no hash of the rolls anywhere on it.
+- [ ] With a **USB webcam plugged in**, creating a wallet is indistinguishable from creating
+      one without it: no preview, no message, no extra second of visible wait. That is the
+      whole of the observable behaviour, since the frame only ever reaches a hash.
+- [ ] With the camera **unplugged mid-gather**, the same holds: the screen says nothing and
+      Continue still unlocks.
+- [ ] On a machine where the pool is genuinely slow, the wait counts seconds and Continue
+      stays locked until it is over — and the screen **never advances on its own**, even
+      after the count stops.

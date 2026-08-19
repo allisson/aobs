@@ -120,6 +120,12 @@ Both are spec requirements alongside the bounds in §3, not implementation hygie
   and capture probability is the variable the transport maths already models.
 - V4L2 devices are enumerated **at the point of use**. A camera that disappears mid-scan states so
   plainly and returns to the previous screen, recovering on re-plug.
+- **The entropy frame uses the front half of this and none of the loop.** `04-screens.md` §2's
+  silent capture opens a node, negotiates `GREY` or `YUYV` the same way, takes one buffer and
+  stops; it has no preview, no decode, no drop policy and no resolution preference, because the
+  bytes are hashed rather than read. It arrived first, with
+  [#72](https://github.com/allisson/aobs/issues/72), which is what puts `v4l` — and, through
+  `v4l2-sys-mit`'s bindgen, `libclang-dev` — in the build environment already.
 
 ## 6. Outbound: the signed PSBT
 

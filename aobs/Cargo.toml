@@ -8,6 +8,12 @@ description = "The aobs appliance: Slint on KMS, the camera loop, and the raw ge
 
 [dependencies]
 aobs-core = { path = "../aobs-core" }
+# The shell holds three of the four buffers 02-core.md §3's lifetime rule names — the dice,
+# the luma plane and the array `getrandom` fills — for as long as it takes to hand them to
+# core, which takes them by value and drops them. `Zeroizing` is what wipes them if the user
+# walks away instead. No derive feature: nothing here is a secret *type*, only a buffer.
+zeroize = "1.9.0"
+v4l = "0.14"
 
 # Slint on backend-linuxkms-noseat + renderer-software, rendering straight to the display
 # (01-boot-layer.md §2, ADR-0002, ADR-0016). No X server, no Wayland compositor, no display

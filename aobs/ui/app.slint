@@ -30,6 +30,8 @@
 // outcome, and one callback carrying an intent is what keeps that checkable).
 export enum Intent {
     create,
+    create-continue,
+    create-confirm,
     import,
     restore,
     session-end,
@@ -43,8 +45,44 @@ export enum Intent {
 // swallowing the press (standing rule 8).
 export enum Screen {
     start,
+    dice,
+    words,
     unbuilt,
     ending,
+}
+
+// One numbered word of the phrase. The *position* travels with the text rather than being
+// the index of a row, because 04-screens.md §3's fill is column-major: the thirteenth word
+// is the first row of the right-hand column, and a component that numbered its own rows
+// would have to be told which column it is.
+export struct Word {
+    position: int,
+    text: string,
+}
+
+// The numbers the frame lays itself out with, in one place because one of them is an owed
+// measurement (00-overview.md, 04-screens.md §3): *that two columns of 12 words fit the
+// 800×600 minimum canvas at the settled type size*. The shell reads `words-required` and
+// `words-chrome` off this global at startup and prints both against the canvas it learned,
+// so the claim is checked on every boot rather than measured once in a browser frame.
+export global Metrics {
+    out property <length> header-height: 44px;
+    out property <length> footer-height: 48px;
+    out property <length> rule: 1px;
+    // The screen slot's padding at each breakpoint (04-screens.md §0). The floor is the
+    // narrow one, which is why that is the value the measurement below is taken against.
+    out property <length> slot-padding: 24px;
+    out property <length> slot-padding-wide: 44px;
+
+    // The words screen, as the heights it is actually built from.
+    out property <length> word-row: 26px;
+    out property <length> words-banner: 52px;
+    out property <length> words-gap: 14px;
+    out property <length> words-continue: 48px;
+    out property <length> words-required: root.words-banner + root.words-gap
+        + 12 * root.word-row + root.words-gap + root.words-continue;
+    out property <length> words-chrome: root.header-height + 2 * root.rule + root.footer-height
+        + 2 * root.slot-padding;
 }
 
 export global Palette {
@@ -155,8 +193,169 @@ component StartMenu inherits Rectangle {
     }
 }
 
+// 04-screens.md §2. **One screen doing both jobs**: the rolls are needed before the mnemonic
+// exists, which is exactly when `getrandom(2)` is still blocking, so the dead time carries
+// the optional feature at the cost of no extra step — and a screen with something to do on
+// it cannot read as a hang.
+//
+// What is *not* here is the specification (02-core.md §3): no minimum, no bit counter, no
+// progress meter, no distribution check, and **no running hash of the rolls**. The roll
+// count is the whole of what this screen says about them, because the rolls are mixed rather
+// than substituted and a hash on screen would hand back the property that makes that safe.
+//
+// The wait is indeterminate with elapsed seconds and no percentage, and it **only unlocks
+// Continue**: nothing here advances on its own, because the user may still be rolling.
+component DiceScreen inherits Rectangle {
+    in property <int> rolls;
+    in property <int> wait-seconds;
+    in property <bool> ready;
+    in property <int> selected;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: 16px;
+
+        Heading {
+            text: "Dice, if you want them";
+        }
+
+        // The mandated line of copy, on the screen where it will actually be read.
+        Text {
+            text: "Your rolls are combined with the system random number generator. "
+                + "They can only add randomness, never remove it.";
+            color: Palette.ink-mid;
+            font-size: 16px;
+            wrap: word-wrap;
+        }
+
+        Text {
+            text: "Type your rolls as digits, 1 to 6. Stop whenever you like.";
+            color: Palette.ink-dim;
+            font-size: 13px;
+            wrap: word-wrap;
+        }
+
+        // The count, and nothing else. Zero is stated as an answer rather than as an empty
+        // field, because it is one: with no supplement the entropy is `getrandom`'s bytes
+        // verbatim, and nothing about this screen is a requirement (02-core.md §3).
+        Text {
+            text: root.rolls == 0
+                ? "nothing rolled yet — that is a complete answer"
+                : "rolls: " + root.rolls;
+            color: root.rolls == 0 ? Palette.ink-dim : Palette.ink;
+            font-family: "DejaVu Sans Mono";
+            font-size: 20px;
+        }
+
+        Choice {
+            label: "Continue";
+            // The wait, stated as what it is. Seconds because they are known; no bar,
+            // because `getrandom(2)` reports no progress and a fabricated one stalling near
+            // the end reads more like a hang than a spinner does (04-screens.md §2).
+            note: root.ready
+                ? "The system random number generator is ready."
+                : "Waiting for the system random number generator — " + root.wait-seconds + " s. "
+                    + "Keep rolling, or wait.";
+            available: root.ready;
+            current: root.selected == 0;
+        }
+    }
+}
+
+// One numbered word. The row height is Metrics' and not this component's, because it is a
+// term in the owed measurement above.
+component WordRow inherits Rectangle {
+    in property <Word> word;
+
+    height: Metrics.word-row;
+
+    HorizontalLayout {
+        spacing: 10px;
+
+        Text {
+            text: root.word.position;
+            width: 28px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            color: Palette.ink-dim;
+            font-family: "DejaVu Sans Mono";
+            font-size: 14px;
+        }
+
+        Text {
+            text: root.word.text;
+            vertical-alignment: center;
+            color: Palette.ink;
+            font-family: "DejaVu Sans Mono";
+            font-size: 17px;
+        }
+    }
+}
+
+// 04-screens.md §3. **Two column-major columns of 12 — 1–12 left, 13–24 right, all visible
+// at once.** The fill is the argument: a column of twelve is the shape of the card or steel
+// plate being copied onto, so screen and destination share a geometry and the copy becomes
+// positional rather than sequential. A row-flow grid renders 1,2 / 3,4 and inverts it, which
+// is why the two columns arrive as two models built and tested in Rust rather than as one
+// list this file slices.
+//
+// **No pages.** A page turn sits exactly where a place gets lost during transcription, and it
+// makes cross-checking impossible when half the phrase is never on screen with the other half.
+component Words inherits Rectangle {
+    in property <[Word]> left;
+    in property <[Word]> right;
+    in property <int> selected;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: Metrics.words-gap;
+
+        // The instructional banner. It stays because it carries information, and its height
+        // is fixed because it is a term in the measurement.
+        VerticalLayout {
+            height: Metrics.words-banner;
+            spacing: 6px;
+
+            Text {
+                text: "Write these 24 words on paper, in this order.";
+                color: Palette.ink;
+                font-size: 20px;
+                font-weight: 600;
+            }
+
+            Text {
+                text: "They are the only copy. Anyone who has them has the wallet, and nothing here is stored.";
+                color: Palette.ink-mid;
+                font-size: 13px;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 28px;
+
+            VerticalLayout {
+                for word in root.left: WordRow {
+                    word: word;
+                }
+            }
+
+            VerticalLayout {
+                for word in root.right: WordRow {
+                    word: word;
+                }
+            }
+        }
+
+        Choice {
+            height: Metrics.words-continue;
+            label: "I have written them down";
+            current: root.selected == 0;
+        }
+    }
+}
+
 // The honest placeholder. It exists so that choosing a real entry is not a dead press while
-// the screens behind it are still being built (#78, #72).
+// the screens behind it are still being built (#73, #75, #85).
 component Unbuilt inherits Rectangle {
     VerticalLayout {
         alignment: start;
@@ -230,7 +429,21 @@ export component AppWindow inherits Window {
     in property <bool> camera-present;
     in property <Screen> screen: Screen.start;
 
+    // The create path (04-screens.md §2, §3). `rolls` is a count and never the rolls
+    // themselves: the buffer lives in Rust, where it is zeroized, and 02-core.md §3 forbids
+    // this screen anything more than the count anyway.
+    in property <int> rolls;
+    in property <int> wait-seconds;
+    in property <bool> entropy-ready;
+    in property <[Word]> left-column;
+    in property <[Word]> right-column;
+
     callback intent(Intent);
+    // The two callbacks that carry a value rather than an intent, and so bypass the router
+    // (standing rule 4): a die face is a byte the user typed, and `gathered` is the entropy
+    // thread announcing itself from `upgrade_in_event_loop`.
+    callback roll(int);
+    callback gathered();
 
     // 04-screens.md §0's second breakpoint, one property for the whole appliance. Handed in
     // from `display::wide`, which already owns §0's arithmetic and can be tested; deriving it
@@ -243,6 +456,8 @@ export component AppWindow inherits Window {
     // the frame never has to be told which row means what.
     property <int> screen-rows: root.screen == Screen.start ? 3
         : root.screen == Screen.ending ? 2
+        : root.screen == Screen.dice ? 1
+        : root.screen == Screen.words ? 1
         : 0;
     property <int> rows: root.screen-rows + 1;
     property <int> session-row: root.rows - 1;
@@ -272,7 +487,15 @@ export component AppWindow inherits Window {
     // past *start over with a different wallet* on §13's confirm. Not a precedence anyone
     // should have to be sure of to read this.
     function available(row: int) -> bool {
-        return (root.screen == Screen.start && row == 2) ? root.camera-present : true;
+        if (root.screen == Screen.start && row == 2) {
+            return root.camera-present;
+        }
+        // 04-screens.md §2: entropy readiness *unlocks* Continue and nothing more. The screen
+        // never advances on its own, because the user may still be rolling.
+        if (root.screen == Screen.dice && row == 0) {
+            return root.entropy-ready;
+        }
+        return true;
     }
 
     function wrap(row: int) -> int {
@@ -290,6 +513,12 @@ export component AppWindow inherits Window {
     }
 
     function activate() {
+        // An unavailable row is not a destination. `move` steps past them, so this is only
+        // reachable where one is *selected* — the dice screen, whose Continue starts locked
+        // and stays selected while it is.
+        if (!root.available(root.selected)) {
+            return;
+        }
         if (root.selected == root.session-row) {
             root.intent(Intent.session-end);
         } else if (root.screen == Screen.start) {
@@ -298,6 +527,10 @@ export component AppWindow inherits Window {
                 : Intent.restore);
         } else if (root.screen == Screen.ending) {
             root.intent(root.selected == 0 ? Intent.shut-down : Intent.restart);
+        } else if (root.screen == Screen.dice) {
+            root.intent(Intent.create-continue);
+        } else if (root.screen == Screen.words) {
+            root.intent(Intent.create-confirm);
         }
     }
 
@@ -311,6 +544,14 @@ export component AppWindow inherits Window {
             // travel and Tab is at best a second name for Down — and at worst, if traversal
             // ran ahead of this handler, the one key that could take focus off the only
             // element that reads the keyboard.
+            // The dice, and the only keys in this appliance that carry a value. Read
+            // before the ring's own keys because they share nothing with them: a digit is
+            // never navigation (04-screens.md §2).
+            if (root.screen == Screen.dice
+                && event.text.to-float() >= 1 && event.text.to-float() <= 6) {
+                root.roll(event.text.to-float());
+                return EventResult.accept;
+            }
             if (event.text == Key.UpArrow) {
                 root.move(-1);
                 return EventResult.accept;
@@ -334,7 +575,7 @@ export component AppWindow inherits Window {
 
         VerticalLayout {
             Rectangle {
-                height: 44px;
+                height: Metrics.header-height;
                 background: Palette.ground;
 
                 HorizontalLayout {
@@ -360,7 +601,7 @@ export component AppWindow inherits Window {
             }
 
             Rectangle {
-                height: 1px;
+                height: Metrics.rule;
                 background: Palette.line-soft;
             }
 
@@ -371,10 +612,23 @@ export component AppWindow inherits Window {
                 background: Palette.panel;
 
                 HorizontalLayout {
-                    padding: root.wide ? 44px : 24px;
+                    padding: root.wide ? Metrics.slot-padding-wide : Metrics.slot-padding;
 
                     if root.screen == Screen.start: StartMenu {
                         camera: root.camera-present;
+                        selected: root.selected;
+                    }
+
+                    if root.screen == Screen.dice: DiceScreen {
+                        rolls: root.rolls;
+                        wait-seconds: root.wait-seconds;
+                        ready: root.entropy-ready;
+                        selected: root.selected;
+                    }
+
+                    if root.screen == Screen.words: Words {
+                        left: root.left-column;
+                        right: root.right-column;
                         selected: root.selected;
                     }
 
@@ -387,7 +641,7 @@ export component AppWindow inherits Window {
             }
 
             Rectangle {
-                height: 1px;
+                height: Metrics.rule;
                 background: Palette.line-soft;
             }
 
@@ -395,7 +649,7 @@ export component AppWindow inherits Window {
             // in the ring on every screen there will ever be (04-screens.md §7, §13). The
             // physical power button lands on the same confirm this row does (ADR-0017).
             Rectangle {
-                height: 48px;
+                height: Metrics.footer-height;
                 background: Palette.ground;
 
                 HorizontalLayout {
