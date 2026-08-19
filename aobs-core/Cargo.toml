@@ -11,4 +11,24 @@ license.workspace = true
 repository.workspace = true
 description = "Wallet logic for aobs: no hardware, no I/O, no clock."
 
+# Every entry here is named by 02-core.md §1, with one exception called out below.
 [dependencies]
+# PSBT, script, address, BIP32 — and, for #70, `bitcoin::hashes`: SHA-256 for the BIP-39
+# checksum and the entropy supplement, HMAC-SHA-512 for the seed. The PBKDF2 iteration over
+# that HMAC is fifteen lines in bip39.rs rather than a `pbkdf2` + `hmac` + `sha2` trio,
+# which would put a second SHA-512 implementation in the closure for the same arithmetic.
+bitcoin = "0.32"
+# **Not in §1's table.** NFKD is mandated — 02-core.md §5, and the Japanese vectors are
+# mandatory in 05-testing-and-release.md §2 — and it is unimplementable without the Unicode
+# decomposition tables, so the choice was one crate or hand-rolled UCD data. This is the
+# crate rust-bitcoin's own ecosystem uses; licence Unicode-3.0 OR (MIT OR Apache-2.0), all
+# GPL-3.0-compatible. Flagged rather than slipped in: the table is a closed decision and
+# this is an addition to it.
+unicode-normalization = "0.1.25"
+# `ZeroizeOnDrop`, and the derive that makes it one line per secret type.
+zeroize = { version = "1.9.0", features = ["zeroize_derive"] }
+
+# Test-only, so outside the shipped closure entirely. 05-testing-and-release.md §3 requires
+# property tests; this is what runs them.
+[dev-dependencies]
+proptest = "1.11.0"
