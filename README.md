@@ -1,6 +1,22 @@
 # aobs
 Amnesic Offline Bitcoin Signer
 
+> [!WARNING]
+> **This appliance cannot yet do the thing it exists to do. Do not point it at a key that holds
+> money.**
+>
+> The repository is published while it is being built, so the design can be read and argued with
+> before the code sets. What is missing is not detail work:
+>
+> - **No PSBT validation and no rejection policy.** Nothing checks what a transaction does.
+> - **No transaction review screen.** The screen that is the entire security argument — *if the
+>   user cannot verify what they are signing, no other property matters* — is not written.
+> - **No signing path.** No derivation, no change re-derivation, no sighash, no `secp256k1` call.
+>
+> An ISO built from this tree boots, and it can generate a seed. Treat any key it produces or
+> imports as **disclosed**: the paths that would protect it do not exist yet. There is no release
+> and no signed artifact, and until there is, nothing here is a signer — it is the shape of one.
+
 A Bitcoin signing appliance shipped as a bootable Debian LiveCD (`bitcoin-signer-amd64.iso`,
 amd64 only). You boot it on a machine with no network, create or load a single-sig wallet,
 review a transaction in full, sign it, and shut down. The wallet lives in RAM for one session
@@ -28,7 +44,7 @@ repo currently holds:
 | Path | What is in it |
 |---|---|
 | [`docs/specs/`](docs/specs/) | The v1 implementation spec, seven files: overview, boot layer, core, transport, screens, testing and release, code registry. |
-| [`docs/adr/`](docs/adr/) | Fifteen architecture decision records — the *why* for the choices a newcomer would otherwise read as arbitrary. |
+| [`docs/adr/`](docs/adr/) | Eighteen architecture decision records — the *why* for the choices a newcomer would otherwise read as arbitrary. |
 | [`docs/research/`](docs/research/) | Research findings, one file per question, every claim carrying a source URL. |
 | [`docs/prototypes/`](docs/prototypes/) | Throwaway HTML prototypes built to settle specific UI questions. |
 | [`docs/qa-checklist.md`](docs/qa-checklist.md) | The claims CI cannot answer, which need a person and a machine. |
