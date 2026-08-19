@@ -1,21 +1,25 @@
 //! `aobs` — the shell.
 //!
-//! It draws, and in later slices it reads the keyboard and runs the camera. **It decides
-//! nothing about money and branches on no validation outcome** (`04-screens.md`); that
-//! rule is what keeps it honestly outside the coverage gate.
+//! It draws, it reads the keyboard, it answers the power button, and in later slices it runs
+//! the camera. **It decides nothing about money and branches on no validation outcome**
+//! (`04-screens.md`); that rule is what keeps it honestly outside the coverage gate, and
+//! `router` is where it is visible rather than asserted.
 //!
-//! This is the walking skeleton ([#39](https://github.com/allisson/aobs/issues/39)): one
-//! Slint screen on `backend-linuxkms` + `renderer-software`, holding DRM master on tty1.
-//! No wallet logic, no camera, no QR.
+//! The frame is [#69](https://github.com/allisson/aobs/issues/69): the start menu, the
+//! chrome that does not vanish, and §13's ending. No wallet logic, no camera, no QR.
 
 mod buildinfo;
+mod camera;
 mod console;
 mod display;
 mod entropy;
 mod fail;
 mod notify;
+mod power;
+mod router;
 
 use fail::Failure;
+use router::Ending;
 
 slint::include_modules!();
 
@@ -32,13 +36,18 @@ fn main() -> ! {
     // zeroization guarantee lives, and abort skips it. Catching here is the other half —
     // the top level catches, unwinding has already dropped, and we exit into §9.
     match std::panic::catch_unwind(run) {
-        Ok(Ok(())) => fail::halt(Failure::EventLoopExited),
+        // The exit status is the shutdown mechanism, and it is the whole of it (ADR-0017,
+        // 01-boot-layer.md §2). `run` has returned, so the window is dropped, DRM master is
+        // released and every frame between here and the wallet is gone — the app dies first
+        // and the machine goes down afterwards, which is what makes §5's RAM wipe
+        // unconditional rather than a claim about someone else's ordering.
+        Ok(Ok(ending)) => std::process::exit(ending.exit_code()),
         Ok(Err(failure)) => fail::halt(failure),
         Err(_) => fail::halt(Failure::Panicked),
     }
 }
 
-fn run() -> Result<(), Failure> {
+fn run() -> Result<Ending, Failure> {
     // The first of the eight owed measurements (00-overview.md). Derived as 1–16 s under
     // `random.trust_cpu=off`; this is what makes it a number. The "gathering entropy"
     // screen belongs with wallet creation (04-screens.md §2), not here.
@@ -78,6 +87,22 @@ fn run() -> Result<(), Failure> {
             scale_factor: scale,
         });
 
+    // 04-screens.md §1: with no camera the third start entry is visibly unavailable with its
+    // reason stated, not hidden. Probed here because this is where the start menu is about
+    // to be drawn — 01-boot-layer.md §7 enumerates V4L2 devices at the point of use, so a
+    // camera plugged in later is not something a startup decision can have ruled out.
+    ui.set_camera_present(camera::present());
+
+    // §0's second breakpoint, decided once for the whole appliance and read by every screen
+    // that has two states. The mode cannot change under a running appliance — the DRM tier
+    // took the connector's preferred mode and the fbdev tier took the firmware's — so this is
+    // an input like the mode itself, not something the layout recomputes.
+    ui.set_wide(display::wide(mode.width, mode.height));
+
+    // Everything the user can ask for goes through here, and nothing else. The cell is where
+    // §13's answer lands, because the event loop is what ends and it carries nothing back.
+    let ending = router::wire(&ui);
+
     // The readiness line, printed from inside the running event loop rather than before
     // it. That placement is the point: the line asserts the loop came up, which is what
     // the QEMU harness keys on instead of diffing a screenshot
@@ -115,5 +140,8 @@ fn run() -> Result<(), Failure> {
     // narrowed it to *no display at all* — and E03 is what covers a loop nothing asked to
     // return.
     ui.run().map_err(|_| Failure::EventLoopExited)?;
-    Ok(())
+
+    // Nothing but §13 ends the loop, so a loop that ended with no ending in the cell ended
+    // for a reason nobody asked for — which is exactly what `AOBS-E03` is (06-codes.md §5).
+    ending.get().ok_or(Failure::EventLoopExited)
 }

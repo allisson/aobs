@@ -1,92 +1,435 @@
-// The walking skeleton's one screen (#39).
+// The shell frame: chrome, the keyboard, and the screens hung off it (#69).
 //
-// Light, one scheme throughout, no toggle (ADR-0011) — the tokens below are the
-// prototype's palette, which the ADR calls a starting point rather than a mandate. There
-// is no dark token set and no theme switch: **absent, not defaulted off.**
+// Light, one scheme throughout, no toggle (ADR-0011) — the palette below is the
+// prototype's, which ADR-0011 calls a starting point rather than a mandate. There is no
+// dark token set and no theme switch: **absent, not defaulted off.**
 //
-// Chrome does not vanish for any screen (04-screens.md §0), so the status bar is here on
-// the emptiest screen the appliance will ever draw.
+// Three rules from 04-screens.md §0 are structural here rather than per screen, which is
+// the whole point of there being a frame:
+//
+//   * **Chrome does not vanish for any screen.** The header and the footer are outside the
+//     screen slot, so no screen can remove them — including the ones that will show secret
+//     material, where a disappearing frame would be a surprise on the screen demanding the
+//     most attention.
+//   * **Keyboard only, no pointer.** The software renderer draws no cursor and nothing here
+//     has a `TouchArea`. One `FocusScope` in the frame owns every key, so navigation cannot
+//     be reimplemented — or forgotten — screen by screen. Escape cancels wherever a cancel
+//     exists, which the router decides by having somewhere to go back to.
+//   * **The two breakpoints, and no third.** `wide` is computed once, from the logical
+//     width the scale factor produced (04-screens.md §0, §11.2: the threshold is the design
+//     width). The review panel is its first real consumer — a fixed rail beside the outputs
+//     above it, stacked above them below it — and it reads this rather than deriving its own.
+//
+// The frame also **appends one row to every screen**: 04-screens.md §7 lists *restart /
+// shut down* as always available, and a screen that had to add it itself is a screen that
+// can forget it. It is the last row of the ring on every screen, reachable from all of them
+// with the same two keys as everything else.
+
+// What the user asked for. The frame names the intent; the router decides where it lands
+// (04-screens.md: the shell decides nothing about money and branches on no validation
+// outcome, and one callback carrying an intent is what keeps that checkable).
+export enum Intent {
+    create,
+    import,
+    restore,
+    session-end,
+    shut-down,
+    restart,
+    cancel,
+}
+
+// Which screen is in the slot. `unbuilt` is honest rather than permanent: the three start
+// entries route somewhere real in later slices, and until then the frame says so instead of
+// swallowing the press (standing rule 8).
+export enum Screen {
+    start,
+    unbuilt,
+    ending,
+}
+
+export global Palette {
+    out property <color> ground: #eef1f5;
+    out property <color> panel: #ffffff;
+    out property <color> line-soft: #dfe5ec;
+    out property <color> ink: #0f151c;
+    out property <color> ink-mid: #414d5c;
+    out property <color> ink-dim: #66717f;
+    // §0: darkened from the dark scheme's value to hold contrast against a white panel.
+    out property <color> focus: #14468f;
+}
+
+// One row of a ring. `note` carries the stated reason when a row is unavailable — 01-boot
+// -layer.md §7 and 04-screens.md §1 both require *visibly unavailable with the reason
+// stated*, never hidden — and a plain sub-line otherwise.
+component Choice inherits Rectangle {
+    in property <string> label;
+    in property <string> note;
+    in property <bool> available: true;
+    in property <bool> current: false;
+
+    height: 66px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: root.current ? Palette.focus : Palette.line-soft;
+    background: root.current ? Palette.ground : Palette.panel;
+
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 18px;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 4px;
+
+            Text {
+                text: root.label;
+                color: root.available ? Palette.ink : Palette.ink-dim;
+                font-size: 19px;
+                font-weight: root.current ? 600 : 400;
+            }
+
+            Text {
+                text: root.note;
+                visible: root.note != "";
+                color: Palette.ink-dim;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+component Heading inherits Text {
+    color: Palette.ink;
+    font-size: 26px;
+    font-weight: 600;
+}
+
+// 04-screens.md §1. A flat three-entry menu, labelled by the input the user is holding —
+// paper with words, or a QR — because labelling by artifact fails: the encrypted QR is a
+// re-encoding of the mnemonic, so "backup" names both artifacts. No submenu, and no way
+// back here later: this is a boot-time menu, not a mode switch (ADR-0010).
+component StartMenu inherits Rectangle {
+    in property <bool> camera;
+    in property <int> selected;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: 22px;
+
+        Heading {
+            text: "What are you holding?";
+        }
+
+        VerticalLayout {
+            spacing: 10px;
+
+            Choice {
+                label: "Create a new wallet";
+                note: "24 words, generated here, on paper before anything else happens.";
+                current: root.selected == 0;
+            }
+
+            Choice {
+                label: "Type a seed phrase";
+                note: "You have the words on paper.";
+                current: root.selected == 1;
+            }
+
+            Choice {
+                label: "Scan an encrypted backup";
+                // Not hidden, and the reason is on screen rather than in a manual.
+                note: root.camera
+                    ? "You have the QR this appliance printed for you, and the eight words that unlock it."
+                    : "Unavailable: no camera was found. Plug in a USB webcam and start over, or type the words instead.";
+                available: root.camera;
+                current: root.selected == 2;
+            }
+        }
+
+        Text {
+            text: "One wallet per boot. There is no way back to this menu.";
+            color: Palette.ink-dim;
+            font-size: 13px;
+        }
+    }
+}
+
+// The honest placeholder. It exists so that choosing a real entry is not a dead press while
+// the screens behind it are still being built (#78, #72).
+component Unbuilt inherits Rectangle {
+    VerticalLayout {
+        alignment: start;
+        spacing: 14px;
+
+        Heading {
+            text: "Not in this build.";
+        }
+
+        Text {
+            text: "That screen is not built yet. This appliance holds no wallet and signs nothing.";
+            color: Palette.ink-mid;
+            font-size: 16px;
+            wrap: word-wrap;
+        }
+
+        Text {
+            text: "Press Escape to go back.";
+            color: Palette.ink-dim;
+            font-size: 13px;
+        }
+    }
+}
+
+// 04-screens.md §13. *End the session* and *shut down* are the same action, and restart is
+// offered alongside it, labelled as what it actually delivers: a different wallet, from a
+// fresh process with a fresh OnceLock (ADR-0010, ADR-0017) — not the machine's word for it.
+//
+// One press confirms, never a hold: an accidental shutdown mid-review is the most expensive
+// accident in the product, and one press is the cheapest guard proportional to it.
+component Ending inherits Rectangle {
+    in property <int> selected;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: 22px;
+
+        Heading {
+            text: "End the session?";
+        }
+
+        VerticalLayout {
+            spacing: 10px;
+
+            Choice {
+                label: "Shut down";
+                note: "The machine powers off. Nothing on it is saved.";
+                current: root.selected == 0;
+            }
+
+            Choice {
+                label: "Start over with a different wallet";
+                note: "aobs comes back in about a second with nothing loaded. The machine stays on.";
+                current: root.selected == 1;
+            }
+        }
+
+        Text {
+            text: "Press Escape to go back.";
+            color: Palette.ink-dim;
+            font-size: 13px;
+        }
+    }
+}
 
 export component AppWindow inherits Window {
     in property <string> version;
     in property <string> build-date;
+    // Probed at the point of use rather than cached at startup (01-boot-layer.md §7), so a
+    // camera plugged in later simply works.
+    in property <bool> camera-present;
+    in property <Screen> screen: Screen.start;
 
-    property <color> ground: #eef1f5;
-    property <color> panel: #ffffff;
-    property <color> line-soft: #dfe5ec;
-    property <color> ink: #0f151c;
-    property <color> ink-mid: #414d5c;
-    property <color> ink-dim: #66717f;
+    callback intent(Intent);
+
+    // 04-screens.md §0's second breakpoint, one property for the whole appliance. Handed in
+    // from `display::wide`, which already owns §0's arithmetic and can be tested; deriving it
+    // from `root.width` here makes the layout's constraints depend on the width they produce,
+    // which Slint reports as a binding loop that may panic at runtime.
+    in property <bool> wide;
+
+    // The ring. Every screen's own rows, plus the one the frame appends (§7: *restart /
+    // shut down*, always). A screen never numbers its own rows into the frame's ring, and
+    // the frame never has to be told which row means what.
+    property <int> screen-rows: root.screen == Screen.start ? 3
+        : root.screen == Screen.ending ? 2
+        : 0;
+    property <int> rows: root.screen-rows + 1;
+    property <int> session-row: root.rows - 1;
+    property <int> selected: 0;
+
+    // A screen change resets the cursor. Without it a ring that just got shorter would keep
+    // a selection off its end, and the first key would move from nowhere.
+    changed screen => {
+        self.selected = 0;
+    }
 
     title: "aobs";
-    background: root.panel;
+    background: Palette.panel;
     // fonts-dejavu is in the 22-package floor (01-boot-layer.md §2); naming it means the
     // appliance renders the same on every machine rather than taking fontconfig's pick.
     default-font-family: "DejaVu Sans";
     default-font-size: 15px;
+    forward-focus: keys;
 
-    VerticalLayout {
-        Rectangle {
-            height: 44px;
-            background: root.ground;
+    // Whether a row can be chosen. The only unavailable row the appliance has today is the
+    // one that needs a camera (04-screens.md §1); it stays visible and navigation steps past
+    // it, so the reason is readable and the press is never dead.
+    //
+    // The parentheses are load-bearing rather than decorative. If `?:` bound tighter than
+    // `&&`, the unparenthesised form would read *start screen **and** (row 2 ? camera : yes)*,
+    // which is false for every row on every other screen — and `move` would then double-hop
+    // past *start over with a different wallet* on §13's confirm. Not a precedence anyone
+    // should have to be sure of to read this.
+    function available(row: int) -> bool {
+        return (root.screen == Screen.start && row == 2) ? root.camera-present : true;
+    }
 
-            HorizontalLayout {
-                padding-left: 24px;
-                padding-right: 24px;
-                alignment: space-between;
+    function wrap(row: int) -> int {
+        return Math.mod(row + root.rows, root.rows);
+    }
 
-                Text {
-                    text: "AOBS";
-                    color: root.ink-dim;
-                    font-size: 12px;
-                    letter-spacing: 1.7px;
-                    vertical-alignment: center;
-                }
+    // One hop, then one more if the row it landed on is unavailable. A single extra step is
+    // enough while no two unavailable rows are adjacent, which the one-unavailable-row rule
+    // above guarantees — and it has to be, because Slint's functions have no loop. A screen
+    // that ever greys two neighbouring rows needs this rewritten, not extended.
+    function move(delta: int) {
+        self.selected = self.available(self.wrap(root.selected + delta))
+            ? self.wrap(root.selected + delta)
+            : self.wrap(root.selected + 2 * delta);
+    }
 
-                Text {
-                    text: "WALKING SKELETON";
-                    color: root.ink-dim;
-                    font-size: 12px;
-                    letter-spacing: 1.7px;
-                    vertical-alignment: center;
+    function activate() {
+        if (root.selected == root.session-row) {
+            root.intent(Intent.session-end);
+        } else if (root.screen == Screen.start) {
+            root.intent(root.selected == 0 ? Intent.create
+                : root.selected == 1 ? Intent.import
+                : Intent.restore);
+        } else if (root.screen == Screen.ending) {
+            root.intent(root.selected == 0 ? Intent.shut-down : Intent.restart);
+        }
+    }
+
+    keys := FocusScope {
+        width: 100%;
+        height: 100%;
+
+        key-pressed(event) => {
+            // Four keys, and Tab is deliberately not among them. There is exactly one
+            // `FocusScope` in this appliance, so Slint's focus traversal has nowhere to
+            // travel and Tab is at best a second name for Down — and at worst, if traversal
+            // ran ahead of this handler, the one key that could take focus off the only
+            // element that reads the keyboard.
+            if (event.text == Key.UpArrow) {
+                root.move(-1);
+                return EventResult.accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.move(1);
+                return EventResult.accept;
+            }
+            if (event.text == Key.Return) {
+                root.activate();
+                return EventResult.accept;
+            }
+            // Escape cancels wherever a cancel exists (§0). Whether one exists is the
+            // router's answer, not this frame's: it knows what it would go back to.
+            if (event.text == Key.Escape) {
+                root.intent(Intent.cancel);
+                return EventResult.accept;
+            }
+            return EventResult.reject;
+        }
+
+        VerticalLayout {
+            Rectangle {
+                height: 44px;
+                background: Palette.ground;
+
+                HorizontalLayout {
+                    padding-left: 24px;
+                    padding-right: 24px;
+                    alignment: space-between;
+
+                    Text {
+                        text: "AOBS";
+                        color: Palette.ink-dim;
+                        font-size: 12px;
+                        letter-spacing: 1.7px;
+                        vertical-alignment: center;
+                    }
+
+                    Text {
+                        text: "Up / Down to move        Enter to choose";
+                        color: Palette.ink-dim;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
                 }
             }
-        }
 
-        Rectangle {
-            height: 1px;
-            background: root.line-soft;
-        }
+            Rectangle {
+                height: 1px;
+                background: Palette.line-soft;
+            }
 
-        Rectangle {
-            background: root.panel;
+            // The screen slot. The frame's own padding is the one thing that reflows at the
+            // breakpoint today; §11.2's rail arrives with the review panel and reads `wide`
+            // from here rather than deriving it again.
+            Rectangle {
+                background: Palette.panel;
 
-            VerticalLayout {
-                alignment: center;
-                spacing: 14px;
+                HorizontalLayout {
+                    padding: root.wide ? 44px : 24px;
 
-                Text {
-                    text: "aobs";
-                    color: root.ink;
-                    font-size: 46px;
-                    font-weight: 600;
-                    horizontal-alignment: center;
+                    if root.screen == Screen.start: StartMenu {
+                        camera: root.camera-present;
+                        selected: root.selected;
+                    }
+
+                    if root.screen == Screen.unbuilt: Unbuilt { }
+
+                    if root.screen == Screen.ending: Ending {
+                        selected: root.selected;
+                    }
                 }
+            }
 
-                // Standing rule 8: state the fact, invent nothing. This build signs
-                // nothing and holds no wallet, and says so rather than looking ready.
-                Text {
-                    text: "This build draws one screen and does nothing else.";
-                    color: root.ink-mid;
-                    horizontal-alignment: center;
-                }
+            Rectangle {
+                height: 1px;
+                background: Palette.line-soft;
+            }
 
-                Text {
-                    text: "version " + root.version + "    build " + root.build-date;
-                    color: root.ink-dim;
-                    font-family: "DejaVu Sans Mono";
-                    font-size: 13px;
-                    horizontal-alignment: center;
+            // The footer carries the appended row, so *restart / shut down* is on screen and
+            // in the ring on every screen there will ever be (04-screens.md §7, §13). The
+            // physical power button lands on the same confirm this row does (ADR-0017).
+            Rectangle {
+                height: 48px;
+                background: Palette.ground;
+
+                HorizontalLayout {
+                    padding-left: 24px;
+                    padding-right: 24px;
+                    spacing: 16px;
+                    alignment: space-between;
+
+                    Rectangle {
+                        width: 260px;
+                        border-radius: 4px;
+                        border-width: 1px;
+                        border-color: root.selected == root.session-row ? Palette.focus : Palette.ground;
+                        background: root.selected == root.session-row ? Palette.panel : Palette.ground;
+
+                        Text {
+                            text: "Restart or shut down";
+                            color: Palette.ink-mid;
+                            font-size: 14px;
+                            font-weight: root.selected == root.session-row ? 600 : 400;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                        }
+                    }
+
+                    // §10: the version and the build date make no security claim, and they
+                    // are the one thing on this appliance a bug report can quote.
+                    Text {
+                        text: "version " + root.version + "    build " + root.build-date;
+                        color: Palette.ink-dim;
+                        font-family: "DejaVu Sans Mono";
+                        font-size: 13px;
+                        vertical-alignment: center;
+                    }
                 }
             }
         }

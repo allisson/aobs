@@ -98,10 +98,17 @@ without it a silent run cannot be told from a broken probe, which is the ambigui
 directives and rejects a bad value for any of them. It also rejected `SuccessAction=` in `[Service]`,
 where it was written first — a silent no-op of exactly the kind control 1 was.
 
-**Not established**: that the exit-status contract fires end to end. Nothing in the crate exits 42
-yet, so that waits for [#69](https://github.com/allisson/aobs/issues/69) and the CI row
-`05-testing-and-release.md` §6.2 now carries. And the probe ran under QEMU's ACPI implementation
-only; the button on real firmware is on §6.3's by-hand list, for the reason ADR-0016 records about
+**Established since, by [#69](https://github.com/allisson/aobs/issues/69)**: that the exit-status
+contract fires end to end. `ci/power-button-probe.sh` is §6.2's row — a control press first, then the
+button, then the confirm, then the machine going down. Building it found the half nobody had looked
+at: `/usr/lib/aobs/launch` ran the binary and then fell through to `AOBS-E00` unconditionally, so
+`exit 42` never reached systemd and neither did a crash's status. The wrapper now passes the app's
+status through and keeps `E00` for 126 and 127, which are the shell's own and exactly the *never
+spoke* cases §9 describes. **The mechanism was correct in three files and inert because of a fourth**,
+which is this ADR's own argument arriving from the other direction.
+
+**Still not established**: the button on real firmware. The probe ran under QEMU's ACPI
+implementation only, and the machine is on §6.3's by-hand list for the reason ADR-0016 records about
 `ramfb`.
 
 ## Alternatives rejected

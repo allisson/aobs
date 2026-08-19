@@ -125,6 +125,16 @@ included `libseat1` and `seatd`, which this image no longer ships.
     with a fresh `OnceLock` (ADR-0010), not a reboot. Any other exit is a crash and restarts, which
     is the product fact below, unchanged. A **startup** failure reaches none of the three: §9's
     diagnostic parks the process rather than exiting.
+  - **`launch` passes the app's exit status through, and that is part of the mechanism rather than
+    an implementation detail.** The wrapper runs the binary as a child rather than exec'ing it, so
+    it is the process systemd sees — and it shipped falling through to §9's `AOBS-E00` block
+    unconditionally, which swallowed all three cases above: *end the session* printed a
+    build-is-broken diagnostic instead of powering the machine off, and a crash parked forever
+    instead of restarting. It now exits with the child's status, keeping `E00` for **126 and 127
+    only**. Those two are the shell's own — *not executable* and *not found*, the latter also being
+    what the dynamic loader exits with on a missing shared library — so they are precisely the
+    *never spoke* list `06-codes.md` §5 gives `E00`, and the app's own 42 and 0 cannot collide with
+    them. Found by building §6.2's power-button row ([#69](https://github.com/allisson/aobs/issues/69)).
   - **`SuccessAction=` is a `[Unit]` key.** Stated because it was written into `[Service]` first,
     where the image's own systemd (`257.13-1~deb13u1`) discards it as an unknown key while the unit
     still starts — a silent no-op of exactly the kind control 1 was. `systemd-analyze verify`
@@ -525,6 +535,11 @@ block** and halts:
   which also states why the code is worth printing when the variant name is already there.
 
 Not a stack trace, not systemd's default spew. Halt with the text visible; do not power off.
+
+**What the wrapper does *not* do is decide.** It prints that block for the two statuses that mean the
+binary never ran — 126 and 127 — and otherwise exits with whatever the app exited with, because §2's
+exit-status contract runs through it. A wrapper that parked on every status would make *end the
+session* unreachable and a crash unrestartable, which is what it did until #69.
 
 **The diagnostic prints only fixed strings and typed error-variant names, never formatted program
 state** — the same rule that governs logs and `Debug`, extended to the one output path that survives
