@@ -60,7 +60,7 @@ the shell or is deleted.
 |---|---|
 | **BIP-32** | Derivation across all four families. |
 | **BIP-39 English, all five lengths, passphrase `"TREZOR"`** | Mnemonic ↔ entropy, checksum, seed derivation. |
-| **BIP-39 Japanese, passphrase `㍍ガバヴァぱばぐゞちぢ十人十色`** ([bip32JP](https://github.com/bip32JP/bip32JP.github.io/blob/master/test_JP_BIP39.json)) | **Mandatory, not optional.** `㍍` (U+3350) is a *compatibility* character that decomposes under NFKD and is left untouched by NFD. These are the only vectors in the suite that distinguish NFKD from NFD — an implementation reaching for the wrong form passes everything else. |
+| **BIP-39 Japanese, passphrase `㍍ガバヴァぱばぐゞちぢ十人十色`** ([bip32JP](https://github.com/bip32JP/bip32JP.github.io/blob/master/test_JP_BIP39.json)) | **Mandatory, not optional.** `㍍` (U+334D) is a *compatibility* character that decomposes under NFKD and is left untouched by NFD. These are the only vectors in the suite that distinguish NFKD from NFD — an implementation reaching for the wrong form passes everything else. |
 | **BIP-174**, including **invalid vector 5** | The PSBT parser, and the duplicate-key refusal we now inherit from the dependency. |
 | **BIP-340 / BIP-341** | Taproot key-path signing and sighash. |
 | **BIP-380** | The four exported descriptors' checksums. |

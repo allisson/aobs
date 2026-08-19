@@ -75,7 +75,7 @@ and trimming ourselves would silently disagree with every other implementation o
   screen, and carried into the review header — the fingerprint is technically a complete indicator,
   but only to a user who compares it, and the users who most need the reminder are the ones who will
   not.
-- **Japanese BIP39 vectors are mandatory in the suite.** `㍍` (U+3350) decomposes only under NFKD and
+- **Japanese BIP39 vectors are mandatory in the suite.** `㍍` (U+334D) decomposes only under NFKD and
   is untouched by NFD, so they are the only vectors that catch an implementation reaching for the
   wrong normalization form.
 - **The passphrase cannot change mid-session** (ADR-0010).
