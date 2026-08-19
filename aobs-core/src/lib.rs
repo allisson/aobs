@@ -4,7 +4,9 @@
 //! encode/decode, the review model and the watch-only export model all land here as
 //! modules. Five of them exist: [`secret`], [`entropy`] and [`bip39`]
 //! ([#70](https://github.com/allisson/aobs/issues/70)), then [`derive`] and the address half
-//! of [`format`] ([#71](https://github.com/allisson/aobs/issues/71)). The rest do not — the walking
+//! of [`format`] ([#71](https://github.com/allisson/aobs/issues/71)), whose amount half arrived
+//! with the writing rules ([#100](https://github.com/allisson/aobs/issues/100)) — but not the
+//! review model those numbers come from. The rest do not — the walking
 //! skeleton ([#39](https://github.com/allisson/aobs/issues/39)) built the boot layer first,
 //! because the boot layer is where the unproven claims were.
 //!
