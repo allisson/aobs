@@ -455,6 +455,73 @@ refuse it on another, which no test row and no user could reason about. *Owed: t
 minimum canvas. Provisional in the same way the RAM floor is provisional, and movable only before the
 first signed ISO ships.*
 
+### 11.2.1 How the numbers are written
+
+Settled by [#100](https://github.com/allisson/aobs/issues/100). The prototype was already internally
+consistent about amounts, and every one of its renderings is now a rule — with the boundaries stated
+and the grouping reconciled against §0. Rendering is a pure function over `bitcoin::Amount` in
+`aobs-core/src/format.rs`, the ninth 98% component, and it decides nothing: §9's warning is a typed
+variant and stays one, so no arm of the formatter evaluates a condition and no arm of it reads a
+network.
+
+**Amounts are BTC with eight decimals, never trimmed.** `0.04855200`, `0.00005200`,
+`21000000.00000000`. Eight decimals is exactly what BTC needs to carry one satoshi, so nothing the
+appliance can hold is unrepresentable and nothing is rounded — a one-satoshi payment is `0.00000001`
+and never `0.00`. Fixed decimals also make the digits a *shape*: the point lands in the same column on
+every row of the rail, so a magnitude error reads as a misaligned column rather than as digits to
+count. **Named cost:** six meaningless zeros in front of every small number — which is what the
+satoshi form below buys back.
+
+**The unit is a separate label, and it is `BTC` on both networks.** The formatter returns digits and
+never a unit; the shell sets the label apart from them, dimmer and smaller (§0). There is no `tBTC`
+and no different precision on testnet — ADR-0015 makes those sessions look identical to mainnet ones,
+and a unit label is the one place the money would have leaked the network.
+
+**The fee carries a second form in satoshis; no other row does.** `5 200 sat` beside
+`0.00005200 BTC`. The fee is the number the eight-decimal form serves worst — routinely five zeros
+and then the digits — and the only one a user compares against a market quoted in satoshis. Two units
+on every row would be a units question on every row.
+
+**Satoshi digits group in threes. BTC digits do not group at all.** The satoshi form is a free-length
+integer with nothing anchoring its magnitude — `5200` and `52000` differ only by width — so it is
+grouped, conventionally, in threes from the right. The BTC form is already anchored by the fixed point
+and the fixed eight decimals, so grouping it would add a second reading rule and buy no scan help.
+**Named cost:** an amount above 1 000 BTC has an ungrouped integer part.
+
+**The separation is §0's gap, not a space character** — the same mechanism as an address, and the
+group *size* differs because the jobs differ: four for characters being compared one at a time, three
+for digits being read as a magnitude. The formatter therefore returns the satoshi groups **as data**,
+the way address groups already come back, and the shell lays them out with the sub-cell gap. A real
+space costs a full monospace cell per gap where §0's gap costs a quarter, and §0's whole argument is
+that cells at the floor are what the six-output bound is made of. Two rules disagreeing about the same
+gap, in the same panel, is the silent disagreement this spec removes everywhere else.
+
+**The fee rate is `sat/vB` with one decimal, and it divides by the predicted vsize of the *signed*
+transaction.** `25.0 sat/vB`. The PSBT carries an unsigned transaction, so the size is a prediction
+rather than a measurement — and a sound one, because the wallet is single-sig across exactly four
+known script types (`02-core.md` §6) and each input's witness or `scriptSig` is therefore a fixed
+shape. The prediction sums **weight units** — the unsigned transaction's base size at ×4, plus each
+input's own signing data at its own weight — and divides once, `vsize = ceil(weight / 4)` as BIP-141
+defines it, never rounding per input. Each ECDSA input is charged a **71-byte** signature element, the
+smaller of the two sizes low-S DER produces, so the error runs in one direction only: **the rate
+displayed is never lower than the rate the broadcast transaction will pay.** A screen that made a fee
+look cheaper than it is would be the one rounding error this panel cannot afford. **Named cost:**
+about half of ECDSA inputs produce a 72-byte element instead, so the displayed rate reads high by a
+fraction of a percent. The prediction against a real signed transaction is *owed*
+(`00-overview.md`).
+
+**The fee as a percentage of the amount paying is three decimals, and a consolidation has none at
+all.** `0.107%`. The denominator is the amount paying — the total to non-change outputs — which is
+exactly §9's warning denominator, so the two numbers cannot disagree about what they are about. With
+no non-change outputs the ratio is undefined, §9 says nothing fires, and the formatter returns nothing
+rather than a zero, an infinity or a dash: the absence is typed, not rendered.
+
+**A number that would round to zero renders as a bound instead.** A non-zero fee under 0.05 sat/vB is
+`< 0.1`, and a non-zero ratio under 0.0005% is `< 0.001`. Rounding a real fee to `0.0 sat/vB` or a
+real ratio to `0.000%` would be the formatter quietly asserting *nothing*, and asserting is deciding —
+§9's line. Otherwise both round half up. At the other extreme nothing is clamped: a 5 200-satoshi fee
+against a one-satoshi payment is `520000.000%`, which is the fact.
+
 ### 11.3 Per-address confirmation
 
 Pressing sign walks **one full-width screen per payment address** before the signature is produced.

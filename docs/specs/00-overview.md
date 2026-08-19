@@ -141,6 +141,7 @@ None of these blocks implementation. All of them block the release gate
 | That **six output rows** fit the minimum canvas non-scrolling, below the stacked money facts (derived: ~320 px of rows at ~57 px each). The six-output cap rests on it, and the number can only move before the first signed ISO. | [#58](https://github.com/allisson/aobs/issues/58) |
 | That a phone camera reads our v27 output at arm's length (v40 is the documented fallback — and the maximum UR fragment length is re-derived from the new cap, `03-transport.md` §9). | [#30](https://github.com/allisson/aobs/issues/30) |
 | The capture-resolution floor for reading an inbound v40 symbol. | [#31](https://github.com/allisson/aobs/issues/31) |
+| That the predicted signed-transaction vsize the fee rate divides by matches a real signed transaction across all four script types (derived: a weight-unit sum charging each ECDSA input a 71-byte signature element, so it errs high by a fraction of a percent — `04-screens.md` §11.2.1). | [#100](https://github.com/allisson/aobs/issues/100) |
 
 Eight verification obligations, distinct from measurements:
 

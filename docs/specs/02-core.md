@@ -432,6 +432,13 @@ Contents: amount leaving, amount paying, fee (absolute, rate, and as a percentag
 input count, input total, amount returning, the classified outputs (payment or change, with the full
 derivation path and the re-derivation verdict on each), the network, and the warning variant below.
 
+**The rate divides by a prediction, not a measurement.** The unsigned transaction the PSBT carries is
+not the one that pays the fee, so the model computes the vsize the *signed* transaction will have from
+our own four script types, in weight units, `vsize = ceil(weight / 4)` — charging each ECDSA input the
+smaller 71-byte signature element, so the rate is never displayed lower than what will be paid.
+`04-screens.md` §11.2.1 carries that reasoning and the rest of the writing rules; every number in this
+model crosses the seam as a `bitcoin::Amount` and is written by `format.rs`, never here.
+
 ### The one advisory warning
 
 ```
