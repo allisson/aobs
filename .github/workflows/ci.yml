@@ -1,10 +1,20 @@
 name: ci
 
+# No `push` on main. GitHub builds the `pull_request` event against the merge commit of head
+# and base, so under squash-merge the tree CI judged *is* the tree that lands — and running it
+# again on the push was an exact second copy: 18 `push` runs against 18 `pull_request` runs in
+# the first nineteen days of August, half the bill for a commit already proven green.
+# `workflow_dispatch` stays, so main can still be checked on demand.
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
+
+# One live run per ref. A force-push to a PR otherwise leaves the superseded run booting eight
+# QEMU machines for a tree nobody will merge; run 32084441517 sat six hours before a human
+# cancelled it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
