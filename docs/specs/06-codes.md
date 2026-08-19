@@ -70,7 +70,7 @@ already accepted, for the same reason: someone else's copy of the old behaviour 
 
 | Code | Condition | Note |
 |---|---|---|
-| `AOBS-E00` | **The binary never spoke.** `/usr/lib/aobs/launch` reached the line after running it: a missing shared library, a wrong interpreter, an image built wrong. | The wrapper's own code — the only one printed by something other than the app, and the only one whose remedy is *verify the download and write the medium again*. Found in the tree by [#57](https://github.com/allisson/aobs/issues/57) and added here; it predates this registry and is correct. |
+| `AOBS-E00` | **The binary never spoke.** `/usr/lib/aobs/launch` could not execute it at all — status 126 or 127: a missing shared library, a wrong interpreter, an image built wrong. | The wrapper's own code — the only one printed by something other than the app, and the only one whose remedy is *verify the download and write the medium again*. Found in the tree by [#57](https://github.com/allisson/aobs/issues/57) and added here; it predates this registry and is correct. Narrowed to those two statuses by [#69](https://github.com/allisson/aobs/issues/69): the wrapper reached this block on *every* status, including the app's own `exit 42`, so §2's shutdown printed *this image is built wrong* instead of powering the machine off. |
 | `AOBS-E01` | The kernel CSPRNG returned no bytes. | Unchanged. |
 | `AOBS-E02` | **No display at all**: no DRM device and no firmware framebuffer. | Narrowed here — see below. |
 | `AOBS-E03` | The event loop returned. Nothing on this appliance asks it to. | Unchanged. |

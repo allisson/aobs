@@ -168,6 +168,13 @@ jobs:
       - name: The fbcon regression
         run: ci/fbcon-probe.sh bitcoin-signer-amd64.iso 4096 900
 
+      # §6.2's power-button row. It carried a caveat — *waits for a shutdown to assert on* —
+      # until #69 gave it one, and it is the only row that exercises the exit-status contract:
+      # the wrapper passing the status through, SuccessExitStatus, RestartPreventExitStatus
+      # and SuccessAction, none of which is observable on its own.
+      - name: The power button
+        run: ci/power-button-probe.sh bitcoin-signer-amd64.iso 4096 900
+
       # §7 requires the low-memory GRUB entry to degrade rather than brick. The floor is
       # provisional at 2 GiB until measured against the built image (00-overview.md), so
       # this run is what produces the number rather than asserting one.

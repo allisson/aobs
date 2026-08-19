@@ -49,35 +49,8 @@ rm -f "${out}"-panel-*.ppm
 work="$(mktemp -d)"
 log="${work}/serial.log"
 
-# Same firmware discovery as ci/qemu-boot.sh; AOBS_OVMF overrides.
-firmware_args=""
-if [ -n "${AOBS_OVMF:-}" ]; then
-    firmware_args="-bios ${AOBS_OVMF}"
-else
-    for pair in \
-        "/usr/share/OVMF/OVMF_CODE_4M.fd:/usr/share/OVMF/OVMF_VARS_4M.fd" \
-        "/usr/share/OVMF/OVMF_CODE.fd:/usr/share/OVMF/OVMF_VARS.fd" \
-        "/usr/share/edk2/ovmf/OVMF_CODE.fd:/usr/share/edk2/ovmf/OVMF_VARS.fd" \
-        "/opt/homebrew/share/qemu/edk2-x86_64-code.fd:/opt/homebrew/share/qemu/edk2-i386-vars.fd" \
-        "/usr/local/share/qemu/edk2-x86_64-code.fd:/usr/local/share/qemu/edk2-i386-vars.fd"
-    do
-        code="${pair%%:*}"
-        vars="${pair##*:}"
-        if [ -f "${code}" ] && [ -f "${vars}" ]; then
-            cp "${vars}" "${work}/OVMF_VARS.fd"
-            chmod u+w "${work}/OVMF_VARS.fd"
-            firmware_args="-drive if=pflash,format=raw,unit=0,readonly=on,file=${code}"
-            firmware_args="${firmware_args} -drive if=pflash,format=raw,unit=1,file=${work}/OVMF_VARS.fd"
-            break
-        fi
-    done
-fi
-if [ -z "${firmware_args}" ]; then
-    for candidate in /usr/share/ovmf/OVMF.fd /usr/share/qemu/OVMF.fd; do
-        [ -f "${candidate}" ] && { firmware_args="-bios ${candidate}"; break; }
-    done
-fi
-[ -n "${firmware_args}" ] || { echo "no UEFI firmware found; set AOBS_OVMF." >&2; exit 1; }
+# UEFI firmware, from the one list every row shares (ci/ovmf.sh).
+. "$(dirname "$0")/ovmf.sh"
 
 command -v nc >/dev/null 2>&1 || { echo "nc is required: it drives the QEMU monitor." >&2; exit 1; }
 
@@ -170,13 +143,12 @@ capture panel-3-after-nmi
 # §9 has a channel again. This is the one stop the harness can ask for, and it exercises
 # that whole path.
 #
-# Ctrl-Alt-Del and not the ACPI power button. No `systemd-logind` runs on this image and
-# none ever will (ADR-0017), so the button is the app's to answer — and until #69 builds
-# the confirm-then-exit path there is nothing to answer it, which is what `system_powerdown`
-# sitting for 120 s with no reaction showed. The button itself is not the problem: #89
-# measured `Power Button` / `KEY_POWER` reaching the app. Ctrl-Alt-Del goes to PID 1 from
-# the kernel with nothing in between, and `-no-reboot` turns the reboot into an exit here.
-# Once #69 lands, this stop could become the power button and §6.2's row asserts it.
+# Ctrl-Alt-Del and not the ACPI power button, and it stays that way now that #69 has built
+# the confirm-then-exit path. Two different stops are worth having: the button ends in
+# `SuccessAction=poweroff`, which is a machine that is *gone* — there is no window in which to
+# ask for a capture — whereas Ctrl-Alt-Del goes to PID 1 from the kernel with nothing in
+# between and `-no-reboot` turns the reboot into an exit, so `ExecStopPost` runs on a machine
+# that is still there to be photographed. The button's own row is ci/power-button-probe.sh.
 #
 # **What this asserts is that the stop path completes, not that the console came back.**
 # The panel does not change during the stop, and it cannot: `quiet` on the cmdline

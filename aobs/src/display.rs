@@ -38,6 +38,23 @@ pub fn logical(width: u32, height: u32) -> (u32, u32) {
     )
 }
 
+/// Which side of §0's second breakpoint this mode lands on — **two states and no third.**
+///
+/// The threshold is the design width, which `04-screens.md` §11.2 names in the concrete: the
+/// review panel's money-facts rail sits beside the outputs above it and stacks above them
+/// below it. Note what the `max(1, …)` in [`scale`] does to this: a physical panel at or
+/// above 1280 wide always produces a logical width of at least 1280, so the stacked state is
+/// reached only by panels genuinely narrower than the design canvas — 1024×768 and the
+/// 800×600 floor, not a 4K screen.
+///
+/// **Computed here rather than in the frame's own expression language.** Deriving it from the
+/// window's width inside Slint makes the layout's own constraints depend on the width they
+/// produce, which Slint reports as a binding loop and warns may panic at runtime. The mode is
+/// an input; so is this.
+pub fn wide(width: u32, height: u32) -> bool {
+    logical(width, height).0 >= DESIGN_WIDTH as u32
+}
+
 /// Whether this mode is below the floor, in physical pixels.
 pub fn below_floor(width: u32, height: u32) -> bool {
     width < FLOOR_WIDTH || height < FLOOR_HEIGHT
@@ -101,7 +118,7 @@ pub fn window_failure() -> Failure {
 
 #[cfg(test)]
 mod tests {
-    use super::{below_floor, logical, scale};
+    use super::{below_floor, logical, scale, wide};
 
     #[test]
     fn the_design_canvas_and_everything_under_it_scales_by_one() {
@@ -119,6 +136,25 @@ mod tests {
         assert_eq!(scale(1920, 1080), 1.35);
         assert_eq!(logical(1920, 1080), (1422, 800));
         assert_eq!(logical(3840, 2160), (1422, 800));
+    }
+
+    #[test]
+    fn the_breakpoint_is_the_design_width_and_scaling_keeps_big_panels_on_its_wide_side() {
+        // 04-screens.md §0, §11.2: two states, and the threshold is the design width.
+        assert!(wide(1280, 800), "the design canvas is the wide state");
+        assert!(
+            wide(1920, 1080),
+            "and so is everything the scale factor lifts onto it"
+        );
+        assert!(wide(3840, 2160));
+        assert!(!wide(1024, 768), "narrower than the canvas stacks");
+        assert!(
+            !wide(800, 600),
+            "including the floor, which is where six outputs are counted"
+        );
+        // A tall, narrow mode is the reason this reads the logical width and not the scale:
+        // the height would happily scale, and the address column is what is short.
+        assert!(!wide(1024, 1600));
     }
 
     #[test]

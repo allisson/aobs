@@ -11,6 +11,22 @@
 # Fixed strings only. No exit status, no linker message, no program state (§9).
 
 /usr/bin/aobs
+status=$?
+
+# **The status the app exits with has to become this script's status**, or §2's exit-status
+# contract is inert: `exit 42` would never reach systemd, so `SuccessExitStatus=42` and
+# `SuccessAction=poweroff` would never fire and *end the session* would print the block
+# below instead of powering the machine off. The same swallowing turned a crash — §2's stated
+# product fact, restart and a blank signer — into a permanent park on the wrong code.
+#
+# 126 and 127 are the discriminator, and they are the shell's own rather than anything the
+# app can produce: 127 is *command not found*, which is also what the dynamic loader exits
+# with on a missing shared library, and 126 is *found and not executable*, which is the wrong
+# interpreter. That is exactly the list above. The app exits only 42 or 0, or parks forever
+# on §9's diagnostic, so nothing collides.
+if [ "${status}" -ne 126 ] && [ "${status}" -ne 127 ]; then
+    exit "${status}"
+fi
 
 cat <<'EOF'
 
