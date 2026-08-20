@@ -195,3 +195,25 @@ the practical way to run them, since the shipped image offers no shell.
 - [ ] On a machine where the pool is genuinely slow, the wait counts seconds and Continue
       stays locked until it is over — and the screen **never advances on its own**, even
       after the count stops.
+
+### The word-entry component and the creation retype ([#73](https://github.com/allisson/aobs/issues/73))
+
+- [ ] At 800×600 the retype draws **24 slots in two columns of 12**, the banner above them and
+      the Done row below, with nothing clipped. The sum is the same 440 px `AOBS_WORDS`
+      already asserts — the screen is built from the same heights — so what this row catches is
+      the one thing the sum cannot: the banner's live second line wrapping to a third.
+- [ ] **The phrase is nowhere on the retype screen.** Not ghosted, not greyed, not in a
+      corner: the only words on it are the ones being typed.
+- [ ] Four letters and the space bar place a word, and typing the whole word without a space
+      places **nothing** — the slot stays empty until the space lands.
+- [ ] **Type a wrong word.** The screen goes back to the phrase with that position marked, the
+      copy names the number, and pressing on returns to the retype with **every word already
+      typed still there** and the cursor on the position that was refused. Nothing on either
+      screen offers to start the retype over.
+- [ ] **With caps lock on, nothing lands** and the screen names each ignored key. That is
+      02-core.md §4's third behaviour applied literally — the wordlist is `a`–`z` — and it is
+      the one place a person can judge whether naming the key is enough to be understood.
+- [ ] Backspace at an empty slot steps back and **returns the previous word as editable text**,
+      not as a re-selected slot: the next backspace deletes a letter of it.
+- [ ] The ghosted completion after the caret is legible but plainly dimmer than the letters
+      typed, at the settled type size on a real panel.

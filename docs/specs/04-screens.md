@@ -199,6 +199,14 @@ it is an instrument for making the paper correct — so a failure is the feature
   makes an off-by-one visible as a *shift* rather than as a mystery rejection at word 20. The
   mnemonic itself is never re-shown, so the input still comes from paper.
 
+**The screen is built from §3's heights, so §3's measurement covers it**
+([#73](https://github.com/allisson/aobs/issues/73)): the same 52 px banner, the same twelve
+26 px rows in two columns, the same 48 px control row — 440 px against the 458 px the chrome
+leaves in the minimum canvas, which is what `AOBS_WORDS` prints on every boot. The live line the
+entry needs — the key that did not land, or how many words the current prefix still matches —
+sits **inside** the banner's fixed height rather than as a row of its own, which is what keeps
+two screens on one measurement instead of two.
+
 ## 5. Wallet load — passphrase and network
 
 **One screen, always present, on every load path — created, imported or restored.** It carries the

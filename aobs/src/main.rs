@@ -7,11 +7,13 @@
 //!
 //! The frame is [#69](https://github.com/allisson/aobs/issues/69): the start menu, the
 //! chrome that does not vanish, and §13's ending. Creating a wallet is
-//! [#72](https://github.com/allisson/aobs/issues/72) — `create`, the dice and the 24 words.
+//! [#72](https://github.com/allisson/aobs/issues/72) — `create`, the dice and the 24 words —
+//! and [#73](https://github.com/allisson/aobs/issues/73) closes it with `confirm`, the retype.
 //! No QR yet, and no scanning screen.
 
 mod buildinfo;
 mod camera;
+mod confirm;
 mod console;
 mod create;
 mod display;
@@ -124,9 +126,14 @@ fn run() -> Result<Ending, Failure> {
     // intent (04-screens.md §2). Wired before the router, which holds it to reach §2 and §3.
     let create = create::wire(&ui);
 
+    // §4's retype, and the three callbacks that carry a keystroke rather than an intent. Its
+    // state is core's — the phrase, the prefix matching and the per-word compare — and this
+    // module holds only what the screen draws.
+    let confirm = confirm::wire(&ui);
+
     // Everything the user can ask for goes through here, and nothing else. The cell is where
     // §13's answer lands, because the event loop is what ends and it carries nothing back.
-    let ending = router::wire(&ui, create.clone());
+    let ending = router::wire(&ui, create.clone(), confirm);
 
     // The readiness line, printed from inside the running event loop rather than before
     // it. That placement is the point: the line asserts the loop came up, which is what
