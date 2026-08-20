@@ -167,3 +167,24 @@ adversarial corpus. The code is that name, so:
   startup space.
 - **`docs/qa-checklist.md` quotes codes** wherever a hand-checked row expects a refusal or a halt, so a
   human runs the same names the tests do.
+
+**The tree carries this section** as of [#79](https://github.com/allisson/aobs/issues/79):
+`aobs-core/src/corpus_tests.rs` is the corpus and the bijection, and it reads §6's tables out of
+this file with `include_str!` rather than copying them into a constant — a copy is a second place
+to forget. Two things it settles, both stated here because a later reader would otherwise take
+the prose above literally and find it does not hold:
+
+- **The bijection is between the two *sets of codes*, not between cases and codes one for one.**
+  `05-testing-and-release.md` §5's own list of cases names duplicate keys in *each* map and both
+  halves of the `non_witness_utxo` rule — four cases carrying two codes — so a
+  one-case-per-code reading contradicts the list it sits next to. *Exactly one* above means the
+  relation is total in both directions, and the enforced form is: every code a refusal can carry
+  has at least one case, and every case names a code this file defines.
+- **The direction that needs every code implemented is deferred, not weakened.** A `PENDING`
+  list names each code whose refusal does not exist yet and the ticket that owes it — `R06`,
+  `R08`, `R09` to [#80](https://github.com/allisson/aobs/issues/80), `R10` and `R11` to
+  [#77](https://github.com/allisson/aobs/issues/77), `R12`–`R14` to
+  [#85](https://github.com/allisson/aobs/issues/85) — and a test asserts that the implemented
+  codes and the pending ones together are **exactly** §6's tables. A code added to §6 that is
+  neither implemented nor owed fails it; so does a code left on the pending list after its
+  refusal ships. The list only ever shrinks, and it is empty at the release gate.
