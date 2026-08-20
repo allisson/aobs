@@ -7,12 +7,21 @@
 //! itself — that renderability is network-independent, and that the previous transaction beats
 //! a `witness_utxo` that disagrees with it.
 
+use bitcoin::bip32::{ChildNumber, Fingerprint};
+use bitcoin::hashes::Hash as _;
 use bitcoin::psbt::{Error as PsbtError, PsbtSighashType};
 use bitcoin::{Amount, ScriptBuf};
 
+use crate::bip39::Mnemonic;
+
 use super::*;
-use crate::corpus::{from_hex, one_in_one_out, our_spk, psbt, wallet};
-use crate::derive::Family;
+use crate::corpus::declare_input;
+use crate::corpus::{
+    declare_output, from_hex, normal, one_in_one_out, our_key, our_path, our_spk, psbt, psbt_for,
+    wallet, wallet_on,
+};
+use crate::derive::{Branch, Family};
+use crate::secret::{Entropy, Passphrase};
 
 /// BIP-174's other four invalid vectors, transcribed from `bitcoin-0.32`'s own tests, which
 /// are the BIP's hex. None of them is a refusal: they are bytes that never became a PSBT.
@@ -21,11 +30,28 @@ const INVALID_VECTOR_2: &str = "70736274ff0100750200000001268171371edff285e937ad
 const INVALID_VECTOR_3: &str = "70736274ff0100fd0a010200000002ab0949a08c5af7c49b8212f417e2f15ab3f5c33dcf153821a8139f877a5b7be4000000006a47304402204759661797c01b036b25928948686218347d89864b719e1f7fcf57d1e511658702205309eabf56aa4d8891ffd111fdf1336f3a29da866d7f8486d75546ceedaf93190121035cdc61fc7ba971c0b501a646a2a83b102cb43881217ca682dc86e2d73fa88292feffffffab0949a08c5af7c49b8212f417e2f15ab3f5c33dcf153821a8139f877a5b7be40100000000feffffff02603bea0b000000001976a914768a40bbd740cbe81d988e71de2a4d5c71396b1d88ac8e240000000000001976a9146f4620b553fa095e721b9ee0efe9fa039cca459788ac00000000000001012000e1f5050000000017a9143545e6e33b832c47050f24d3eeb93c9c03948bc787010416001485d13537f2e265405a34dbafa9e3dda01fb82308000000";
 const INVALID_VECTOR_4: &str = "70736274ff000100fda5010100000000010289a3c71eab4d20e0371bbba4cc698fa295c9463afa2e397f8533ccb62f9567e50100000017160014be18d152a9b012039daf3da7de4f53349eecb985ffffffff86f8aa43a71dff1448893a530a7237ef6b4608bbb2dd2d0171e63aec6a4890b40100000017160014fe3e9ef1a745e974d902c4355943abcb34bd5353ffffffff0200c2eb0b000000001976a91485cff1097fd9e008bb34af709c62197b38978a4888ac72fef84e2c00000017a914339725ba21efd62ac753a9bcd067d6c7a6a39d05870247304402202712be22e0270f394f568311dc7ca9a68970b8025fdd3b240229f07f8a5f3a240220018b38d7dcd314e734c9276bd6fb40f673325bc4baa144c800d2f2f02db2765c012103d2e15674941bad4a996372cb87e1856d3652606d98562fe39c5e9e7e413f210502483045022100d12b852d85dcd961d2f5f4ab660654df6eedcc794c0c33ce5cc309ffb5fce58d022067338a8e0e1725c197fb1a88af59f51e44e4255b20167c8684031c05d1f2592a01210223b72beef0965d10be0778efecd61fcac6f79a4ea169393380734464f84f2ab30000000000";
 
-fn accept(psbt: &Psbt) -> Psbt {
-    let bytes = psbt.serialize();
-    match validate(&bytes) {
+fn accept(psbt: &Psbt) -> Review {
+    review(&wallet(), psbt)
+}
+
+/// The whole inbound path over one PSBT's bytes, refusing to be refused.
+fn review(wallet: &Wallet, psbt: &Psbt) -> Review {
+    accepted(wallet, &psbt.serialize()).review
+}
+
+/// The same, for the three tests whose subject is the document rather than the model.
+fn accepted(wallet: &Wallet, bytes: &[u8]) -> Accepted {
+    match validate(wallet, bytes) {
         Ok(accepted) => accepted,
         Err(rejection) => panic!("refused a transaction the policy accepts: {rejection:?}"),
+    }
+}
+
+/// The refusal one PSBT earns, or a panic naming what happened instead.
+fn refusal(wallet: &Wallet, psbt: &Psbt) -> Refusal {
+    match validate(wallet, &psbt.serialize()) {
+        Err(Rejection::Refused(refusal)) => refusal,
+        other => panic!("expected a refusal: {other:?}"),
     }
 }
 
@@ -44,7 +70,7 @@ fn all_four_families_are_accepted_together() {
 fn nothing_is_stripped_from_an_accepted_transaction() {
     // §8: add signatures and remove nothing. What comes back is what went in, byte for byte.
     let bytes = one_in_one_out().serialize();
-    assert_eq!(validate(&bytes).expect("accepted").serialize(), bytes);
+    assert_eq!(accepted(&wallet(), &bytes).psbt.serialize(), bytes);
 }
 
 #[test]
@@ -72,7 +98,10 @@ fn six_outputs_are_accepted_and_the_seventh_is_the_refusal() {
 
     let seven: Vec<(ScriptBuf, u64)> = (0..=MAX_OUTPUTS).map(|_| (spk.clone(), 10_000)).collect();
     assert_eq!(
-        validate(&psbt(&[(Family::Bip84, 100_000)], &seven).serialize()),
+        validate(
+            &wallet(),
+            &psbt(&[(Family::Bip84, 100_000)], &seven).serialize()
+        ),
         Err(Rejection::Refused(Refusal::TooManyOutputs { count: 7 }))
     );
 }
@@ -116,7 +145,7 @@ fn a_non_taproot_input_may_not_declare_sighash_default() {
     let mut psbt = one_in_one_out();
     psbt.inputs[0].sighash_type = Some(PsbtSighashType::from_u32(0x00));
     assert_eq!(
-        validate(&psbt.serialize()),
+        validate(&wallet(), &psbt.serialize()),
         Err(Rejection::Refused(Refusal::UnsupportedSighash { input: 0 }))
     );
 }
@@ -141,7 +170,7 @@ fn the_previous_transaction_beats_a_witness_utxo_that_disagrees() {
             .clone(),
     });
     assert_eq!(
-        validate(&psbt.serialize()),
+        validate(&wallet(), &psbt.serialize()),
         Err(Rejection::Refused(Refusal::OutputsExceedInputs))
     );
 }
@@ -186,7 +215,7 @@ fn unknown_fields_are_ignored_and_preserved() {
     psbt.outputs[0].unknown.insert(key.clone(), value.clone());
 
     let bytes = psbt.serialize();
-    let accepted = validate(&bytes).expect("unknown fields never influence a decision");
+    let accepted = accepted(&wallet(), &bytes).psbt;
 
     assert_eq!(accepted.unknown.get(&key), Some(&value));
     assert_eq!(accepted.inputs[0].unknown.get(&key), Some(&value));
@@ -203,7 +232,7 @@ fn unknown_fields_are_ignored_and_preserved() {
 fn decode_failure(hex: &str) -> PsbtError {
     let bytes = from_hex(hex);
     let error = Psbt::deserialize(&bytes).expect_err("the vector is invalid");
-    assert_eq!(validate(&bytes), Err(Rejection::NotAPsbt));
+    assert_eq!(validate(&wallet(), &bytes), Err(Rejection::NotAPsbt));
     error
 }
 
@@ -232,7 +261,7 @@ fn the_other_bip174_invalid_vectors_are_not_refusals() {
 #[test]
 fn empty_and_arbitrary_bytes_are_not_refusals() {
     for bytes in [vec![], b"psbt".to_vec(), b"not a psbt at all".to_vec()] {
-        assert_eq!(validate(&bytes), Err(Rejection::NotAPsbt));
+        assert_eq!(validate(&wallet(), &bytes), Err(Rejection::NotAPsbt));
     }
 }
 
@@ -240,7 +269,7 @@ fn empty_and_arbitrary_bytes_are_not_refusals() {
 fn a_truncated_psbt_is_not_a_refusal() {
     let bytes = one_in_one_out().serialize();
     for cut in [1, bytes.len() / 2, bytes.len() - 1] {
-        assert_eq!(validate(&bytes[..cut]), Err(Rejection::NotAPsbt));
+        assert_eq!(validate(&wallet(), &bytes[..cut]), Err(Rejection::NotAPsbt));
     }
 }
 
@@ -274,6 +303,10 @@ fn all_holds_every_variant() {
             Refusal::UnsupportedInputScript { .. } => 6,
             Refusal::UnrenderableOutput { .. } => 7,
             Refusal::TooManyOutputs { .. } => 8,
+            Refusal::AmountOutOfRange => 9,
+            Refusal::NoInputOfOurs { .. } => 10,
+            Refusal::ChangeMismatch { .. } => 11,
+            Refusal::UnscannableChangePath { .. } => 12,
         }
     }
 
@@ -314,9 +347,545 @@ fn a_refusal_names_the_position_that_tripped_it_one_based() {
     psbt.inputs[1].non_witness_utxo = None;
     psbt.inputs[1].witness_utxo = None;
 
-    let Err(Rejection::Refused(refusal)) = validate(&psbt.serialize()) else {
-        panic!("the second input carries no utxo at all");
-    };
+    let refusal = refusal(&wallet(), &psbt);
     assert_eq!(refusal, Refusal::PreviousTransactionAbsent { input: 1 });
     assert!(refusal.reason().contains("Input 2"), "{}", refusal.reason());
+}
+
+// --- the derivation check ------------------------------------------------------------------
+
+/// A wallet that is not ours, from a seed nothing else in the suite uses.
+fn stranger() -> Wallet {
+    let mnemonic = Mnemonic::from_entropy(&Entropy::new(&[0xAB; 16]).expect("16 bytes fit"))
+        .expect("16 bytes is an accepted length");
+    Wallet::load(
+        &mnemonic,
+        &Passphrase::new("").expect("empty fits"),
+        Network::Mainnet,
+    )
+}
+
+/// The mainnet fixture wallet loaded with a passphrase — a different wallet, same seed.
+fn with_passphrase() -> Wallet {
+    let mnemonic = Mnemonic::from_entropy(&Entropy::new(&[0u8; 16]).expect("16 bytes fit"))
+        .expect("16 bytes is an accepted length");
+    Wallet::load(
+        &mnemonic,
+        &Passphrase::new("correct horse").expect("13 bytes fit"),
+        Network::Mainnet,
+    )
+}
+
+/// A stranger's P2WPKH address, for the outputs that are genuinely payments.
+fn theirs() -> ScriptBuf {
+    our_spk(&stranger(), Family::Bip84)
+}
+
+/// One BIP84 input of `input` satoshis, paying `payment` to a stranger and `change` back to
+/// `84h/0h/0h/1/0` — declared the way a coordinator declares it. The remainder is the fee.
+fn spend(input: u64, payment: u64, change: u64) -> Psbt {
+    let wallet = wallet();
+    let back = wallet
+        .address(Family::Bip84, Branch::Change, 0)
+        .expect("a normal index")
+        .script_pubkey();
+    let mut psbt = psbt(
+        &[(Family::Bip84, input)],
+        &[(theirs(), payment), (back, change)],
+    );
+    declare_output(
+        &mut psbt.outputs[1],
+        Family::Bip84,
+        &our_key(&wallet, Family::Bip84, 1, 0),
+        wallet.fingerprint(),
+        our_path(&wallet, Family::Bip84, 1, 0),
+    );
+    psbt
+}
+
+#[test]
+fn the_review_model_carries_every_number_the_panel_states() {
+    let model = accept(&spend(100_000, 60_000, 30_000));
+
+    assert_eq!(model.network, Network::Mainnet);
+    assert_eq!(model.input_count, 1);
+    assert_eq!(model.input_total, Amount::from_sat(100_000));
+    assert_eq!(model.paying, Amount::from_sat(60_000));
+    assert_eq!(model.returning, Amount::from_sat(30_000));
+    assert_eq!(model.fee, Amount::from_sat(10_000));
+    // What leaves the wallet is what the recipient gets plus what the miners get. The two
+    // numbers are computed from different sides — the inputs less the change, against the
+    // outputs — so this is a real cross-check and not a restatement.
+    assert_eq!(model.leaving, Amount::from_sat(70_000));
+    assert_eq!(model.leaving, model.paying + model.fee);
+    assert_eq!(model.outputs.len(), 2);
+    assert_eq!(model.warning, None);
+}
+
+/// Change is classified only after the byte-compare, and the verdict travels with the row —
+/// §11.2 makes the panel *state* that the compare ran.
+#[test]
+fn change_carries_its_full_path_and_its_verdict() {
+    let wallet = wallet();
+    let model = accept(&spend(100_000, 60_000, 30_000));
+
+    assert_eq!(model.outputs[0].kind, OutputKind::Payment);
+    assert_eq!(
+        model.outputs[1].kind,
+        OutputKind::Change {
+            path: our_path(&wallet, Family::Bip84, 1, 0),
+            verdict: Rederivation::MatchedByteForByte,
+        }
+    );
+    // The rendered address is the loaded network's, not a network-free stand-in.
+    assert!(model.outputs[1].address.to_string().starts_with("bc1"));
+    assert_eq!(model.outputs[1].amount, Amount::from_sat(30_000));
+}
+
+/// **A foreign fingerprint is simply a payment** (§7): displayed in full, no suspicion
+/// attached. The path and the key are ours; only the fingerprint is not.
+///
+/// This is the safe direction of both attacks — marking real change as foreign only causes it
+/// to be *shown*.
+#[test]
+fn an_output_with_a_foreign_fingerprint_is_a_payment() {
+    let wallet = wallet();
+    let mut psbt = spend(100_000, 60_000, 30_000);
+    psbt.outputs[1].bip32_derivation.clear();
+    declare_output(
+        &mut psbt.outputs[1],
+        Family::Bip84,
+        &our_key(&wallet, Family::Bip84, 1, 0),
+        Fingerprint::from([0xde, 0xad, 0xbe, 0xef]),
+        our_path(&wallet, Family::Bip84, 1, 0),
+    );
+
+    let model = accept(&psbt);
+    assert_eq!(model.outputs[1].kind, OutputKind::Payment);
+    assert_eq!(model.paying, Amount::from_sat(90_000));
+    assert_eq!(model.returning, Amount::ZERO);
+}
+
+/// An output with no claim at all is a payment, even when it pays an address of ours.
+#[test]
+fn an_output_with_no_claim_is_a_payment() {
+    let model = accept(&one_in_one_out());
+
+    assert_eq!(model.outputs[0].kind, OutputKind::Payment);
+    assert_eq!(model.returning, Amount::ZERO);
+    assert_eq!(model.paying, Amount::from_sat(90_000));
+}
+
+/// `AOBS-R08`: our fingerprint on an output whose `scriptPubKey` is the attacker's refuses the
+/// **entire transaction** rather than being reclassified as a plain spend and shown.
+#[test]
+fn a_change_output_that_fails_the_compare_refuses_the_whole_transaction() {
+    let wallet = wallet();
+    let mut psbt = spend(100_000, 60_000, 30_000);
+    // Same declaration, one byte of the address changed: the output no longer derives from the
+    // path it claims.
+    psbt.unsigned_tx.output[1].script_pubkey =
+        ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([0x55; 20]));
+
+    assert_eq!(
+        refusal(&wallet, &psbt),
+        Refusal::ChangeMismatch { output: 1 }
+    );
+}
+
+/// `AOBS-R09`: change on a path we would never scan, in its two shapes — a third branch and a
+/// hardened final index. **Both refuse**, and neither derives anything.
+#[test]
+fn change_on_a_path_we_would_never_scan_refuses() {
+    let wallet = wallet();
+    let unscannable = [
+        wallet
+            .account_path(Family::Bip84)
+            .extend([normal(2), normal(0)]),
+        wallet
+            .account_path(Family::Bip84)
+            .extend([normal(1), ChildNumber::Hardened { index: 0 }]),
+    ];
+
+    for path in unscannable {
+        let mut psbt = spend(100_000, 60_000, 30_000);
+        psbt.outputs[1].bip32_derivation.clear();
+        declare_output(
+            &mut psbt.outputs[1],
+            Family::Bip84,
+            &our_key(&wallet, Family::Bip84, 1, 0),
+            wallet.fingerprint(),
+            path.clone(),
+        );
+        assert_eq!(
+            refusal(&wallet, &psbt),
+            Refusal::UnscannableChangePath { output: 1 },
+            "{path}"
+        );
+    }
+}
+
+/// `AOBS-R06`: a PSBT for somebody else's wallet. The fingerprints differ, and that is not what
+/// refuses it — the byte-compare is.
+#[test]
+fn a_transaction_with_no_input_of_ours_is_refused() {
+    let stranger = stranger();
+    let theirs = psbt_for(
+        &stranger,
+        &[(Family::Bip84, 100_000)],
+        &[(our_spk(&stranger, Family::Bip84), 90_000)],
+    );
+
+    assert_eq!(
+        refusal(&wallet(), &theirs),
+        Refusal::NoInputOfOurs {
+            network: Network::Mainnet,
+            passphrase_in_use: false,
+            coin_type_mismatch: false,
+        }
+    );
+}
+
+/// A PSBT with no inputs at all reaches `AOBS-R06`, and the coin-type variant does **not**
+/// fire — there is no declared path to assert anything about.
+#[test]
+fn a_transaction_with_no_inputs_is_refused_without_naming_a_network_for_it() {
+    let refused = refusal(&wallet(), &psbt(&[], &[(theirs(), 0)]));
+
+    assert_eq!(
+        refused,
+        Refusal::NoInputOfOurs {
+            network: Network::Mainnet,
+            passphrase_in_use: false,
+            coin_type_mismatch: false,
+        }
+    );
+}
+
+/// The four copy variants of `AOBS-R06`, one code (`02-core.md` §7).
+///
+/// Two requirements are unconditional and hold in all four — the loaded network and account 0.
+/// Two are conditional: the passphrase, and the coin-type disagreement stated outright. The
+/// last of those **selects copy only**: acceptance rested on the byte-compare in every one of
+/// these four, which is standing rule 1.
+#[test]
+fn the_no_input_refusal_carries_four_copy_variants() {
+    let stranger = stranger();
+    let mainnet_psbt = psbt_for(
+        &stranger,
+        &[(Family::Bip84, 100_000)],
+        &[(our_spk(&stranger, Family::Bip84), 90_000)],
+    );
+    let testnet = wallet_on(Network::Testnet);
+    let testnet_psbt = psbt_for(
+        &testnet,
+        &[(Family::Bip84, 100_000)],
+        &[(our_spk(&testnet, Family::Bip84), 90_000)],
+    );
+
+    let mut seen = Vec::new();
+    for (wallet, passphrase) in [(wallet(), false), (with_passphrase(), true)] {
+        for (psbt, mismatch) in [(&mainnet_psbt, false), (&testnet_psbt, true)] {
+            let refused = refusal(&wallet, psbt);
+            assert_eq!(
+                refused,
+                Refusal::NoInputOfOurs {
+                    network: Network::Mainnet,
+                    passphrase_in_use: passphrase,
+                    coin_type_mismatch: mismatch,
+                }
+            );
+
+            let reason = refused.reason();
+            // Unconditional, in all four.
+            assert!(reason.contains("mainnet"), "{reason}");
+            assert!(reason.contains("account 0"), "{reason}");
+            // Conditional, and named only when true.
+            assert_eq!(reason.contains("passphrase"), passphrase, "{reason}");
+            assert_eq!(reason.contains("testnet or signet"), mismatch, "{reason}");
+            seen.push(reason);
+        }
+    }
+
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen.len(), 4, "the four variants are four sentences");
+}
+
+/// One input built for the other network among several of ours is **not** a network mistake, so
+/// the coin-type variant is *every* and not *any*.
+#[test]
+fn one_foreign_coin_type_among_ours_does_not_claim_a_network() {
+    let wallet = wallet();
+    let testnet = wallet_on(Network::Testnet);
+    let mut psbt = psbt_for(
+        &testnet,
+        &[(Family::Bip84, 100_000), (Family::Bip49, 100_000)],
+        &[(our_spk(&testnet, Family::Bip84), 190_000)],
+    );
+    // The second input now declares a mainnet path — still not ours, but the transaction can no
+    // longer be described as built for one network.
+    psbt.inputs[1].bip32_derivation.clear();
+    declare_input(
+        &mut psbt.inputs[1],
+        Family::Bip49,
+        &our_key(&wallet, Family::Bip49, 0, 0),
+        wallet.fingerprint(),
+        our_path(&wallet, Family::Bip49, 0, 0),
+    );
+
+    assert_eq!(
+        refusal(&wallet, &psbt),
+        Refusal::NoInputOfOurs {
+            network: Network::Mainnet,
+            passphrase_in_use: false,
+            coin_type_mismatch: false,
+        }
+    );
+}
+
+/// An input whose origin was declared under a fingerprint that is not ours is still ours if we
+/// derive its `scriptPubKey` — the byte-compare answers the question the hint only asks.
+#[test]
+fn an_input_verifies_under_a_fingerprint_that_is_not_ours() {
+    let wallet = wallet();
+    let mut psbt = one_in_one_out();
+    psbt.inputs[0].bip32_derivation.clear();
+    declare_input(
+        &mut psbt.inputs[0],
+        Family::Bip84,
+        &our_key(&wallet, Family::Bip84, 0, 0),
+        Fingerprint::from([0x00, 0x00, 0x00, 0x00]),
+        our_path(&wallet, Family::Bip84, 0, 0),
+    );
+
+    accept(&psbt);
+}
+
+// --- the amount bound ----------------------------------------------------------------------
+
+/// `AOBS-R16` is the money supply exactly: the cap is accepted and one satoshi over is not.
+#[test]
+fn the_amount_bound_is_the_money_supply() {
+    let spk = our_spk(&wallet(), Family::Bip84);
+    let supply = Amount::MAX_MONEY.to_sat();
+
+    accept(&psbt(&[(Family::Bip84, supply)], &[(spk.clone(), 1_000)]));
+    assert_eq!(
+        refusal(
+            &wallet(),
+            &psbt(&[(Family::Bip84, supply + 1)], &[(spk, 1_000)])
+        ),
+        Refusal::AmountOutOfRange
+    );
+}
+
+/// The shape the bound exists for: two taproot inputs whose sum no `u64` can hold. `AOBS-R04`
+/// cannot catch it — the outputs are modest — and every number the panel states would wrap.
+#[test]
+fn two_inputs_summing_past_u64_are_refused_rather_than_wrapped() {
+    let spk = our_spk(&wallet(), Family::Bip84);
+    let psbt = psbt(
+        &[(Family::Bip86, u64::MAX), (Family::Bip86, u64::MAX)],
+        &[(spk, 90_000)],
+    );
+
+    assert_eq!(refusal(&wallet(), &psbt), Refusal::AmountOutOfRange);
+}
+
+// --- the one advisory warning (`02-core.md` §9) --------------------------------------------
+
+/// The rule is `fee ≥ total sent to non-change outputs`, and equality is the boundary the `≥`
+/// exists for.
+#[test]
+fn the_warning_fires_when_the_fee_equals_the_payment() {
+    let model = accept(&spend(100_000, 40_000, 20_000));
+
+    assert_eq!(model.fee, model.paying);
+    assert_eq!(model.warning, Some(Warning::FeeAbovePayment));
+}
+
+/// One satoshi under, and it is silent.
+#[test]
+fn the_warning_is_silent_one_satoshi_under_the_boundary() {
+    let model = accept(&spend(100_000, 40_001, 20_000));
+
+    assert_eq!(model.fee, Amount::from_sat(39_999));
+    assert_eq!(model.warning, None);
+}
+
+/// **A consolidation fires nothing** (§9's carve-out): with no non-change outputs the ratio is
+/// undefined, and `fee >= 0` would otherwise be true of every transaction ever built.
+#[test]
+fn a_consolidation_with_no_payment_fires_nothing() {
+    let wallet = wallet();
+    let back = wallet
+        .address(Family::Bip84, Branch::Change, 0)
+        .expect("a normal index")
+        .script_pubkey();
+    let mut psbt = psbt(&[(Family::Bip84, 100_000)], &[(back, 90_000)]);
+    declare_output(
+        &mut psbt.outputs[0],
+        Family::Bip84,
+        &our_key(&wallet, Family::Bip84, 1, 0),
+        wallet.fingerprint(),
+        our_path(&wallet, Family::Bip84, 1, 0),
+    );
+
+    let model = accept(&psbt);
+    assert_eq!(model.paying, Amount::ZERO);
+    assert_eq!(model.returning, Amount::from_sat(90_000));
+    assert_eq!(model.warning, None);
+}
+
+/// A legitimate high-congestion transaction well under the ratio **stays silent**. A signer
+/// that warns about everything trains the user to click through.
+#[test]
+fn a_high_fee_well_under_the_ratio_stays_silent() {
+    let model = accept(&spend(1_000_000, 900_000, 50_000));
+
+    assert_eq!(model.fee, Amount::from_sat(50_000));
+    assert_eq!(model.warning, None);
+}
+
+/// A change output does not count towards the denominator, which is what makes the warning
+/// about the recipient rather than about the transaction.
+#[test]
+fn change_is_not_part_of_the_warnings_denominator() {
+    // 10 000 to the recipient, 80 000 back to us, 10 000 to the miners: the fee equals the
+    // payment even though it is an eighth of what comes home.
+    let model = accept(&spend(100_000, 10_000, 80_000));
+
+    assert_eq!(model.paying, Amount::from_sat(10_000));
+    assert_eq!(model.warning, Some(Warning::FeeAbovePayment));
+}
+
+// --- the predicted vsize (`04-screens.md` §11.2.1) -----------------------------------------
+
+/// Two outputs of `spk`, so the rows cost the same in every family.
+fn two_out(family: Family, spk: &ScriptBuf) -> Psbt {
+    psbt(
+        &[(family, 100_000)],
+        &[(spk.clone(), 60_000), (spk.clone(), 30_000)],
+    )
+}
+
+/// The three single-family shapes, against the figures the ecosystem publishes for them.
+///
+/// These are hand-derived from BIP-141's weight rule and the element sizes above, and they
+/// agree with the widely-quoted sizes for a 1-in 2-out spend: 141 vB for P2WPKH, 225 for P2PKH
+/// (the 226 figure charges a 72-byte signature element, which we deliberately do not), and 154
+/// for P2TR. *The prediction against a real signed transaction is owed* — `00-overview.md`.
+#[test]
+fn the_predicted_vsize_matches_the_published_figures() {
+    let wallet = wallet();
+    for (family, expected) in [
+        (Family::Bip44, 225u64),
+        (Family::Bip84, 141),
+        (Family::Bip86, 154),
+    ] {
+        let spk = our_spk(&wallet, family);
+        assert_eq!(
+            accept(&two_out(family, &spk)).vsize.get(),
+            expected,
+            "{family:?}"
+        );
+    }
+}
+
+/// A legacy-only transaction has no marker, no flag and no witness section, so it weighs
+/// exactly four units per byte and its vsize *is* its size.
+#[test]
+fn a_legacy_transaction_weighs_four_units_per_byte() {
+    let wallet = wallet();
+    let spk = our_spk(&wallet, Family::Bip44);
+    let psbt = two_out(Family::Bip44, &spk);
+    let signed_base = psbt.unsigned_tx.base_size() + 1 + 71 + 1 + 33;
+
+    assert_eq!(accept(&psbt).vsize.get(), signed_base as u64);
+}
+
+/// A legacy input inside a segwit transaction still costs its empty witness item, so mixing
+/// families is not the same as adding the two predictions.
+#[test]
+fn a_segwit_transaction_discounts_its_witness() {
+    let wallet = wallet();
+    let spk = our_spk(&wallet, Family::Bip84);
+    let mixed = psbt(
+        &[(Family::Bip44, 100_000), (Family::Bip84, 100_000)],
+        &[(spk.clone(), 90_000), (spk, 90_000)],
+    );
+
+    let model = accept(&mixed);
+    // Base: the unsigned size plus the P2PKH scriptSig. Witness: marker and flag, the legacy
+    // input's empty item, and the P2WPKH witness.
+    let base = mixed.unsigned_tx.base_size() + 1 + 71 + 1 + 33;
+    let witness = 2 + 1 + (1 + (1 + 71) + (1 + 33));
+    assert_eq!(model.vsize.get(), ((4 * base + witness) as u64).div_ceil(4));
+    // And it is a discount: the witness bytes cost a quarter each.
+    assert!(model.vsize.get() < (base + witness) as u64);
+}
+
+/// BIP49 pays for both halves — a `scriptSig` push of the redeem script *and* a witness.
+#[test]
+fn bip49_pays_for_the_redeem_script_and_the_witness() {
+    let wallet = wallet();
+    let spk = our_spk(&wallet, Family::Bip49);
+    let psbt = two_out(Family::Bip49, &spk);
+
+    let base = psbt.unsigned_tx.base_size() + 1 + 22;
+    let witness = 2 + (1 + (1 + 71) + (1 + 33));
+    assert_eq!(
+        accept(&psbt).vsize.get(),
+        ((4 * base + witness) as u64).div_ceil(4)
+    );
+}
+
+/// The addresses on the panel are the **loaded network's**, not a network-free stand-in — which
+/// is the one thing rendering needs the whole network for.
+#[test]
+fn the_addresses_on_the_panel_are_the_loaded_networks() {
+    let testnet = wallet_on(Network::Testnet);
+    let spk = our_spk(&testnet, Family::Bip84);
+    let model = review(
+        &testnet,
+        &psbt_for(&testnet, &[(Family::Bip84, 100_000)], &[(spk, 90_000)]),
+    );
+
+    assert_eq!(model.network, Network::Testnet);
+    assert!(
+        model.outputs[0].address.to_string().starts_with("tb1"),
+        "{}",
+        model.outputs[0].address
+    );
+}
+
+/// A declared path too short to read a coin type out of claims no network, so `AOBS-R06`'s
+/// fourth variant stays silent rather than asserting something about a path that is not there.
+#[test]
+fn an_input_declaring_a_path_too_short_to_read_claims_no_network() {
+    let wallet = wallet();
+    let stranger = stranger();
+    let mut psbt = psbt_for(
+        &stranger,
+        &[(Family::Bip84, 100_000)],
+        &[(our_spk(&stranger, Family::Bip84), 90_000)],
+    );
+    psbt.inputs[0].bip32_derivation.clear();
+    declare_input(
+        &mut psbt.inputs[0],
+        Family::Bip84,
+        &our_key(&wallet, Family::Bip84, 0, 0),
+        wallet.fingerprint(),
+        DerivationPath::from(vec![ChildNumber::Hardened { index: 84 }]),
+    );
+
+    assert_eq!(
+        refusal(&wallet, &psbt),
+        Refusal::NoInputOfOurs {
+            network: Network::Mainnet,
+            passphrase_in_use: false,
+            coin_type_mismatch: false,
+        }
+    );
 }

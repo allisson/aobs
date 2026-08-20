@@ -5,11 +5,12 @@
 //! modules. Seven of them exist: [`secret`], [`entropy`] and [`bip39`]
 //! ([#70](https://github.com/allisson/aobs/issues/70)), then [`derive`] and the address half
 //! of [`format`] ([#71](https://github.com/allisson/aobs/issues/71)), whose amount half arrived
-//! with the writing rules ([#100](https://github.com/allisson/aobs/issues/100)) — but not the
-//! review model those numbers come from — and [`entry`], the word-entry component the retype
-//! and three later screens drive ([#73](https://github.com/allisson/aobs/issues/73)), and
-//! [`psbt`], whose structural half of the rejection policy arrived without the derivation
-//! check or the review model ([#79](https://github.com/allisson/aobs/issues/79)). The rest
+//! with the writing rules ([#100](https://github.com/allisson/aobs/issues/100)) — and
+//! [`entry`], the word-entry component the retype and three later screens drive
+//! ([#73](https://github.com/allisson/aobs/issues/73)), and [`psbt`], the whole rejection
+//! policy: its structural half first ([#79](https://github.com/allisson/aobs/issues/79)), then
+//! the derivation check and the review model those numbers are written from
+//! ([#80](https://github.com/allisson/aobs/issues/80)). The rest
 //! do not — the walking
 //! skeleton ([#39](https://github.com/allisson/aobs/issues/39)) built the boot layer first,
 //! because the boot layer is where the unproven claims were.
@@ -22,6 +23,10 @@
 //! | CSPRNG | Seed generation takes `csprng_32: [u8; 32]` as a parameter. |
 //! | Screen | We produce a review *model*; the shell renders it. |
 //! | Clock | We take none. |
+//!
+//! [`psbt::validate`] is where the screen row is enforced rather than promised: it takes hostile
+//! bytes and a [`derive::Wallet`] and returns either a refusal or a [`psbt::Review`], so there
+//! is no way to reach something drawable without having run the derivation check.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

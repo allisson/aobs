@@ -140,6 +140,10 @@ The cases:
 - the 64 KiB boundary at exactly the limit and one byte over;
 - **six outputs, and seven** — the second refusing on `AOBS-R15` — plus a PSBT packing outputs to the
   transport bound, which is where the ~2,000-output case lives;
+- **two taproot inputs each claiming `u64::MAX` satoshis** — `AOBS-R16`, the amount bound, and the
+  shape it exists for rather than a single amount one satoshi over the supply;
+- **a testnet PSBT against a mainnet-loaded wallet** — `AOBS-R06` with the coin-type copy variant,
+  the network mismatch that has no other symptom;
 - address-shaped entries: mixed-case bech32, truncated bech32, a valid address differing by one
   character, a valid address differing only in case, `bitcoin:` with a query string, an uppercase
   BIP-21 URI, and a correctly-formed address from the *wrong* account;
