@@ -1,4 +1,4 @@
-//! PSBT validation — the structural half of the rejection policy (`02-core.md` §7).
+//! PSBT validation, the derivation check and the review model (`02-core.md` §7 and §9).
 //!
 //! Everything between attacker-controlled bytes and a review screen being drawn. **A
 //! rejection here means no screen is drawn at all**, so this module is the one place in the
@@ -10,13 +10,25 @@
 //! a check are hostile until proven otherwise: [`Rejection::Refused`] carries a [`Refusal`],
 //! which carries a stable `AOBS-R##` and offers exactly one action — discard.
 //!
-//! **What is here and what is not.** The seven structural refusals — `AOBS-R01`–`R05`, `R07`
-//! and `R15` — need no key material, which is why they land before anything re-derives a
-//! `scriptPubKey` ([#79](https://github.com/allisson/aobs/issues/79)). The derivation check
-//! (`R06`, `R08`, `R09`) and the review model are
-//! [#80](https://github.com/allisson/aobs/issues/80)'s, and until they land a PSBT with no
-//! input of ours passes this module — including one with no inputs at all, which `R06` is what
-//! refuses.
+//! **Two stages, and the order is the design.** The structural refusals — `AOBS-R01`–`R05`,
+//! `R07`, `R15` and `R16` — need no key material at all, so they run first and a hostile PSBT
+//! is thrown out before our own seed is asked anything
+//! ([#79](https://github.com/allisson/aobs/issues/79)). Then the derivation check (`R06`, `R08`,
+//! `R09`) and the review model ([#80](https://github.com/allisson/aobs/issues/80)), which need
+//! the wallet.
+//!
+//! **There is one entry point, [`validate`], and it returns an [`Accepted`].** Not two calls the
+//! shell composes: a caller who ran the structural half and forgot the derivation check would
+//! have a transaction that looks reviewable and whose change was never re-derived, which is the
+//! whole attack. So the only way to obtain something a screen can draw is to have run every
+//! check, and `AOBS-R08` cannot be skipped by forgetting a second call.
+//!
+//! **The claimed derivation selects a candidate; the byte-compare is the only authority.** That
+//! is [`crate::derive::Wallet::verify`]'s job and this module never re-implements it — what
+//! lives here is which outputs are candidates (a claim carrying *our* fingerprint, which is a
+//! hint and authorises nothing), and what each verdict means: `AOBS-R09` for a path we would
+//! never scan, `AOBS-R08` for one whose bytes disagree, and a refusal of the **entire
+//! transaction** either way rather than a quiet reclassification to *payment*.
 //!
 //! **The duplicate-key refusal is the dependency's invariant, not ours.** `bitcoin` 0.32
 //! rejects duplicate keys in all three maps, so §7 forbids us a pre-parse scan and requires we
@@ -48,13 +60,43 @@
 //! **Unknown fields** are ignored by every check below, and the returned [`Psbt`] is the parsed
 //! one — nothing is stripped, so their bytes are what the outbound PSBT carries.
 
-use bitcoin::psbt::{Error as PsbtError, Input, Psbt};
+use core::num::NonZeroU64;
+use std::collections::BTreeMap;
+
+use bitcoin::bip32::{DerivationPath, Fingerprint};
+use bitcoin::psbt::{Error as PsbtError, Input, Output, Psbt};
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
-use bitcoin::{Address, OutPoint, Script, ScriptBuf, TxOut};
+use bitcoin::taproot::TapLeafHash;
+use bitcoin::{Address, Amount, OutPoint, Script, ScriptBuf, Transaction, TxOut};
+
+use crate::derive::{Family, Network, Verdict, Wallet};
 
 /// What the review panel holds in the 800×600 minimum canvas (`04-screens.md` §11.2), payment
 /// and change counted together. A seventh output is `AOBS-R15` and not a scroll.
 const MAX_OUTPUTS: usize = 6;
+
+/// The DER signature element an ECDSA input is charged in the vsize prediction, sighash byte
+/// included — the **smaller** of the two sizes low-S DER produces (`04-screens.md` §11.2.1).
+///
+/// Charging the smaller one makes the predicted vsize smaller and therefore the displayed rate
+/// higher, so the error runs in one direction only: **the rate shown is never lower than the
+/// rate the broadcast transaction pays.** About half of ECDSA inputs produce a 72-byte element
+/// instead, which reads high by a fraction of a percent.
+const ECDSA_SIGNATURE: usize = 71;
+
+/// A compressed public key, which is what all four families spend to.
+const COMPRESSED_PUBKEY: usize = 33;
+
+/// A BIP-340 signature under `SIGHASH_DEFAULT`, which is the taproot key path's whole witness
+/// item. An explicit `SIGHASH_ALL` would add one byte, so this is the smaller one again.
+const SCHNORR_SIGNATURE: usize = 64;
+
+/// BIP49's redeem script: `OP_0 <20-byte key hash>`.
+const P2WPKH_REDEEM_SCRIPT: usize = 22;
+
+/// The segwit marker and flag, which cost one weight unit each and are present exactly when
+/// some input has a witness (BIP-141).
+const SEGWIT_MARKER_AND_FLAG: usize = 2;
 
 /// The two ways inbound bytes fail to become a transaction we will show.
 ///
@@ -115,6 +157,53 @@ pub enum Refusal {
         /// How many the transaction has.
         count: usize,
     },
+    /// `AOBS-R16` — the inputs claim to be worth more than the money that will ever exist.
+    ///
+    /// Consensus caps the supply at 21 000 000 BTC, so a transaction whose inputs sum above it
+    /// is describing UTXOs that cannot exist. The check is here rather than left implicit
+    /// because a taproot input carries only its `witness_utxo` and nothing cross-checks the
+    /// amount (BIP-341 makes a lie invalidate the signature, which is a property of *signing*,
+    /// not of reviewing) — so two of them can claim `u64::MAX` each and every number the review
+    /// panel is about would overflow the type that carries it.
+    AmountOutOfRange,
+    /// `AOBS-R06` — no input re-derives to our own key material.
+    ///
+    /// **Four copy requirements, one code** (`02-core.md` §7), because this refusal would
+    /// otherwise read as a bug in aobs. Two are unconditional — the loaded network and account 0,
+    /// always named. Two are conditional: the passphrase, named as the likely cause when one is
+    /// in use, and the coin-type disagreement, stated outright when every input declares the
+    /// other network's. Those two booleans are what makes this one code four sentences.
+    ///
+    /// **The coin type selects copy and nothing else** (standing rule 1): acceptance rests
+    /// entirely on the byte-compare, and the shell must not branch on any of this — it renders
+    /// [`Refusal::reason`] (standing rule 4).
+    NoInputOfOurs {
+        /// The loaded network, named in every variant. A network mismatch reaches this refusal
+        /// with no other symptom, because `scriptPubKey`s are network-agnostic bytes.
+        network: Network,
+        /// Whether a passphrase was in use at load.
+        passphrase_in_use: bool,
+        /// Whether **every** input declares the other network's BIP-44 coin type, which is what
+        /// makes *this transaction was built for the other network* a fact we can state.
+        coin_type_mismatch: bool,
+    },
+    /// `AOBS-R08` — an output claiming to be ours fails the `scriptPubKey` byte-compare.
+    ///
+    /// The change-substitution class. It refuses the **entire transaction** rather than being
+    /// reclassified as a plain spend and shown, because there is no state of the user's
+    /// knowledge that makes a transaction lying about where its change goes acceptable.
+    ChangeMismatch {
+        /// Zero-based index into the outputs; the copy states it one-based.
+        output: usize,
+    },
+    /// `AOBS-R09` — change on a path this wallet would never scan.
+    ///
+    /// Coldcard's 2019 change-path ransom: coins that are provably yours and that your wallet
+    /// will never look for.
+    UnscannableChangePath {
+        /// Zero-based index into the outputs.
+        output: usize,
+    },
 }
 
 impl Refusal {
@@ -122,7 +211,9 @@ impl Refusal {
     ///
     /// The indices are samples: nothing about a code or the shape of its copy depends on
     /// which input tripped it.
-    pub const ALL: [Self; 9] = [
+    /// One entry per variant, not per copy: [`Refusal::NoInputOfOurs`] has four sentences and
+    /// appears once, and the four are asserted in `psbt_tests.rs` instead.
+    pub const ALL: [Self; 13] = [
         Self::DuplicateKey,
         Self::PreviousTransactionAbsent { input: 0 },
         Self::PreviousTransactionMismatch { input: 0 },
@@ -132,6 +223,14 @@ impl Refusal {
         Self::UnsupportedInputScript { input: 0 },
         Self::UnrenderableOutput { output: 0 },
         Self::TooManyOutputs { count: 7 },
+        Self::AmountOutOfRange,
+        Self::NoInputOfOurs {
+            network: Network::Mainnet,
+            passphrase_in_use: false,
+            coin_type_mismatch: false,
+        },
+        Self::ChangeMismatch { output: 0 },
+        Self::UnscannableChangePath { output: 0 },
     ];
 
     /// The stable machine-readable code, from `06-codes.md` §6's `AOBS-R##` space.
@@ -150,6 +249,10 @@ impl Refusal {
             Self::UnsupportedInputScript { .. } => "AOBS-R05",
             Self::UnrenderableOutput { .. } => "AOBS-R07",
             Self::TooManyOutputs { .. } => "AOBS-R15",
+            Self::AmountOutOfRange => "AOBS-R16",
+            Self::NoInputOfOurs { .. } => "AOBS-R06",
+            Self::ChangeMismatch { .. } => "AOBS-R08",
+            Self::UnscannableChangePath { .. } => "AOBS-R09",
         }
     }
 
@@ -205,8 +308,208 @@ impl Refusal {
                  {MAX_OUTPUTS}. aobs will not ask you to approve an output it has not shown \
                  you. Split the payment and sign it in parts."
             ),
+            Self::AmountOutOfRange => "This transaction says its inputs are worth more than \
+                 the 21 million bitcoin that will ever exist, so at least one of the amounts \
+                 in it is false."
+                .to_owned(),
+            Self::NoInputOfOurs {
+                network,
+                passphrase_in_use,
+                coin_type_mismatch,
+            } => {
+                // Four sentences for four requirements, assembled rather than written out as
+                // four `format!` arms: the requirements compose — a passphrase and a coin-type
+                // disagreement can both be true — and four arms would be four places to forget
+                // one of the two that are unconditional. Assembled *here* rather than in a
+                // helper, because a helper taking these three would be a signature with two
+                // same-typed booleans side by side, and nothing would catch them swapped.
+                let mut reason = String::from(
+                    "None of this transaction's inputs belongs to the wallet you loaded: aobs \
+                     re-derived every one of them from your own seed and none of them matched.",
+                );
+
+                if coin_type_mismatch {
+                    // The one variant that names a cause instead of listing three. Three causes
+                    // in a list names nothing, and this is the common accidental case.
+                    reason.push_str(&format!(
+                        " Every input in it was built for {}, and the wallet you loaded is for \
+                         {}.",
+                        network.other().name(),
+                        network.name()
+                    ));
+                } else {
+                    reason.push_str(&format!(
+                        " The wallet you loaded is for {}.",
+                        network.name()
+                    ));
+                }
+
+                reason.push_str(
+                    " aobs derives account 0 of each of the four standard address types, so a \
+                     wallet kept on a different account arrives here too.",
+                );
+
+                if passphrase_in_use {
+                    reason.push_str(
+                        " You loaded this wallet with a passphrase, and a passphrase that \
+                         differs by one character derives an entirely different wallet — that is \
+                         the likeliest cause.",
+                    );
+                }
+
+                reason
+            }
+            Self::ChangeMismatch { output } => format!(
+                "Output {} says it comes back to this wallet, and the address it actually pays \
+                 is not the one aobs derives at the path it claims. aobs will not sign a \
+                 transaction that misdescribes where its change goes.",
+                output + 1
+            ),
+            Self::UnscannableChangePath { output } => format!(
+                "Output {} says it comes back to this wallet at a path aobs would never look \
+                 at, so those coins would be yours and unfindable. aobs derives account 0 of \
+                 each of the four standard address types, on the receiving and change branches \
+                 only.",
+                output + 1
+            ),
         }
     }
+}
+
+/// An accepted transaction: the document, and the model of it a screen renders.
+///
+/// **Two fields rather than two return values.** §8 signs the PSBT the review was computed from,
+/// so both have to cross the seam — and handing them back separately would let a caller pair a
+/// review with a different transaction, which is the same class of mistake as skipping the
+/// derivation check. Pairing them here keeps [`Review`] to exactly the contents `02-core.md` §9
+/// lists, none of which is the document.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Accepted {
+    /// The parsed PSBT, unmodified: unknown fields included, nothing stripped (§8).
+    pub psbt: Psbt,
+    /// What the review panel draws.
+    pub review: Review,
+}
+
+/// The typed model the review panel renders (`02-core.md` §9).
+///
+/// **The shell renders this and evaluates nothing** (standing rule 4). Every number crosses the
+/// seam as a [`Amount`] and is written by [`crate::format`]; the warning is a variant and never
+/// a formatted string, so no arm of the shell re-tests the condition that produced it.
+///
+/// The fields are §9's list and nothing else — the PSBT it is about is [`Accepted::psbt`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Review {
+    /// The loaded network. Stated on the panel because a `scriptPubKey` cannot state it.
+    pub network: Network,
+    /// How many inputs the transaction spends. Inputs are aggregated on the panel and cost no
+    /// rows, which is why there is no bound on them the way there is on outputs.
+    pub input_count: usize,
+    /// What those inputs are worth together.
+    pub input_total: Amount,
+    /// What leaves the wallet: the input total less what comes back. Equal to
+    /// [`Review::paying`] plus [`Review::fee`].
+    pub leaving: Amount,
+    /// What the recipients receive: the total to outputs that are not our change. It is the
+    /// denominator of both the fee percentage and the one warning, so the two cannot disagree
+    /// about what they are about.
+    pub paying: Amount,
+    /// What comes back to this wallet: the total to outputs that re-derived to ours.
+    pub returning: Amount,
+    /// The fee, absolute. The panel also states it as a rate over [`Review::vsize`] and as a
+    /// percentage of [`Review::paying`] — same number, three readings.
+    pub fee: Amount,
+    /// The **predicted vsize of the signed** transaction, in vbytes, which is what the fee rate
+    /// divides by (`04-screens.md` §11.2.1).
+    ///
+    /// The PSBT carries an unsigned transaction, so this is a prediction rather than a
+    /// measurement — sound because the wallet is single-sig across exactly four known script
+    /// types, and charged the smaller signature element in every family so the rate it produces
+    /// is never lower than the rate that will be paid.
+    pub vsize: NonZeroU64,
+    /// One row per output, in the transaction's own order. At most six of them: a seventh is
+    /// `AOBS-R15` and the panel is never asked to draw what it cannot hold.
+    pub outputs: Vec<OutputRow>,
+    /// The one advisory warning, or nothing.
+    pub warning: Option<Warning>,
+}
+
+/// One output row on the panel: the address at full width, the amount, and what it is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutputRow {
+    /// The address, rendered for the loaded network. It exists because `AOBS-R07` refused every
+    /// output that has no address form.
+    pub address: Address,
+    /// What this output pays.
+    pub amount: Amount,
+    /// Payment or change — and change only after the byte-compare said so.
+    pub kind: OutputKind,
+}
+
+/// What an output is, after the derivation check (`02-core.md` §7).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OutputKind {
+    /// A payment: no derivation claim at all, or one bearing a fingerprint that is not ours.
+    ///
+    /// **No suspicion attaches to it** — it is displayed in full and given its own confirmation
+    /// screen. Both attack directions are safe here: marking real change as foreign only causes
+    /// it to be *shown*, and putting our fingerprint on the attacker's address fails the
+    /// byte-compare and refuses the transaction.
+    Payment,
+    /// Change: an output that claimed our fingerprint and then proved it.
+    ///
+    /// §11.2 presents change as **settled rather than as a thing to check**, which is only
+    /// honest if the re-derivation actually ran — so the verdict travels with the row rather
+    /// than being assumed by the screen.
+    Change {
+        /// The full claimed path, which is also the path we derived at. The panel states it.
+        path: DerivationPath,
+        /// The verdict.
+        verdict: Rederivation,
+    },
+}
+
+/// The re-derivation verdict on a change output.
+///
+/// **One arm, deliberately.** The other two verdicts do not reach a panel: a path we would never
+/// scan is `AOBS-R09` and bytes that disagree are `AOBS-R08`, and both refuse the entire
+/// transaction. The variant exists rather than being implied because §11.2 makes the panel
+/// *state* that the compare ran, and a screen may not state something the model does not carry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rederivation {
+    /// The `scriptPubKey` derived at this path was byte-identical to the one the transaction
+    /// carries.
+    MatchedByteForByte,
+}
+
+/// The one advisory warning (`02-core.md` §9).
+///
+/// A warning is only legitimate when the user knows something we don't; everything else is a
+/// refusal. This is the only condition that qualifies, and it is a variant rather than a string
+/// so the shell renders it and never evaluates it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Warning {
+    /// `fee ≥ total sent to non-change outputs` — *you are paying miners more than you are
+    /// paying your recipient*.
+    ///
+    /// True or false regardless of congestion, fiat price, urgency or size, which is exactly
+    /// what makes it sayable by a device in a Faraday cage. **Silent for a consolidation**: with
+    /// no non-change outputs the ratio is undefined and nothing fires.
+    FeeAbovePayment,
+}
+
+/// One input's spent output, as the structural walk established it.
+///
+/// It exists so the derivation check and the vsize prediction do not re-derive facts the walk
+/// already had. Recomputing them would mean a second pass with error arms that cannot be
+/// reached, which is worse than carrying three fields.
+struct Spend {
+    /// Which of the four script types, for the vsize prediction.
+    script: InputScript,
+    /// What the input is worth, from the previous transaction rather than asserted.
+    value: Amount,
+    /// The `scriptPubKey` being spent — the right-hand side of the input byte-compare.
+    script_pubkey: ScriptBuf,
 }
 
 /// One of the four script types we model, identified from the output being spent.
@@ -225,20 +528,56 @@ enum InputScript {
     P2tr,
 }
 
-/// Parse hostile bytes and run every structural check, in the registry's own order.
+impl InputScript {
+    /// Bytes this input's `scriptSig` gains when it is signed (`04-screens.md` §11.2.1).
+    ///
+    /// The unsigned transaction already spends one byte on each empty `scriptSig`'s length
+    /// prefix, and every signed form here stays under 253 bytes, so the prefix does not grow
+    /// and this is the script's own length.
+    fn script_sig_growth(self) -> usize {
+        match self {
+            // `<signature> <pubkey>`, each behind its own one-byte push opcode.
+            Self::P2pkh => 1 + ECDSA_SIGNATURE + 1 + COMPRESSED_PUBKEY,
+            // One push of the 22-byte P2WPKH redeem script; the witness carries the rest.
+            Self::P2shP2wpkh => 1 + P2WPKH_REDEEM_SCRIPT,
+            Self::P2wpkh | Self::P2tr => 0,
+        }
+    }
+
+    /// Bytes this input contributes to the witness of a signed **segwit** transaction.
+    ///
+    /// A legacy input inside a segwit transaction still costs its item count of zero, which is
+    /// why `P2pkh` is 1 here and not 0. When no input has a witness the transaction is not
+    /// segwit at all and none of this is counted — see [`predicted_vsize`].
+    fn witness_size(self) -> usize {
+        match self {
+            Self::P2pkh => 1,
+            Self::P2shP2wpkh | Self::P2wpkh => 1 + (1 + ECDSA_SIGNATURE) + (1 + COMPRESSED_PUBKEY),
+            Self::P2tr => 1 + (1 + SCHNORR_SIGNATURE),
+        }
+    }
+
+    /// Whether the signed form of this input carries a witness at all.
+    fn is_segwit(self) -> bool {
+        !matches!(self, Self::P2pkh)
+    }
+}
+
+/// Parse hostile bytes, run every check, and return the transaction with the model of it.
 ///
-/// The returned PSBT is the parsed one, unmodified: unknown fields included, nothing
-/// stripped. What it does **not** carry is any claim about whose keys the inputs are — that is
-/// [#80](https://github.com/allisson/aobs/issues/80)'s.
+/// The whole inbound path in one call: decode, the structural refusals that need no key
+/// material, then the derivation check and the review model, which need the wallet. There is no
+/// way to obtain an [`Accepted`] without having run all of it, which is the point — see the
+/// module documentation.
 ///
 /// # Errors
 ///
 /// [`Rejection::NotAPsbt`] when the bytes never decoded, [`Rejection::Refused`] when they
 /// decoded and failed a check.
-pub fn validate(bytes: &[u8]) -> Result<Psbt, Rejection> {
+pub fn validate(wallet: &Wallet, bytes: &[u8]) -> Result<Accepted, Rejection> {
     let psbt = parse(bytes)?;
-    check(&psbt).map_err(Rejection::Refused)?;
-    Ok(psbt)
+    let spends = check(&psbt).map_err(Rejection::Refused)?;
+    build(wallet, psbt, &spends).map_err(Rejection::Refused)
 }
 
 /// Decode, mapping the dependency's two duplicate-key mechanisms onto `AOBS-R01` and
@@ -262,7 +601,7 @@ fn parse(bytes: &[u8]) -> Result<Psbt, Rejection> {
 /// `AOBS-R15` is a property of the transaction as a whole and needs no walk, so a
 /// two-thousand-output PSBT is refused for what it is rather than for whichever of its
 /// outputs happens to fail something else first.
-fn check(psbt: &Psbt) -> Result<(), Refusal> {
+fn check(psbt: &Psbt) -> Result<Vec<Spend>, Refusal> {
     let outputs = &psbt.unsigned_tx.output;
     if outputs.len() > MAX_OUTPUTS {
         return Err(Refusal::TooManyOutputs {
@@ -273,6 +612,7 @@ fn check(psbt: &Psbt) -> Result<(), Refusal> {
     // Zipped rather than indexed: `Psbt::deserialize` decodes exactly as many input maps as
     // the unsigned transaction has inputs, and zipping means no arm of this loop can panic
     // if that ever stops being true.
+    let mut spends = Vec::with_capacity(psbt.inputs.len());
     let mut input_total: u128 = 0;
     for (index, (txin, input)) in psbt.unsigned_tx.input.iter().zip(&psbt.inputs).enumerate() {
         let spent = spent_output(input, txin.previous_output, index)?;
@@ -282,11 +622,24 @@ fn check(psbt: &Psbt) -> Result<(), Refusal> {
             return Err(Refusal::UnsupportedSighash { input: index });
         }
         input_total += u128::from(spent.value.to_sat());
+        spends.push(Spend {
+            script,
+            value: spent.value,
+            script_pubkey: spent.script_pubkey.clone(),
+        });
     }
 
-    // `u128` because both sums are attacker-supplied `u64`s and a wrapping add would turn
-    // "pays out more than it holds" into "pays out nothing". No policy about `MAX_MONEY`
-    // here: the comparison is the refusal §7 names, and nothing else.
+    // `u128` because the amounts are attacker-supplied `u64`s and a wrapping add would turn
+    // "pays out more than it holds" into "pays out nothing".
+    //
+    // `AOBS-R16` runs here, before the comparison below and before any number reaches the
+    // review model: consensus caps the supply, so a sum above it is describing UTXOs that
+    // cannot exist — and once the sum fits, so does every number derived from it, which is
+    // what lets the model carry `Amount`s at all.
+    if input_total > u128::from(Amount::MAX_MONEY.to_sat()) {
+        return Err(Refusal::AmountOutOfRange);
+    }
+
     let output_total: u128 = outputs
         .iter()
         .map(|out| u128::from(out.value.to_sat()))
@@ -301,7 +654,226 @@ fn check(psbt: &Psbt) -> Result<(), Refusal> {
         }
     }
 
-    Ok(())
+    Ok(spends)
+}
+
+/// The derivation check and the review model — everything that needs our own key material
+/// (`02-core.md` §7's derivation check and §9).
+///
+/// The inputs are asked first. `AOBS-R06` is a property of the transaction as a whole, and a
+/// PSBT for somebody else's wallet should be refused for being somebody else's rather than for
+/// whichever of its outputs failed a compare — which is also what makes a testnet PSBT loaded
+/// as mainnet land here, with the coin-type sentence, instead of on `AOBS-R09`.
+fn build(wallet: &Wallet, psbt: Psbt, spends: &[Spend]) -> Result<Accepted, Refusal> {
+    if !any_input_is_ours(wallet, &psbt, spends) {
+        return Err(Refusal::NoInputOfOurs {
+            network: wallet.network(),
+            passphrase_in_use: wallet.passphrase_in_use(),
+            coin_type_mismatch: every_input_declares_the_other_network(wallet, &psbt),
+        });
+    }
+
+    let mut rows = Vec::with_capacity(psbt.unsigned_tx.output.len());
+    let mut returning = Amount::ZERO;
+    let mut paying = Amount::ZERO;
+    let mut payments = 0usize;
+
+    for (index, txout) in psbt.unsigned_tx.output.iter().enumerate() {
+        // Rendered for the **loaded** network, where `renderable` above asked the
+        // network-free question. Reusing `AOBS-R07` rather than unwrapping is what keeps the
+        // two from disagreeing silently if that claim ever stops holding.
+        let address = Address::from_script(&txout.script_pubkey, wallet.network().params())
+            .map_err(|_| Refusal::UnrenderableOutput { output: index })?;
+
+        let kind = match change_path(wallet, psbt.outputs.get(index), &txout.script_pubkey, index)?
+        {
+            Some(path) => {
+                returning += txout.value;
+                OutputKind::Change {
+                    path,
+                    verdict: Rederivation::MatchedByteForByte,
+                }
+            }
+            None => {
+                payments += 1;
+                paying += txout.value;
+                OutputKind::Payment
+            }
+        };
+
+        rows.push(OutputRow {
+            address,
+            amount: txout.value,
+            kind,
+        });
+    }
+
+    // Every sum below fits a `u64` because `AOBS-R16` bounded the input total by the money
+    // supply and `AOBS-R04` bounded the output total by the input total.
+    let input_total = Amount::from_sat(spends.iter().map(|spend| spend.value.to_sat()).sum());
+    let output_total = Amount::from_sat(
+        psbt.unsigned_tx
+            .output
+            .iter()
+            .map(|out| out.value.to_sat())
+            .sum(),
+    );
+
+    Ok(Accepted {
+        review: Review {
+            network: wallet.network(),
+            input_count: spends.len(),
+            input_total,
+            leaving: input_total - returning,
+            paying,
+            returning,
+            fee: input_total - output_total,
+            vsize: predicted_vsize(&psbt.unsigned_tx, spends),
+            outputs: rows,
+            // §9's carve-out is the `payments > 0`: with no non-change outputs the ratio is
+            // undefined, so a consolidation fires nothing rather than firing on `fee >= 0`.
+            warning: (payments > 0 && input_total - output_total >= paying)
+                .then_some(Warning::FeeAbovePayment),
+        },
+        psbt,
+    })
+}
+
+/// Whether any input re-derives to our own key material — the `AOBS-R06` question.
+///
+/// **Every claimed path is tried, whatever fingerprint it carries.** The asymmetry with
+/// [`change_path`] is deliberate: for an output the fingerprint decides between two *displays*
+/// and §7 fixes that a foreign one is a payment, but for an input it would only decide whether
+/// to ask a question the byte-compare answers outright. Trying more candidates cannot accept
+/// anything wrong — what makes an input ours is that we derive its `scriptPubKey`, and a
+/// coordinator that filled the fingerprint in wrongly should not make a wallet unsignable.
+fn any_input_is_ours(wallet: &Wallet, psbt: &Psbt, spends: &[Spend]) -> bool {
+    spends.iter().zip(&psbt.inputs).any(|(spend, input)| {
+        claims(&input.bip32_derivation, &input.tap_key_origins).any(|(_, path)| {
+            matches!(
+                wallet.verify(path, &spend.script_pubkey),
+                Verdict::Ours { .. }
+            )
+        })
+    })
+}
+
+/// The path an output comes back to us at, or `None` when it is a payment.
+///
+/// **The fingerprint is a hint and authorises nothing** (§7): it selects which claims are
+/// candidates, and a foreign one makes the output a payment with no suspicion attached. What
+/// decides is [`crate::derive::Wallet::verify`].
+///
+/// # Errors
+///
+/// `AOBS-R09` when a candidate points somewhere we would never scan, `AOBS-R08` when it points
+/// at one of our paths and the bytes disagree. Both refuse the entire transaction.
+fn change_path(
+    wallet: &Wallet,
+    output: Option<&Output>,
+    script_pubkey: &Script,
+    index: usize,
+) -> Result<Option<DerivationPath>, Refusal> {
+    // A missing output map is no claim, which is a payment. `Psbt::deserialize` gives one map
+    // per output, so this is the same defence as the zip in `check`.
+    let Some(output) = output else {
+        return Ok(None);
+    };
+
+    let mut refusal = None;
+    for (fingerprint, path) in claims(&output.bip32_derivation, &output.tap_key_origins) {
+        if fingerprint != wallet.fingerprint() {
+            continue;
+        }
+        match wallet.verify(path, script_pubkey) {
+            Verdict::Ours { .. } => return Ok(Some(path.clone())),
+            Verdict::Unscannable => {
+                refusal.get_or_insert(Refusal::UnscannableChangePath { output: index });
+            }
+            Verdict::Mismatch => {
+                refusal.get_or_insert(Refusal::ChangeMismatch { output: index });
+            }
+        }
+    }
+
+    // A claim that verifies wins over one that does not, whatever order the maps hold them in:
+    // an output is ours if *some* claimed path derives it. Only when none does is the first
+    // failing verdict the refusal.
+    match refusal {
+        Some(refusal) => Err(refusal),
+        None => Ok(None),
+    }
+}
+
+/// Every `(fingerprint, path)` a derivation map pair claims, taproot origins included.
+///
+/// Both PSBT maps are walked because the four families straddle them: BIP44/49/84 declare their
+/// origins in `bip32_derivation` and BIP86 in `tap_key_origins`, and an input or output is
+/// entitled to carry either.
+fn claims<'a, K1, K2>(
+    bip32: &'a BTreeMap<K1, (Fingerprint, DerivationPath)>,
+    taproot: &'a BTreeMap<K2, (Vec<TapLeafHash>, (Fingerprint, DerivationPath))>,
+) -> impl Iterator<Item = (Fingerprint, &'a DerivationPath)> {
+    bip32
+        .values()
+        .chain(taproot.values().map(|(_, source)| source))
+        .map(|(fingerprint, path)| (*fingerprint, path))
+}
+
+/// Whether **every** input declares the other network's BIP-44 coin type — `AOBS-R06`'s fourth
+/// copy requirement (§7).
+///
+/// It selects copy and nothing else. *Every* rather than *any*, because one input built for the
+/// other network among several of ours is not a network mistake; and *the other network's* coin
+/// type rather than merely a disagreeing one, because the sentence names which network the
+/// transaction was built for, and a coin type belonging to some third chain would not license
+/// that claim. An input declaring nothing disqualifies the variant: the copy would be asserting
+/// something about a path that is not there.
+fn every_input_declares_the_other_network(wallet: &Wallet, psbt: &Psbt) -> bool {
+    let purposes = Family::ALL.map(Family::purpose);
+    let theirs = wallet.network().other().coin_type();
+
+    !psbt.inputs.is_empty()
+        && psbt.inputs.iter().all(|input| {
+            let mut declared = claims(&input.bip32_derivation, &input.tap_key_origins)
+                .filter_map(|(_, path)| {
+                    let [purpose, coin, ..] = path.as_ref() else {
+                        return None;
+                    };
+                    purposes.contains(purpose).then_some(*coin)
+                })
+                .peekable();
+            declared.peek().is_some() && declared.all(|coin| coin == theirs)
+        })
+}
+
+/// The vsize the **signed** transaction will have, in vbytes (`04-screens.md` §11.2.1).
+///
+/// The sum is in weight units — the base size at ×4 plus each input's own signing data at its
+/// own weight — and divides **once**, `vsize = ceil(weight / 4)` as BIP-141 defines it, never
+/// rounding per input. Every signature element charged is the smaller of the two its family
+/// produces, so the rate this feeds is never lower than what will be paid.
+fn predicted_vsize(unsigned: &Transaction, spends: &[Spend]) -> NonZeroU64 {
+    let base: usize = unsigned.base_size()
+        + spends
+            .iter()
+            .map(|spend| spend.script.script_sig_growth())
+            .sum::<usize>();
+
+    // No input with a witness means no marker, no flag and no witness section at all: the
+    // signed transaction is a legacy one and weighs four units per byte.
+    let witness: usize = if spends.iter().any(|spend| spend.script.is_segwit()) {
+        SEGWIT_MARKER_AND_FLAG
+            + spends
+                .iter()
+                .map(|spend| spend.script.witness_size())
+                .sum::<usize>()
+    } else {
+        0
+    };
+
+    let weight = 4 * base as u64 + witness as u64;
+    NonZeroU64::new(weight.div_ceil(4)).expect("a transaction has a size")
 }
 
 /// The output an input spends, established from the previous transaction rather than asserted.

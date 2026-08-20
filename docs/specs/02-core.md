@@ -374,6 +374,18 @@ Two refusals arrive free and are recorded rather than re-implemented: `unsigned_
 BIP-174's empty-scriptSig/empty-witness rule, and `PartialDataConsumption` for a global unsigned-tx
 value with trailing bytes.
 
+**One refusal the dependency does not give us and §9 needs: the amount bound, `AOBS-R16`.** Settled by
+[#80](https://github.com/allisson/aobs/issues/80). A `TxOut` value is a `u64` and nothing bounds it at
+parse; a taproot input carries only its `witness_utxo` and nothing cross-checks the amount, because
+BIP-341 makes a lie invalidate the *signature* rather than the document. So two taproot inputs claiming
+`u64::MAX` each pass every check above, and then every number §9's model is made of overflows the type
+that carries it. **The inputs must sum to no more than 21 000 000 BTC** — consensus caps the supply, so
+a transaction above it is describing UTXOs that cannot exist. It is checked with the structural
+refusals, before any key material is asked anything, and it is what lets the review model carry
+`bitcoin::Amount`s at all: once the input total fits, the output total fits by the refusal above it and
+so does every difference of the two. **Not a policy about fees or dust** — the one comparison, and
+nothing else.
+
 ### The derivation check
 
 **The claimed derivation selects a candidate; the byte-compare is the only authority.**

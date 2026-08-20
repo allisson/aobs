@@ -23,10 +23,10 @@
 //!    nor listed as owed fails; so does a code listed as owed that has quietly been
 //!    implemented.
 
-use bitcoin::bip32::{ChildNumber, Xpub};
+use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint, Xpub};
 use bitcoin::hashes::Hash as _;
 use bitcoin::opcodes::all::{OP_CHECKMULTISIG, OP_CHECKSIG, OP_PUSHNUM_1, OP_RETURN};
-use bitcoin::psbt::{Psbt, PsbtSighashType};
+use bitcoin::psbt::{Input, Output, Psbt, PsbtSighashType};
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::taproot::TapNodeHash;
 use bitcoin::transaction::Version;
@@ -45,12 +45,22 @@ use crate::secret::{Entropy, Passphrase};
 /// Whose keys these are does not matter to a structural check, and using ours anyway costs
 /// nothing and leaves the corpus reusable by the derivation check that comes next.
 pub(crate) fn wallet() -> Wallet {
+    wallet_on(Network::Mainnet)
+}
+
+/// The same seed on a chosen network — for the one case whose whole subject is that the two
+/// disagree.
+///
+/// The master fingerprint is byte-identical on both (`02-core.md` §6), so a testnet PSBT built
+/// from this seed claims *our* fingerprint and still re-derives to nothing on mainnet. That is
+/// exactly the symptomless network mismatch `AOBS-R06`'s fourth copy variant exists for.
+pub(crate) fn wallet_on(network: Network) -> Wallet {
     let mnemonic = Mnemonic::from_entropy(&Entropy::new(&[0u8; 16]).expect("16 bytes fit"))
         .expect("16 bytes is an accepted length");
     Wallet::load(
         &mnemonic,
         &Passphrase::new("").expect("empty fits"),
-        Network::Mainnet,
+        network,
     )
 }
 
@@ -72,8 +82,65 @@ fn our_redeem_script(wallet: &Wallet) -> ScriptBuf {
     ScriptBuf::new_p2wpkh(&key.to_pub().wpubkey_hash())
 }
 
-fn normal(index: u32) -> ChildNumber {
+pub(crate) fn normal(index: u32) -> ChildNumber {
     ChildNumber::Normal { index }
+}
+
+/// The key at `family`/`branch`/`index` under this wallet's accounts, derived independently of
+/// [`our_spk`] so a case can name a key without going through an address.
+pub(crate) fn our_key(wallet: &Wallet, family: Family, branch: u32, index: u32) -> Xpub {
+    let secp = Secp256k1::verification_only();
+    wallet
+        .account_xpub(family)
+        .derive_pub(&secp, &[normal(branch), normal(index)])
+        .expect("normal children of an xpub always derive")
+}
+
+/// The full path to `family`/`branch`/`index`, which is what an honest coordinator declares.
+pub(crate) fn our_path(wallet: &Wallet, family: Family, branch: u32, index: u32) -> DerivationPath {
+    wallet
+        .account_path(family)
+        .extend([normal(branch), normal(index)])
+}
+
+/// Declare `(fingerprint, path)` as `key`'s origin on an input, in whichever of the two PSBT
+/// maps `family` uses — `tap_key_origins` for BIP86 and `bip32_derivation` for the rest.
+pub(crate) fn declare_input(
+    input: &mut Input,
+    family: Family,
+    key: &Xpub,
+    fingerprint: Fingerprint,
+    path: DerivationPath,
+) {
+    if family == Family::Bip86 {
+        input
+            .tap_key_origins
+            .insert(key.to_x_only_pub(), (vec![], (fingerprint, path)));
+    } else {
+        input
+            .bip32_derivation
+            .insert(key.public_key, (fingerprint, path));
+    }
+}
+
+/// The same, on an output — where a claim is what makes the output a *candidate* for being our
+/// change (`02-core.md` §7).
+pub(crate) fn declare_output(
+    output: &mut Output,
+    family: Family,
+    key: &Xpub,
+    fingerprint: Fingerprint,
+    path: DerivationPath,
+) {
+    if family == Family::Bip86 {
+        output
+            .tap_key_origins
+            .insert(key.to_x_only_pub(), (vec![], (fingerprint, path)));
+    } else {
+        output
+            .bip32_derivation
+            .insert(key.public_key, (fingerprint, path));
+    }
 }
 
 /// A funding transaction paying `value` to `spk`, distinct per `nonce` so two inputs of the
@@ -98,18 +165,29 @@ fn funding(spk: ScriptBuf, value: Amount, nonce: u32) -> Transaction {
     }
 }
 
-/// A PSBT spending one input per entry in `inputs` and paying each entry in `outputs`.
+/// A PSBT spending one input per entry in `inputs` and paying each entry in `outputs`, from the
+/// mainnet fixture wallet.
+pub(crate) fn psbt(inputs: &[(Family, u64)], outputs: &[(ScriptBuf, u64)]) -> Psbt {
+    psbt_for(&wallet(), inputs, outputs)
+}
+
+/// The same, for a chosen wallet — which is how the network-mismatch case builds a PSBT one
+/// wallet will recognise and another will not.
 ///
 /// Every input is complete and honest: the full previous transaction, the `witness_utxo`
-/// beside it, and BIP49's redeem script. Each case below breaks exactly one of those.
-pub(crate) fn psbt(inputs: &[(Family, u64)], outputs: &[(ScriptBuf, u64)]) -> Psbt {
-    let wallet = wallet();
+/// beside it, BIP49's redeem script, and the BIP32 origin a coordinator declares. Each case
+/// below breaks exactly one of those.
+pub(crate) fn psbt_for(
+    wallet: &Wallet,
+    inputs: &[(Family, u64)],
+    outputs: &[(ScriptBuf, u64)],
+) -> Psbt {
     let previous: Vec<Transaction> = inputs
         .iter()
         .enumerate()
         .map(|(nonce, &(family, sats))| {
             funding(
-                our_spk(&wallet, family),
+                our_spk(wallet, family),
                 Amount::from_sat(sats),
                 u32::try_from(nonce).expect("the suite has few inputs"),
             )
@@ -146,8 +224,17 @@ pub(crate) fn psbt(inputs: &[(Family, u64)], outputs: &[(ScriptBuf, u64)]) -> Ps
         slot.witness_utxo = Some(previous.output[0].clone());
         slot.non_witness_utxo = Some(previous.clone());
         if family == Family::Bip49 {
-            slot.redeem_script = Some(our_redeem_script(&wallet));
+            slot.redeem_script = Some(our_redeem_script(wallet));
         }
+        // The origin an honest coordinator declares. Without it no input re-derives to ours and
+        // every case here would refuse on `AOBS-R06` before reaching what it is about.
+        declare_input(
+            slot,
+            family,
+            &our_key(wallet, family, 0, 0),
+            wallet.fingerprint(),
+            our_path(wallet, family, 0, 0),
+        );
     }
     psbt
 }
@@ -250,6 +337,14 @@ pub(crate) struct Case {
     pub name: &'static str,
     /// The `AOBS-R##` the refusal must carry.
     pub code: &'static str,
+    /// The whole refusal, for a case whose subject is **which copy variant** it earns rather
+    /// than only which code.
+    ///
+    /// `None` for the cases where the code is the whole claim. `Some` where §5 names the
+    /// variant — the network mismatch's row says *`AOBS-R06` with the coin-type copy variant*,
+    /// and a case asserting the code alone would discharge that row in a weaker form than it
+    /// is written in.
+    pub refusal: Option<Refusal>,
     /// The hostile bytes.
     pub bytes: fn() -> Vec<u8>,
 }
@@ -280,26 +375,31 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "duplicate keys in an input map (BIP-174 invalid vector 5)",
         code: "AOBS-R01",
+        refusal: None,
         bytes: || from_hex(BIP174_INVALID_VECTOR_5),
     },
     Case {
         name: "duplicate keys in the global map",
         code: "AOBS-R01",
+        refusal: None,
         bytes: duplicated_global_unsigned_tx,
     },
     Case {
         name: "duplicate keys in an output map",
         code: "AOBS-R01",
+        refusal: None,
         bytes: duplicated_output_key,
     },
     Case {
         name: "a duplicate global xpub, which arrives as a different error variant",
         code: "AOBS-R01",
+        refusal: None,
         bytes: duplicated_global_xpub,
     },
     Case {
         name: "a legacy input with witness_utxo only",
         code: "AOBS-R02",
+        refusal: None,
         bytes: || {
             let mut psbt = psbt(
                 &[(Family::Bip44, 100_000)],
@@ -312,6 +412,7 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "a segwit input with witness_utxo only — stricter than Krux on purpose",
         code: "AOBS-R02",
+        refusal: None,
         bytes: || {
             let mut psbt = one_in_one_out();
             psbt.inputs[0].non_witness_utxo = None;
@@ -321,6 +422,7 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "an input carrying neither utxo field",
         code: "AOBS-R02",
+        refusal: None,
         bytes: || {
             let mut psbt = one_in_one_out();
             psbt.inputs[0].non_witness_utxo = None;
@@ -331,6 +433,7 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "a non_witness_utxo that does not hash to its outpoint",
         code: "AOBS-R02",
+        refusal: None,
         bytes: || {
             let mut psbt = one_in_one_out();
             let previous = psbt.inputs[0]
@@ -346,6 +449,7 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "a previous transaction with no output at the index spent",
         code: "AOBS-R02",
+        refusal: None,
         bytes: || {
             let mut psbt = one_in_one_out();
             let previous = psbt.inputs[0]
@@ -362,21 +466,25 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "SIGHASH_SINGLE",
         code: "AOBS-R03",
+        refusal: None,
         bytes: || sighash_case(0x03),
     },
     Case {
         name: "SIGHASH_NONE",
         code: "AOBS-R03",
+        refusal: None,
         bytes: || sighash_case(0x02),
     },
     Case {
         name: "SIGHASH_ALL | ANYONECANPAY",
         code: "AOBS-R03",
+        refusal: None,
         bytes: || sighash_case(0x81),
     },
     Case {
         name: "a taproot input asking for SIGHASH_ALL | ANYONECANPAY",
         code: "AOBS-R03",
+        refusal: None,
         bytes: || {
             let spk = our_spk(&wallet(), Family::Bip84);
             let mut psbt = psbt(&[(Family::Bip86, 100_000)], &[(spk, 90_000)]);
@@ -387,6 +495,7 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "outputs exceeding inputs",
         code: "AOBS-R04",
+        refusal: None,
         bytes: || {
             let spk = our_spk(&wallet(), Family::Bip84);
             psbt(&[(Family::Bip84, 100_000)], &[(spk, 100_001)]).serialize()
@@ -395,6 +504,7 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "a P2WSH input",
         code: "AOBS-R05",
+        refusal: None,
         bytes: || {
             foreign_script_case(ScriptBuf::new_p2wsh(
                 &our_redeem_script(&wallet()).wscript_hash(),
@@ -404,6 +514,7 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "a bare multisig input",
         code: "AOBS-R05",
+        refusal: None,
         bytes: || {
             foreign_script_case(
                 bitcoin::script::Builder::new()
@@ -418,6 +529,7 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "a P2SH input with no redeem script",
         code: "AOBS-R05",
+        refusal: None,
         bytes: || {
             let spk = our_spk(&wallet(), Family::Bip84);
             let mut psbt = psbt(&[(Family::Bip49, 100_000)], &[(spk, 90_000)]);
@@ -428,6 +540,7 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "a P2SH input whose redeem script is not a P2WPKH",
         code: "AOBS-R05",
+        refusal: None,
         bytes: || {
             // A P2SH paying to a redeem script we hand over honestly — it hashes, and it is
             // a multisig, so it is outside the four families rather than a lie.
@@ -457,6 +570,7 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "a P2SH input whose redeem script does not hash to the scriptPubKey",
         code: "AOBS-R05",
+        refusal: None,
         bytes: || {
             let spk = our_spk(&wallet(), Family::Bip84);
             let mut psbt = psbt(&[(Family::Bip49, 100_000)], &[(spk, 90_000)]);
@@ -470,6 +584,7 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "a taproot input spent through a script path",
         code: "AOBS-R05",
+        refusal: None,
         bytes: || {
             let spk = our_spk(&wallet(), Family::Bip84);
             let mut psbt = psbt(&[(Family::Bip86, 100_000)], &[(spk, 90_000)]);
@@ -480,6 +595,7 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "an output we cannot render as an address",
         code: "AOBS-R07",
+        refusal: None,
         bytes: || {
             let op_return = bitcoin::script::Builder::new()
                 .push_opcode(OP_RETURN)
@@ -491,6 +607,7 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "an output paying a bare public key",
         code: "AOBS-R07",
+        refusal: None,
         bytes: || {
             // P2PK: spendable, relayable, and with no address form in any encoding — the
             // second half of why the rule is *renderable* rather than *not an OP_RETURN*.
@@ -504,6 +621,7 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "seven outputs",
         code: "AOBS-R15",
+        refusal: None,
         bytes: || {
             let spk = our_spk(&wallet(), Family::Bip84);
             let outputs: Vec<(ScriptBuf, u64)> = (0..7).map(|_| (spk.clone(), 10_000)).collect();
@@ -513,12 +631,89 @@ pub(crate) const CASES: &[Case] = &[
     Case {
         name: "outputs packed to the transport bound",
         code: "AOBS-R15",
+        refusal: None,
         bytes: || {
             // §5's ~2,000-output case: the panel is what bounds this, not the byte count, and
             // the refusal has to be the count rather than whatever the walk would have hit.
             let spk = our_spk(&wallet(), Family::Bip84);
             let outputs: Vec<(ScriptBuf, u64)> = (0..2_000).map(|_| (spk.clone(), 1_000)).collect();
             psbt(&[(Family::Bip84, 21_000_000_000_000_000)], &outputs).serialize()
+        },
+    },
+    Case {
+        name: "two taproot inputs each claiming u64::MAX satoshis",
+        code: "AOBS-R16",
+        refusal: None,
+        bytes: || {
+            // Taproot needs only its `witness_utxo` and nothing cross-checks the amount, so
+            // this is the cheapest way to a sum no `u64` can hold — which is the case the
+            // refusal exists for, rather than a single amount one satoshi over the supply.
+            let spk = our_spk(&wallet(), Family::Bip84);
+            psbt(
+                &[(Family::Bip86, u64::MAX), (Family::Bip86, u64::MAX)],
+                &[(spk, 90_000)],
+            )
+            .serialize()
+        },
+    },
+    Case {
+        name: "a testnet PSBT against a mainnet-loaded wallet",
+        code: "AOBS-R06",
+        refusal: Some(Refusal::NoInputOfOurs {
+            network: Network::Mainnet,
+            passphrase_in_use: false,
+            coin_type_mismatch: true,
+        }),
+        bytes: || {
+            // The same seed, the same fingerprint, and coin type `1h` throughout: a network
+            // mismatch has no other symptom, because `scriptPubKey`s are network-agnostic
+            // bytes. Validated against the mainnet fixture wallet like every other case.
+            let testnet = wallet_on(Network::Testnet);
+            let spk = our_spk(&testnet, Family::Bip84);
+            psbt_for(&testnet, &[(Family::Bip84, 100_000)], &[(spk, 90_000)]).serialize()
+        },
+    },
+    Case {
+        name: "our fingerprint on an output whose scriptPubKey is the attacker's",
+        code: "AOBS-R08",
+        refusal: None,
+        bytes: || {
+            let wallet = wallet();
+            // A real change path, a real key of ours declared at it, and an address that is
+            // not what that path derives. This is the change-substitution class.
+            let attacker =
+                ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([0x33; 20]));
+            let mut psbt = psbt(&[(Family::Bip84, 100_000)], &[(attacker, 90_000)]);
+            declare_output(
+                &mut psbt.outputs[0],
+                Family::Bip84,
+                &our_key(&wallet, Family::Bip84, 1, 0),
+                wallet.fingerprint(),
+                our_path(&wallet, Family::Bip84, 1, 0),
+            );
+            psbt.serialize()
+        },
+    },
+    Case {
+        name: "change on an unscannable path",
+        code: "AOBS-R09",
+        refusal: None,
+        bytes: || {
+            let wallet = wallet();
+            // Branch 2. The coins really are ours — the address below is derived from our own
+            // account key at that path — and no wallet of ours will ever look there. This is
+            // Coldcard's 2019 change-path ransom.
+            let key = our_key(&wallet, Family::Bip84, 2, 0);
+            let spk = ScriptBuf::new_p2wpkh(&key.to_pub().wpubkey_hash());
+            let mut psbt = psbt(&[(Family::Bip84, 100_000)], &[(spk, 90_000)]);
+            declare_output(
+                &mut psbt.outputs[0],
+                Family::Bip84,
+                &key,
+                wallet.fingerprint(),
+                our_path(&wallet, Family::Bip84, 2, 0),
+            );
+            psbt.serialize()
         },
     },
 ];
@@ -561,9 +756,6 @@ const REGISTRY: &str = include_str!("../../docs/specs/06-codes.md");
 /// — the derivation check, the QR boundary, the backup — rather than a case somebody forgot to
 /// write.
 const PENDING: &[(&str, &str)] = &[
-    ("AOBS-R06", "#80 — the derivation check"),
-    ("AOBS-R08", "#80 — the change byte-compare"),
-    ("AOBS-R09", "#80 — the unscannable change path"),
     ("AOBS-R10", "#77 — the payload-class check"),
     ("AOBS-R11", "#77 — the 1,024-part budget"),
     ("AOBS-R12", "#85 — an unknown backup version byte"),
@@ -611,10 +803,16 @@ fn corpus_codes() -> Vec<&'static str> {
 
 #[test]
 fn every_case_refuses_with_its_code() {
+    // Every case runs against the same mainnet fixture wallet, including the one whose subject
+    // is that the PSBT was built for the other network.
+    let wallet = wallet();
     for case in CASES {
-        match validate(&(case.bytes)()) {
+        match validate(&wallet, &(case.bytes)()) {
             Err(Rejection::Refused(refusal)) => {
                 assert_eq!(refusal.code(), case.code, "{}: {refusal:?}", case.name);
+                if let Some(expected) = case.refusal {
+                    assert_eq!(refusal, expected, "{}", case.name);
+                }
             }
             other => panic!("{} was not refused: {other:?}", case.name),
         }
@@ -679,8 +877,8 @@ fn the_registry_parses_to_the_codes_it_states() {
         registry_codes(),
         [
             "AOBS-R01", "AOBS-R02", "AOBS-R03", "AOBS-R04", "AOBS-R05", "AOBS-R06", "AOBS-R07",
-            "AOBS-R15", "AOBS-R08", "AOBS-R09", "AOBS-R10", "AOBS-R11", "AOBS-R12", "AOBS-R13",
-            "AOBS-R14",
+            "AOBS-R15", "AOBS-R16", "AOBS-R08", "AOBS-R09", "AOBS-R10", "AOBS-R11", "AOBS-R12",
+            "AOBS-R13", "AOBS-R14",
         ]
     );
 }

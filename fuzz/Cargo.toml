@@ -14,11 +14,21 @@ license = "GPL-3.0-only"
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "0.4"
+# `arbitrary-derive` is what makes §4's third target structure-aware: it generates a *plan*
+# of inputs and outputs rather than bytes, so the mutator's budget goes on the checks
+# instead of on the four magic bytes at the front of a PSBT.
+libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+# The validator target builds the PSBTs it feeds in, which means constructing transactions,
+# scripts and derivation paths. Same version as aobs-core's, resolved through this crate's
+# own lockfile.
+bitcoin = "0.32"
+# The `Arbitrary` derive expands to paths in this crate, so it is a direct dependency even
+# though libfuzzer-sys re-exports the trait.
+arbitrary = { version = "1", features = ["derive"] }
 
 # §4's three targets all fuzz core: the fountain decoder through our clamping wrapper, the
-# PSBT parser on raw bytes, and the validator seeded with our own key material. The second
-# of them is here; the other two arrive with the code they fuzz.
+# PSBT parser on raw bytes, and the validator seeded with our own key material. The last
+# two are here; the fountain decoder arrives with the transport layer it wraps (#77).
 [dependencies.aobs-core]
 path = "../aobs-core"
 
@@ -31,6 +41,13 @@ panic = "unwind"
 [[bin]]
 name = "psbt_parse"
 path = "fuzz_targets/psbt_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "validator"
+path = "fuzz_targets/validator.rs"
 test = false
 doc = false
 bench = false

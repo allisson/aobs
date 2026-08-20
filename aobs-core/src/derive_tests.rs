@@ -24,8 +24,10 @@
 
 use std::str::FromStr as _;
 
-use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
+use bitcoin::bip32::{ChildNumber, DerivationPath, Xpriv, Xpub};
+use bitcoin::hashes::Hash as _;
 use bitcoin::secp256k1::Secp256k1;
+use bitcoin::ScriptBuf;
 
 use super::*;
 use crate::secret::Entropy;
@@ -301,4 +303,211 @@ fn all_four_accounts_exist_on_every_wallet() {
     }
 
     assert_eq!(xpubs.len(), 8);
+}
+
+// --- the re-derivation byte-compare (`02-core.md` §7) --------------------------------------
+
+/// The `scriptPubKey` of one of our addresses, and the path a coordinator declares for it.
+fn ours(
+    wallet: &Wallet,
+    family: Family,
+    branch: Branch,
+    index: u32,
+) -> (DerivationPath, ScriptBuf) {
+    let branch_index = match branch {
+        Branch::Receive => 0,
+        Branch::Change => 1,
+    };
+    let path = wallet.account_path(family).extend([
+        ChildNumber::Normal {
+            index: branch_index,
+        },
+        ChildNumber::Normal { index },
+    ]);
+    let spk = wallet
+        .address(family, branch, index)
+        .expect("a normal index")
+        .script_pubkey();
+    (path, spk)
+}
+
+/// The honest case, in all four families and on **both branches**.
+///
+/// §7's *both branches count* is the assertion here: an output that byte-verifies on the
+/// receive branch is provably ours and provably scannable, so treating branch `1` as the only
+/// legitimate change branch would refuse transactions that are fine.
+#[test]
+fn every_family_verifies_on_both_branches() {
+    for network in [Network::Mainnet, Network::Testnet] {
+        let wallet = wallet(network);
+        for family in Family::ALL {
+            for branch in [Branch::Receive, Branch::Change] {
+                let (path, spk) = ours(&wallet, family, branch, 7);
+                assert_eq!(
+                    wallet.verify(&path, &spk),
+                    Verdict::Ours {
+                        family,
+                        branch,
+                        index: 7
+                    },
+                    "{family:?} {branch:?} on {network:?}"
+                );
+            }
+        }
+    }
+}
+
+/// The claimed path is read for *where to look* and nothing else: our path, another key's
+/// bytes, and the answer is [`Verdict::Mismatch`] rather than *ours*.
+#[test]
+fn our_path_over_someone_elses_script_is_a_mismatch() {
+    let wallet = wallet(Network::Mainnet);
+    let (path, _) = ours(&wallet, Family::Bip84, Branch::Change, 0);
+    let theirs = ScriptBuf::new_p2wpkh(&bitcoin::WPubkeyHash::from_byte_array([0x44; 20]));
+
+    assert_eq!(wallet.verify(&path, &theirs), Verdict::Mismatch);
+}
+
+/// The **declared script type is the path's purpose**, so a BIP84 path over a BIP44 address of
+/// our own is a mismatch — same key material, wrong script.
+///
+/// This is why the byte-compare needs no separate script-type parameter: `m/84h/…` says P2WPKH
+/// and nothing else may answer for it.
+#[test]
+fn the_purpose_declares_the_script_type() {
+    let wallet = wallet(Network::Mainnet);
+    let (bip84_path, _) = ours(&wallet, Family::Bip84, Branch::Receive, 0);
+    let (_, bip44_spk) = ours(&wallet, Family::Bip44, Branch::Receive, 0);
+
+    assert_eq!(wallet.verify(&bip84_path, &bip44_spk), Verdict::Mismatch);
+}
+
+/// Every way a path leaves the space we scan. Each of these is `AOBS-R09` on the review path,
+/// and none of them derives anything: the compare never runs.
+#[test]
+fn a_path_we_would_never_scan_is_unscannable() {
+    let wallet = wallet(Network::Mainnet);
+    let (_, spk) = ours(&wallet, Family::Bip84, Branch::Receive, 0);
+    let hardened = |index| ChildNumber::Hardened { index };
+    let normal = |index| ChildNumber::Normal { index };
+
+    let cases: [(&str, DerivationPath); 8] = [
+        // Another account. §6 offers no account-index choice, so account 1 is unreachable.
+        (
+            "account 1",
+            DerivationPath::from(vec![
+                hardened(84),
+                hardened(0),
+                hardened(1),
+                normal(0),
+                normal(0),
+            ]),
+        ),
+        // The other network's coin type — a testnet path against a mainnet wallet.
+        (
+            "coin type 1h",
+            DerivationPath::from(vec![
+                hardened(84),
+                hardened(1),
+                hardened(0),
+                normal(0),
+                normal(0),
+            ]),
+        ),
+        // A purpose outside the four families.
+        (
+            "purpose 45h",
+            DerivationPath::from(vec![
+                hardened(45),
+                hardened(0),
+                hardened(0),
+                normal(0),
+                normal(0),
+            ]),
+        ),
+        // A third branch: `path[-2] ∉ {0, 1}`.
+        (
+            "branch 2",
+            DerivationPath::from(vec![
+                hardened(84),
+                hardened(0),
+                hardened(0),
+                normal(2),
+                normal(0),
+            ]),
+        ),
+        // A hardened branch, which is not `0` or `1` however it prints.
+        (
+            "branch 0h",
+            DerivationPath::from(vec![
+                hardened(84),
+                hardened(0),
+                hardened(0),
+                hardened(0),
+                normal(0),
+            ]),
+        ),
+        // A hardened final index: `path[-1] >= 2^31`.
+        (
+            "index 0h",
+            DerivationPath::from(vec![
+                hardened(84),
+                hardened(0),
+                hardened(0),
+                normal(0),
+                hardened(0),
+            ]),
+        ),
+        // Too short, and too long. A path of the wrong length names no address of ours.
+        (
+            "four children",
+            DerivationPath::from(vec![hardened(84), hardened(0), hardened(0), normal(0)]),
+        ),
+        (
+            "six children",
+            DerivationPath::from(vec![
+                hardened(84),
+                hardened(0),
+                hardened(0),
+                normal(0),
+                normal(0),
+                normal(0),
+            ]),
+        ),
+    ];
+
+    for (name, path) in cases {
+        assert_eq!(wallet.verify(&path, &spk), Verdict::Unscannable, "{name}");
+    }
+}
+
+/// A hardened final index is refused by the **type**, not by an inequality: `2^31` and above is
+/// exactly what `ChildNumber::Hardened` holds, so there is no off-by-one to get wrong.
+#[test]
+fn the_largest_normal_index_verifies_and_the_next_one_cannot_exist() {
+    let wallet = wallet(Network::Mainnet);
+    let largest = (1u32 << 31) - 1;
+    let (path, spk) = ours(&wallet, Family::Bip84, Branch::Change, largest);
+
+    assert_eq!(
+        wallet.verify(&path, &spk),
+        Verdict::Ours {
+            family: Family::Bip84,
+            branch: Branch::Change,
+            index: largest
+        }
+    );
+    assert!(wallet
+        .address(Family::Bip84, Branch::Change, 1 << 31)
+        .is_none());
+}
+
+/// The two networks and the two names, which `AOBS-R06`'s copy is assembled from.
+#[test]
+fn the_network_names_itself_and_the_other_one() {
+    assert_eq!(Network::Mainnet.other(), Network::Testnet);
+    assert_eq!(Network::Testnet.other(), Network::Mainnet);
+    assert_eq!(Network::Mainnet.name(), "mainnet");
+    assert_eq!(Network::Testnet.name(), "testnet or signet");
+    assert_ne!(Network::Mainnet.name(), Network::Testnet.name());
 }

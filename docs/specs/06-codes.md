@@ -126,6 +126,7 @@ Structural, from `02-core.md` §7:
 | `AOBS-R06` | No input re-derives to our own key material. **Four copy variants, one code** — the passphrase, account 0, the loaded network, and the coin-type mismatch (`02-core.md` §7). |
 | `AOBS-R07` | An output we cannot render as an address. |
 | `AOBS-R15` | More than six outputs, payment and change counted together — the review panel is non-scrolling and holds six rows in the minimum canvas ([#58](https://github.com/allisson/aobs/issues/58)). Numbered after `R14` rather than beside the other structural refusals, because the registry is sequential and never renumbered for tidiness. |
+| `AOBS-R16` | The inputs sum to more than 21 000 000 BTC. Consensus caps the supply, so such a transaction describes UTXOs that cannot exist — and a taproot input carries only its `witness_utxo`, which nothing cross-checks, so two of them claiming `u64::MAX` would overflow every number the review panel is about ([#80](https://github.com/allisson/aobs/issues/80)). Numbered after `R15` for the same reason `R15` is where it is. |
 
 From the derivation check:
 
@@ -150,8 +151,9 @@ From backup restore (`02-core.md` §11, `04-screens.md` §10):
 | `AOBS-R14` | The Poly1305 tag does not authenticate — a wrong password, or a damaged file, and the copy must not claim to know which. |
 
 #58's output-count refusal landed as `AOBS-R15`, above — the next free number at the time, listed with
-the structural refusals it belongs to rather than renumbered into their block. The sequence records the
-order decisions were made; the table's grouping is for reading.
+the structural refusals it belongs to rather than renumbered into their block, and #80's amount bound
+landed as `AOBS-R16` the same way. The sequence records the order decisions were made; the table's
+grouping is for reading.
 
 ## 7. The registry is enforced by tests, not by discipline
 
@@ -181,10 +183,11 @@ the prose above literally and find it does not hold:
   relation is total in both directions, and the enforced form is: every code a refusal can carry
   has at least one case, and every case names a code this file defines.
 - **The direction that needs every code implemented is deferred, not weakened.** A `PENDING`
-  list names each code whose refusal does not exist yet and the ticket that owes it — `R06`,
-  `R08`, `R09` to [#80](https://github.com/allisson/aobs/issues/80), `R10` and `R11` to
-  [#77](https://github.com/allisson/aobs/issues/77), `R12`–`R14` to
-  [#85](https://github.com/allisson/aobs/issues/85) — and a test asserts that the implemented
+  list names each code whose refusal does not exist yet and the ticket that owes it — `R10` and
+  `R11` to [#77](https://github.com/allisson/aobs/issues/77), `R12`–`R14` to
+  [#85](https://github.com/allisson/aobs/issues/85). `R06`, `R08` and `R09` left the list with
+  [#80](https://github.com/allisson/aobs/issues/80), which added `R16` already implemented and so
+  never on it — and a test asserts that the implemented
   codes and the pending ones together are **exactly** §6's tables. A code added to §6 that is
   neither implemented nor owed fails it; so does a code left on the pending list after its
   refusal ships. The list only ever shrinks, and it is empty at the release gate.
