@@ -87,6 +87,12 @@ the shell or is deleted.
   inside its fixed arrays. The first half is the type-back's whole safety claim, asserted
   against sequences nobody wrote a case for; the second is because an out-of-bounds index in a
   reducer is a session ending mid-transcription.
+- **No sequence of scanned symbols escapes the transport bounds.** For any sequence of QR
+  symbols — parts from an honest animation, parts forged field by field, and text that is not a UR
+  at all — every outcome a `ur::Scanner` produces is inside `03-transport.md` §3's bounds: a
+  clamped `seqLen` at most 64, fragments resolved never above it, parts taken in never past the
+  budget, and an accepted payload inside its class's length rule. It is `05` §4's first fuzz
+  target's assertion, running on every commit rather than in the nightly job.
 - **The outbound animation never refuses.** For every message length, at the fragment length
   `03-transport.md` §9 settles, no emitted part exceeds v27-L's 2 132-character budget — charging the
   sequence number its full `u32` width rather than the one it happens to be emitted at. This is the
@@ -110,6 +116,22 @@ Three we write, one we skip, one deliberate exception.
 5. **Deliberate exception: the address-verification path gets no fuzz target.** Its "parser" is a
    prefix strip, a truncate and two comparisons — all total, allocation-free and non-indexing. A fuzz
    target would be exercising `str::eq`. What earns its place instead is corpus entries (§5).
+
+**All three targets exist** as of [#77](https://github.com/allisson/aobs/issues/77), which brought
+the transport layer the first one wraps; the other two arrived with
+[#79](https://github.com/allisson/aobs/issues/79) and
+[#80](https://github.com/allisson/aobs/issues/80). `ci/check-fuzz.sh` runs every target
+`cargo fuzz list` reports rather than a list written in the script, so target four is a file and
+not an edit here.
+
+**The fountain target's `no allocation above the transport bounds` is two halves, and the split is
+deliberate.** `-malloc_limit_mb` aborts on a single allocation above the limit, which is what
+catches `03-transport.md` §1's 34 GB claim on the spot. The assertions in the target are the other
+half and they hold the *outcomes* to the bounds — a clamped `seqLen` above 64, more parts taken in
+than the budget, a message past 64 KiB — so a clamp that stopped clamping fails even when the
+allocation it admitted was small enough to slip under the limit. The same claim also runs on every
+commit as a property test in `aobs-core`, because the fuzz gate is a nightly job and a regression
+should not wait for it.
 
 ## 5. The adversarial corpus
 

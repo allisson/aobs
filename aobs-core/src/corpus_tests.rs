@@ -3,8 +3,15 @@
 //!
 //! **A checked-in regression suite, not fuzz seeds.** Every refusal gets a named case, the name
 //! is the code, and each case asserts the `AOBS-R##` its refusal carries. It lives at the crate
-//! root rather than beside one module because the registry does: `R10`/`R11` are the QR
-//! boundary's, `R12`–`R14` are the backup's, and they will add their cases to the same table.
+//! root rather than beside one module because the registry does: the structural refusals are
+//! `psbt`'s and `R10`/`R11` are `ur`'s, both tabled here, and `R12`–`R14` are the backup's and
+//! will join them.
+//!
+//! **Two tables, because the two halves end differently.** [`CASES`] runs hostile bytes through
+//! `psbt::validate`, where every case is a refusal. [`TRANSPORT_CASES`] runs scanned symbols
+//! through a `ur::Scanner`, where §5's own list includes a bound that **accepts** (the 64 KiB
+//! boundary, exactly at the limit) and several that drop with no code at all — so the outcome,
+//! not the code, is what a transport case asserts.
 //!
 //! **Two readings this file settles, both stated because a later reader would otherwise have to
 //! guess.**
@@ -36,6 +43,7 @@ use crate::bip39::Mnemonic;
 use crate::derive::{Branch, Family, Network, Wallet};
 use crate::psbt::{validate, Refusal, Rejection};
 use crate::secret::{Entropy, Passphrase};
+use crate::ur::{Class, Outcome, Scanner, PART_BUDGET};
 
 // --- the fixture -------------------------------------------------------------------------
 
@@ -744,6 +752,264 @@ fn foreign_script_case(spk: ScriptBuf) -> Vec<u8> {
     psbt.serialize()
 }
 
+// --- the QR boundary's fixtures ----------------------------------------------------------
+//
+// The cases that matter here are the ones no honest encoder emits — a `seqLen` of
+// `0xFFFFFFFF`, a part whose `messageLen` disagrees with the stream it joined — so the part
+// CBOR is written by hand. `ur::Encoder` cannot be asked for a part that lies.
+
+/// A CBOR unsigned integer at its minimal width, which is what `minicbor`'s `.u32()` writes and
+/// therefore what `ur.rs`'s own reader has to agree with.
+fn uint(value: u64, out: &mut Vec<u8>) {
+    match value {
+        0..=0x17 => out.push(u8::try_from(value).expect("under 0x18")),
+        0x18..=0xff => out.extend_from_slice(&[0x18, u8::try_from(value).expect("under 0x100")]),
+        0x100..=0xffff => {
+            out.push(0x19);
+            out.extend_from_slice(&u16::try_from(value).expect("under 0x10000").to_be_bytes());
+        }
+        _ => {
+            out.push(0x1a);
+            out.extend_from_slice(&u32::try_from(value).expect("under 2^32").to_be_bytes());
+        }
+    }
+}
+
+/// A CBOR definite-length byte-string header.
+fn bytes_header(len: usize, out: &mut Vec<u8>) {
+    match len {
+        0..=0x17 => out.push(0x40 | u8::try_from(len).expect("under 0x18")),
+        0x18..=0xff => out.extend_from_slice(&[0x58, u8::try_from(len).expect("under 0x100")]),
+        _ => {
+            out.push(0x59);
+            out.extend_from_slice(&u16::try_from(len).expect("under 0x10000").to_be_bytes());
+        }
+    }
+}
+
+/// One multi-part `ur:crypto-psbt`, with every field of `fountain::Part`'s CBOR array under the
+/// caller's control — including the three a stream's identity is pinned on.
+pub(crate) fn part(
+    seq: usize,
+    seq_len: usize,
+    message_len: usize,
+    checksum: u32,
+    data: &[u8],
+) -> String {
+    let mut cbor = vec![0x85];
+    uint(seq as u64, &mut cbor);
+    uint(seq_len as u64, &mut cbor);
+    uint(message_len as u64, &mut cbor);
+    uint(u64::from(checksum), &mut cbor);
+    bytes_header(data.len(), &mut cbor);
+    cbor.extend_from_slice(data);
+
+    format!(
+        "ur:crypto-psbt/{seq}-{seq_len}/{}",
+        ur::bytewords::encode(&cbor, ur::bytewords::Style::Minimal)
+    )
+}
+
+/// A multi-part `ur:crypto-psbt` whose body is exactly these CBOR bytes — for the cases whose
+/// subject is the part CBOR itself rather than the values in it.
+pub(crate) fn raw_part(indices: &str, cbor: &[u8]) -> String {
+    format!(
+        "ur:crypto-psbt/{indices}/{}",
+        ur::bytewords::encode(cbor, ur::bytewords::Style::Minimal)
+    )
+}
+
+/// A real animation over `message`, which is the only way to get parts whose checksum and
+/// padding the fountain decoder will actually accept.
+pub(crate) fn stream(
+    ur_type: &str,
+    message: &[u8],
+    max_fragment_length: usize,
+    count: usize,
+) -> Vec<String> {
+    let mut encoder = ur::Encoder::new(message, max_fragment_length, ur_type).expect("a message");
+    (0..count)
+        .map(|_| encoder.next_part().expect("a part"))
+        .collect()
+}
+
+/// The single-part form of `message` — `03-transport.md` §6's *"an animation of length one that
+/// happens not to move"*, which arrives with no `seq` component at all.
+pub(crate) fn single(ur_type: &str, message: &[u8]) -> String {
+    ur::ur::encode(message, &ur::Type::Custom(ur_type))
+}
+
+/// A message whose bytes are not all the same, so a fragment that lands in the wrong slot
+/// cannot pass unnoticed.
+pub(crate) fn transport_message(len: usize) -> Vec<u8> {
+    (0..len)
+        .map(|i| u8::try_from(i % 251).expect("under 251"))
+        .collect()
+}
+
+/// The checksum a real animation put in its parts, so a hand-built part can disagree with a
+/// stream on exactly one field.
+pub(crate) fn checksum_of(symbol: &str) -> u32 {
+    let (_, body) = symbol
+        .strip_prefix("ur:")
+        .and_then(|rest| rest.split_once('/'))
+        .expect("a UR");
+    let (_, payload) = body.rsplit_once('/').expect("a multi-part UR");
+    let cbor = ur::bytewords::decode(payload, ur::bytewords::Style::Minimal).expect("bytewords");
+
+    // `[0x85, seq, seqLen, messageLen, checksum, data]`, every integer minimal.
+    let mut at = 1usize;
+    for _ in 0..3 {
+        at += 1 + uint_width(cbor[at]);
+    }
+    let head = cbor[at];
+    at += 1;
+    match head {
+        0..=0x17 => u32::from(head),
+        0x18 => u32::from(cbor[at]),
+        0x19 => u32::from(u16::from_be_bytes([cbor[at], cbor[at + 1]])),
+        _ => u32::from_be_bytes([cbor[at], cbor[at + 1], cbor[at + 2], cbor[at + 3]]),
+    }
+}
+
+fn uint_width(head: u8) -> usize {
+    match head {
+        0..=0x17 => 0,
+        0x18 => 1,
+        0x19 => 2,
+        0x1a => 4,
+        _ => 8,
+    }
+}
+
+// --- the QR boundary's cases -------------------------------------------------------------
+
+/// How a transport case must end.
+///
+/// Unlike the PSBT cases, not every one of `05-testing-and-release.md` §5's transport cases is a
+/// refusal: the bounds in `03-transport.md` §3 that carry no code drop the symbol and leave the
+/// screen live (`06-codes.md` §4), and the 64 KiB boundary's *exactly at the limit* half is an
+/// **acceptance**. A table that could only express refusals would have to leave those out.
+pub(crate) enum Expect {
+    /// The stream completes and the payload arrives.
+    Accepted,
+    /// The symbol is dropped with no code and the scan stays live.
+    Discarded,
+    /// A refusal carrying this `AOBS-R##`.
+    Refused(&'static str),
+}
+
+/// One named transport case: the class the screen asked for, the symbols in the order they are
+/// scanned, and how the last one must end.
+pub(crate) struct TransportCase {
+    /// What the case is, in the words §5 uses for it.
+    pub name: &'static str,
+    /// The class the screen asked for — which for the wrong-class cases is the whole subject.
+    pub expected: Class,
+    /// The symbols, scanned in order into one [`Scanner`].
+    pub symbols: fn() -> Vec<String>,
+    /// How the last symbol must end.
+    pub last: Expect,
+}
+
+/// The transport corpus, from `05-testing-and-release.md` §5's own list.
+pub(crate) const TRANSPORT_CASES: &[TransportCase] = &[
+    TransportCase {
+        name: "a frame declaring seqLen = 0xFFFFFFFF",
+        expected: Class::Psbt,
+        // The body need not even be bytewords: the claim is refused on the decimal in the URI
+        // path, which is what *before any part reaches `ur`* means for this bound.
+        symbols: || vec!["ur:crypto-psbt/1-4294967295/aeaeaeae".to_owned()],
+        last: Expect::Discarded,
+    },
+    TransportCase {
+        name: "a part with an inconsistent seqLen",
+        expected: Class::Psbt,
+        symbols: inconsistent_sequence_count,
+        last: Expect::Discarded,
+    },
+    TransportCase {
+        name: "a part with an inconsistent messageLen",
+        expected: Class::Psbt,
+        symbols: inconsistent_message_length,
+        last: Expect::Discarded,
+    },
+    TransportCase {
+        name: "a part disagreeing with an established stream's identity",
+        expected: Class::Psbt,
+        symbols: foreign_checksum,
+        last: Expect::Discarded,
+    },
+    TransportCase {
+        name: "a stream feeding valid parts past the 1,024-part budget without completing",
+        expected: Class::Psbt,
+        symbols: budget_exhausted,
+        last: Expect::Refused("AOBS-R11"),
+    },
+    TransportCase {
+        name: "the 64 KiB boundary, exactly at the limit",
+        expected: Class::Psbt,
+        symbols: || stream("crypto-psbt", &transport_message(64 * 1024), 2_048, 32),
+        last: Expect::Accepted,
+    },
+    TransportCase {
+        name: "the 64 KiB boundary, one byte over",
+        expected: Class::Psbt,
+        // Same fragment length as the row above, so `messageLen` is the only field that
+        // differs — at a smaller fragment the `seqLen` bound would trip first and the case
+        // would be asserting the wrong thing.
+        symbols: || stream("crypto-psbt", &transport_message(64 * 1024 + 1), 2_048, 33),
+        last: Expect::Discarded,
+    },
+    TransportCase {
+        name: "a wrong-class payload at the signing prompt",
+        expected: Class::Psbt,
+        symbols: || vec!["bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4".to_owned()],
+        last: Expect::Refused("AOBS-R10"),
+    },
+    TransportCase {
+        name: "a wrong-class payload at the address prompt",
+        expected: Class::Address,
+        symbols: || vec![single("crypto-psbt", b"a transaction")],
+        last: Expect::Refused("AOBS-R10"),
+    },
+    TransportCase {
+        name: "a wrong-class payload at the restore prompt",
+        expected: Class::Backup,
+        symbols: || vec![single("crypto-psbt", b"a transaction")],
+        last: Expect::Refused("AOBS-R10"),
+    },
+];
+
+/// A real first part, then a hand-built second one differing only in `seqLen`.
+fn inconsistent_sequence_count() -> Vec<String> {
+    let parts = stream("crypto-psbt", &transport_message(4_000), 1_000, 1);
+    let checksum = checksum_of(&parts[0]);
+    vec![parts[0].clone(), part(2, 8, 4_000, checksum, &[0u8; 1_000])]
+}
+
+/// The same, differing only in `messageLen`.
+fn inconsistent_message_length() -> Vec<String> {
+    let parts = stream("crypto-psbt", &transport_message(4_000), 1_000, 1);
+    let checksum = checksum_of(&parts[0]);
+    vec![parts[0].clone(), part(2, 4, 4_001, checksum, &[0u8; 1_000])]
+}
+
+/// The same, differing only in the message checksum — the field a stream's identity rests on
+/// that neither decimal in the URI path can carry.
+fn foreign_checksum() -> Vec<String> {
+    let parts = stream("crypto-psbt", &transport_message(4_000), 1_000, 1);
+    let checksum = checksum_of(&parts[0]).wrapping_add(1);
+    vec![parts[0].clone(), part(2, 4, 4_000, checksum, &[0u8; 1_000])]
+}
+
+/// Sequence 1 of a four-part stream, over and over: well-formed, consistent with the stream's
+/// identity, and never completing it. This is the shape fountain coding makes free.
+fn budget_exhausted() -> Vec<String> {
+    let parts = stream("crypto-psbt", &transport_message(4_000), 1_000, 1);
+    vec![parts[0].clone(); PART_BUDGET + 1]
+}
+
 // --- the registry ------------------------------------------------------------------------
 
 /// `06-codes.md` §6's refusal space, read from the file itself rather than copied into a
@@ -756,8 +1022,6 @@ const REGISTRY: &str = include_str!("../../docs/specs/06-codes.md");
 /// — the derivation check, the QR boundary, the backup — rather than a case somebody forgot to
 /// write.
 const PENDING: &[(&str, &str)] = &[
-    ("AOBS-R10", "#77 — the payload-class check"),
-    ("AOBS-R11", "#77 — the 1,024-part budget"),
     ("AOBS-R12", "#85 — an unknown backup version byte"),
     ("AOBS-R13", "#85 — a malformed backup header"),
     ("AOBS-R14", "#85 — the Poly1305 tag"),
@@ -791,12 +1055,29 @@ fn sorted_unique(codes: impl IntoIterator<Item = &'static str>) -> Vec<&'static 
     codes
 }
 
+/// Every code a refusal in this crate can carry, from both spaces that produce one: the
+/// rejection policy's and the QR boundary's.
 fn implemented_codes() -> Vec<&'static str> {
-    sorted_unique(Refusal::ALL.iter().map(|refusal| refusal.code()))
+    sorted_unique(
+        Refusal::ALL
+            .iter()
+            .map(|refusal| refusal.code())
+            .chain(crate::ur::Refusal::ALL.iter().map(|refusal| refusal.code())),
+    )
 }
 
 fn corpus_codes() -> Vec<&'static str> {
-    sorted_unique(CASES.iter().map(|case| case.code))
+    sorted_unique(
+        CASES
+            .iter()
+            .map(|case| case.code)
+            .chain(TRANSPORT_CASES.iter().filter_map(|case| match case.last {
+                Expect::Refused(code) => Some(code),
+                // The bounds that drop rather than refuse are cases with no code to contribute
+                // (`06-codes.md` §4), and so is the acceptance half of the 64 KiB boundary.
+                Expect::Accepted | Expect::Discarded => None,
+            })),
+    )
 }
 
 // --- the tests ---------------------------------------------------------------------------
@@ -820,9 +1101,45 @@ fn every_case_refuses_with_its_code() {
 }
 
 #[test]
+fn every_transport_case_ends_as_it_says() {
+    // One scanner per case, fed the case's symbols in order — which is the point of several of
+    // them: a part disagreeing with an established stream is only a case if a stream was
+    // established first.
+    for case in TRANSPORT_CASES {
+        let mut scanner = Scanner::new(case.expected);
+        let symbols = (case.symbols)();
+        assert!(!symbols.is_empty(), "{}: no symbols", case.name);
+
+        let outcome = symbols
+            .iter()
+            .map(|symbol| scanner.receive(symbol))
+            .last()
+            .expect("a symbol");
+
+        match (&case.last, &outcome) {
+            (Expect::Accepted, Outcome::Complete(_))
+            | (Expect::Discarded, Outcome::Discarded(_)) => {}
+            (Expect::Refused(code), Outcome::Refused(refusal)) => {
+                assert_eq!(refusal.code(), *code, "{}: {refusal:?}", case.name);
+            }
+            _ => panic!("{} ended as {outcome:?}", case.name),
+        }
+    }
+}
+
+#[test]
 fn case_names_are_distinct() {
-    let names = sorted_unique(CASES.iter().map(|case| case.name));
-    assert_eq!(names.len(), CASES.len(), "two cases share a name");
+    let names = sorted_unique(
+        CASES
+            .iter()
+            .map(|case| case.name)
+            .chain(TRANSPORT_CASES.iter().map(|case| case.name)),
+    );
+    assert_eq!(
+        names.len(),
+        CASES.len() + TRANSPORT_CASES.len(),
+        "two cases share a name"
+    );
 }
 
 #[test]

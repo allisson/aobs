@@ -101,6 +101,51 @@ mode — giving up on a slow but honest scan — to buy nothing the parts cap do
 
 Both are spec requirements alongside the bounds in §3, not implementation hygiene.
 
+## 4a. What building §2–§4 settled
+
+**The tree carries §2, §3 and §4** as of [#77](https://github.com/allisson/aobs/issues/77):
+`aobs-core/src/ur.rs` is one `Scanner`, built for one class, and the whole of those three sections
+is its `receive`. Five things the prose above did not answer are recorded here rather than left in
+the code for a later reader to rediscover.
+
+**`ur` will not let a part be inspected between parsing and reception.** `fountain::Part` is
+constructible only inside the crate — `from_cbor`, `sequence` and `sequence_count` are
+`pub(crate)`, and `message_length` and `checksum` have no accessor at all. So *before any part
+reaches `ur`* is unimplementable through the dependency's own types, and the clamp reads the
+part's four header fields out of its CBOR itself. The `seqLen` clamp needs none of that — it is
+the decimal in the URI path, checked with no allocation at all, and it is the one the 34 GB claim
+turns on.
+
+**Two readers reading one field is only safe if they cannot disagree**, and this pair cannot: both
+take the same byte at the same offset under the same five CBOR width rules, so a non-minimal or
+eight-byte encoding reads identically in both. That is what lets the bound checked on the
+*declared* `messageLen` stand for the *delivered* message with no second check downstream — the
+dependency truncates the reassembly to the same field. Where the two readers do differ is that
+ours stops after the fourth field and never looks at the fragment, so it can compute a header for
+a part the dependency then refuses. That is handled, and it is the next point.
+
+**§4's *accepted* is load-bearing, and reading it as *received* is an attack.** A header inside
+every bound whose fragment the fountain decoder refuses must leave no trace: pinning the stream's
+identity on it would let one hostile frame claim the stream and lock the honest animation out of
+the scan for as long as the user kept aiming at it. The pin happens after `receive` returns `Ok`,
+never before.
+
+**A fifth bound is not added, and the symbol length is not one.** §3 orders the `messageLen` bound
+*before* the decoder, and a bound read out of the CBOR has already paid for the bytewords
+allocation that produced the CBOR. So the same bound is applied first to the only form the symbol
+has before we are allowed to decode it — bytewords minimal is two characters per byte plus a
+doubled CRC-32 — and the number is **derived from the 64 KiB bound rather than chosen**. It is
+§3's first bound enforced as early as it can be, which is also what makes the fountain fuzz
+target's *no allocation above the transport bounds* true of an arbitrary `&str` and not only of
+something a QR could carry.
+
+**One dead end is recorded rather than fixed.** A stream that completes into something the
+dependency refuses — nonzero padding, or a message failing its own CRC-32 — leaves that scanner
+unable to complete ever again: the decoder stays complete and its message stays bad, so the screen
+stays live and discards everything after. No honest encoder can produce it and the remedy is
+cancel and re-enter. Resetting the decoder mid-scan would be a decision §4 does not make, so it is
+named here instead of invented there.
+
 ## 5. Capture
 
 - **`v4l` directly** (raw V4L2 ioctls, default features, no `libv4l` on the image), decoded with

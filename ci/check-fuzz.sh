@@ -1,11 +1,12 @@
 #!/bin/sh
 # The fuzz gate (05-testing-and-release.md §4).
 #
-# §4 names three targets we write ourselves. One of them exists — the PSBT parser on raw
-# bytes (#79); the other two arrive with the code they fuzz. The gate was wired before any
-# of them, on a placeholder, so that the first real target was a file and not a toolchain
-# investigation — and that is why this runs every target `cargo fuzz list` reports rather
-# than a name written here: adding a target must not also mean editing this script.
+# §4 names three targets we write ourselves and all three now exist — the PSBT parser on
+# raw bytes and the validator (#79, #80), and the fountain decoder through our clamping
+# wrapper (#77). The gate was wired before any of them, on a placeholder, so that the first
+# real target was a file and not a toolchain investigation — and that is why this runs every
+# target `cargo fuzz list` reports rather than a name written here: adding a target must not
+# also mean editing this script.
 #
 # A separate gate from the test run and from coverage, because §1 says coverage is
 # necessary and not sufficient: the fuzz targets are not a subset of the coverage run.

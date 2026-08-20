@@ -27,8 +27,8 @@ bitcoin = "0.32"
 arbitrary = { version = "1", features = ["derive"] }
 
 # §4's three targets all fuzz core: the fountain decoder through our clamping wrapper, the
-# PSBT parser on raw bytes, and the validator seeded with our own key material. The last
-# two are here; the fountain decoder arrives with the transport layer it wraps (#77).
+# PSBT parser on raw bytes, and the validator seeded with our own key material. All three
+# are here as of #77, which brought the transport layer the first one wraps.
 [dependencies.aobs-core]
 path = "../aobs-core"
 
@@ -37,6 +37,13 @@ path = "../aobs-core"
 # abort — this one included.
 [profile.release]
 panic = "unwind"
+
+[[bin]]
+name = "fountain_decode"
+path = "fuzz_targets/fountain_decode.rs"
+test = false
+doc = false
+bench = false
 
 [[bin]]
 name = "psbt_parse"

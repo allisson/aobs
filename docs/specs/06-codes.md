@@ -183,11 +183,17 @@ the prose above literally and find it does not hold:
   relation is total in both directions, and the enforced form is: every code a refusal can carry
   has at least one case, and every case names a code this file defines.
 - **The direction that needs every code implemented is deferred, not weakened.** A `PENDING`
-  list names each code whose refusal does not exist yet and the ticket that owes it — `R10` and
-  `R11` to [#77](https://github.com/allisson/aobs/issues/77), `R12`–`R14` to
-  [#85](https://github.com/allisson/aobs/issues/85). `R06`, `R08` and `R09` left the list with
-  [#80](https://github.com/allisson/aobs/issues/80), which added `R16` already implemented and so
-  never on it — and a test asserts that the implemented
+  list names each code whose refusal does not exist yet and the ticket that owes it — now
+  `R12`–`R14`, all to [#85](https://github.com/allisson/aobs/issues/85). `R06`, `R08` and `R09`
+  left the list with [#80](https://github.com/allisson/aobs/issues/80), which added `R16` already
+  implemented and so never on it, and `R10` and `R11` left it with
+  [#77](https://github.com/allisson/aobs/issues/77) — and a test asserts that the implemented
   codes and the pending ones together are **exactly** §6's tables. A code added to §6 that is
   neither implemented nor owed fails it; so does a code left on the pending list after its
   refusal ships. The list only ever shrinks, and it is empty at the release gate.
+- **The corpus is two tables, because the QR boundary's cases do not all end in a refusal.**
+  `05-testing-and-release.md` §5's transport list includes the 64 KiB boundary *exactly at the
+  limit*, which is an **acceptance**, and several bounds that drop the symbol with no code at all
+  (§4 above). So a transport case states the outcome it expects rather than only a code, and only
+  the refusing ones contribute to the bijection. A table that could express refusals alone would
+  have had to leave §5's own cases out.
