@@ -23,7 +23,9 @@ use slint::ComponentHandle;
 
 use crate::confirm::Confirm;
 use crate::create::Create;
+use crate::load::Load;
 use crate::power;
+use crate::session::Session;
 use crate::{AppWindow, Intent, Screen};
 
 /// How the session ended, and therefore how the process exits.
@@ -65,7 +67,13 @@ impl Ending {
 /// event loop: `slint::quit_event_loop` is what ends `ui.run()`, and it carries nothing.
 /// `None` after the loop returns is 06-codes.md §5's `AOBS-E03` — a loop that ended without
 /// anyone asking it to.
-pub fn wire(ui: &AppWindow, create: Rc<Create>, confirm: Rc<Confirm>) -> Rc<Cell<Option<Ending>>> {
+pub fn wire(
+    ui: &AppWindow,
+    create: Rc<Create>,
+    confirm: Rc<Confirm>,
+    load: Rc<Load>,
+    session: Rc<Session>,
+) -> Rc<Cell<Option<Ending>>> {
     let ending = Rc::new(Cell::new(None));
 
     let sink = ending.clone();
@@ -98,6 +106,20 @@ pub fn wire(ui: &AppWindow, create: Rc<Create>, confirm: Rc<Confirm>) -> Rc<Cell
             // The other two start entries. Their screens arrive in later slices.
             Intent::Import | Intent::Restore => ui.set_screen(Screen::Unbuilt),
 
+            // 04-screens.md §5's confirm, and the one place a wallet comes into existence. The
+            // arm is still a destination: `confirm` derives, hands the session its one wallet
+            // and shows §7's hub, and nothing here reads the passphrase, the network or the
+            // fingerprint that comes back.
+            Intent::LoadConfirm => load.confirm(&ui),
+
+            // §7's four actions. One destination for four intents, because they *have* one
+            // destination in this build — the frame names what the user asked for and says so
+            // rather than swallowing the press (standing rule 8), and each of them becomes its
+            // own arm when its screen exists.
+            Intent::WatchOnly | Intent::Sign | Intent::VerifyAddress | Intent::BackupExport => {
+                ui.set_screen(Screen::Unbuilt)
+            }
+
             // §13's confirm, reached identically from the footer row and from the physical
             // button. Idempotent on purpose: a second press is not a faster path to
             // shutdown, so an accidental knock costs a press to undo rather than a session.
@@ -107,18 +129,19 @@ pub fn wire(ui: &AppWindow, create: Rc<Create>, confirm: Rc<Confirm>) -> Rc<Cell
             // to go back to — the start menu is where every path in this build begins, and
             // cancelling on it is a no-op rather than a hidden exit.
             //
-            // **This arm is correct only while no wallet can exist**, which is the state of
-            // this build: every screen it has is reachable from the start menu and none of
-            // them is behind a load. The slice that adds a screen reached *after* a wallet is
-            // loaded cannot keep this line, because 04-screens.md §13 rules that any *close
-            // the wallet and return to the start screen* is a switch wearing a different
-            // name — cancelling §13's confirm has to return to the screen the user was on.
-            //
             // The retype is the first screen with a nearer answer than the start menu, and
             // 04-screens.md §4 is why: cancelling out of it has to return to the phrase, with
             // the mark still on it, because the paper is what the user is holding.
+            //
+            // **And once a wallet exists the start menu is no longer an answer at all**, which
+            // is the change [#69](https://github.com/allisson/aobs/issues/69) predicted this arm
+            // would need: 04-screens.md §13 rules that any *close the wallet and return to the
+            // start screen* is a switch wearing a different name (ADR-0010), so Escape returns
+            // to §7's hub instead. On the hub itself that is the no-op cancelling on the start
+            // menu is — there is somewhere to go back to, and it is where you are.
             Intent::Cancel => match ui.get_screen() {
                 Screen::Retype => ui.set_screen(Screen::Words),
+                _ if session.loaded() => ui.set_screen(Screen::Identity),
                 _ => ui.set_screen(Screen::Start),
             },
 

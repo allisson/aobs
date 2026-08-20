@@ -35,6 +35,18 @@ export enum Intent {
     create-done,
     import,
     restore,
+    // 04-screens.md §5's one confirm. Which of the two things it is — *continue without
+    // passphrase* or *use this passphrase* — is stated by the label the user pressed, and is
+    // not a second intent: the passphrase is a value the screen holds, and no value crosses
+    // here (standing rule 4).
+    load-confirm,
+    // §7's hub, and the four actions it offers. Each is a screen a later slice brings; naming
+    // them here rather than routing all four through one anonymous intent is what keeps *the
+    // frame names the intent* true, even while they share a destination.
+    watch-only,
+    sign,
+    verify-address,
+    backup-export,
     session-end,
     shut-down,
     restart,
@@ -49,6 +61,8 @@ export enum Screen {
     dice,
     words,
     retype,
+    load,
+    identity,
     unbuilt,
     ending,
 }
@@ -72,6 +86,15 @@ export struct Slot {
     text: string,
     ghost: string,
     current: bool,
+}
+
+// One of the four accounts, as the identity screen states it (04-screens.md §7). Three
+// columns because they are three different facts about one account and the eye reads them
+// down: which BIP it is, the script type §7 names, and the path a coordinator will ask for.
+export struct Account {
+    family: string,
+    script: string,
+    path: string,
 }
 
 // The numbers the frame lays itself out with, in one place because one of them is an owed
@@ -118,6 +141,13 @@ component Choice inherits Rectangle {
     in property <string> note;
     in property <bool> available: true;
     in property <bool> current: false;
+    // A selector row (04-screens.md §5.2), which needs a signal for something no other row has:
+    // *what the appliance will use*, which is not the same fact as *where the cursor is*. Two
+    // independent facts need two independent signals, so `current` keeps the border and the
+    // weight and `chosen` gets a disc of its own — a shape rather than a glyph, for the reason
+    // the retype's caret is a 2 px rule.
+    in property <bool> mark: false;
+    in property <bool> chosen: false;
 
     height: 66px;
     border-radius: 4px;
@@ -133,11 +163,30 @@ component Choice inherits Rectangle {
             alignment: center;
             spacing: 4px;
 
-            Text {
-                text: root.label;
-                color: root.available ? Palette.ink : Palette.ink-dim;
-                font-size: 19px;
-                font-weight: root.current ? 600 : 400;
+            HorizontalLayout {
+                alignment: start;
+                spacing: root.mark ? 10px : 0px;
+
+                VerticalLayout {
+                    alignment: center;
+
+                    Rectangle {
+                        visible: root.mark;
+                        width: root.mark ? 13px : 0px;
+                        height: root.mark ? 13px : 0px;
+                        border-radius: 7px;
+                        border-width: 2px;
+                        border-color: root.chosen ? Palette.focus : Palette.ink-dim;
+                        background: root.chosen ? Palette.focus : Palette.panel;
+                    }
+                }
+
+                Text {
+                    text: root.label;
+                    color: root.available ? Palette.ink : Palette.ink-dim;
+                    font-size: 19px;
+                    font-weight: root.current ? 600 : 400;
+                }
             }
 
             Text {
@@ -522,8 +571,309 @@ component RetypeScreen inherits Rectangle {
     }
 }
 
+// 04-screens.md §5. **One screen, always present, on every load path** — created, imported or
+// restored. It carries the two parameters that enter at derivation rather than at generation,
+// and the rejected alternative is a menu branch ("load wallet" / "load wallet with
+// passphrase"): a branch is where people take the wrong one, and it makes the passphrase feel
+// like a mode rather than a field.
+//
+// **The network sits above the passphrase and that order is forced**, not preferred: the
+// confirm control's label is a function of whether the field is empty, so the passphrase has to
+// be the last thing touched before confirming. A selector below it would be reached after the
+// label had already settled.
+//
+// The heights add up, against the 458 px the chrome leaves inside the 800×600 floor — the same
+// sum §3's `AOBS_WORDS` line takes for the words screen:
+//
+//   34 heading + 14 + 38 copy + 14 + 150 network + 14 + 100 field + 14 + 66 confirm = 444
+//
+// The field is two lines of 26 px because 128 characters and two delimiters at 17 px monospace
+// are about 1,330 px against the floor's ~752 px of usable width, so a full-length passphrase
+// wraps exactly once and can wrap no further: three lines would need a monospace advance wider
+// than the type size.
+component LoadScreen inherits Rectangle {
+    in property <bool> testnet;
+    // Already rendered by the shell: delimited, and with every space drawn as a mark. This
+    // property is a string to *draw* and carries no structure for this file to interpret.
+    in property <string> passphrase;
+    in property <int> count;
+    in property <string> note;
+    in property <int> selected;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: 14px;
+
+        Heading {
+            text: "Load the wallet";
+        }
+
+        VerticalLayout {
+            spacing: 4px;
+
+            // §5.1: **the screen names the layout before the user starts.** The field is
+            // printable ASCII only and group 1 of `us` reaches all 95 of those characters, so on
+            // a German, French or Brazilian board nothing is unreachable — the legends are
+            // simply wrong. A stated fact beats a mystery under the fingers, and a picker was
+            // rejected because a wrongly-picked `de` imports dead keys, which is an *invisible*
+            // mode where a wrong legend is a visible one.
+            Text {
+                text: "US keyboard layout. Other boards reach every character; only the legends are wrong.";
+                color: Palette.ink-mid;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+
+            // The one line of copy that replaces the strength UI. No meter, no minimum, no
+            // double entry, no lecture (02-core.md §5).
+            Text {
+                text: "A passphrase is never checked and never recoverable.";
+                color: Palette.ink-mid;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+        }
+
+        // §5.2. **Two states, not three**: nothing in a key, an address or a descriptor
+        // distinguishes testnet from signet, so a third state would be a label with no derivable
+        // consequence. Mainnet is preselected and the pick is not forced — the user can confirm
+        // straight through. The copy states what the selection is for and nothing else: no
+        // advice, and no confirmation step for choosing testnet.
+        VerticalLayout {
+            spacing: 8px;
+
+            Text {
+                text: "Network";
+                color: Palette.ink-dim;
+                font-size: 13px;
+            }
+
+            Choice {
+                height: 58px;
+                mark: true;
+                chosen: !root.testnet;
+                label: "Mainnet";
+                note: "Real coins.";
+                current: root.selected == 0;
+            }
+
+            Choice {
+                height: 58px;
+                mark: true;
+                chosen: root.testnet;
+                label: "Testnet / signet";
+                note: "For rehearsal. Coins on it are not real.";
+                current: root.selected == 1;
+            }
+        }
+
+        // §5.1. **Clear text, always, no toggle**, and rendering is the mitigation: fixed-width,
+        // spaces drawn as a visible mark, explicit start and end delimiters, character count
+        // shown, never trimmed. Masked-with-a-reveal-toggle is the worst of the three shapes,
+        // because it makes clear text an opt-in that a hurrying user skips.
+        //
+        // Not a ring row. There is exactly one field on this screen, so every printable key
+        // lands in it whichever row the cursor is on — which is why the line below says so
+        // rather than leaving the user to discover it.
+        VerticalLayout {
+            spacing: 6px;
+
+            Text {
+                text: "Passphrase — optional. Every printable key lands here; Backspace removes one.";
+                color: Palette.ink-dim;
+                font-size: 13px;
+            }
+
+            Text {
+                text: root.passphrase;
+                color: Palette.ink;
+                font-family: "DejaVu Sans Mono";
+                font-size: 17px;
+                height: 52px;
+                vertical-alignment: top;
+                wrap: char-wrap;
+            }
+
+            // The count, and the refusal line when there is one. A rejected keystroke says so
+            // (§5.1), and it takes this line rather than a line of its own, so the block's height
+            // is the same whether a key was refused or not.
+            Text {
+                text: root.note != ""
+                    ? root.note
+                    : root.count + " of 128 characters. Spaces show as ·, and nothing is trimmed.";
+                color: root.note != "" ? Palette.focus : Palette.ink-dim;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+        }
+
+        // §5.1: **the confirm control states which of the two is happening.** An accidental empty
+        // confirm cannot pass as a deliberate one, which is the whole job of this label.
+        Choice {
+            height: 66px;
+            label: root.count == 0 ? "Continue without passphrase" : "Use this passphrase";
+            note: root.count == 0
+                ? "The ordinary case. Your 24 words are the whole of the wallet."
+                : "The wallet comes from your 24 words and this passphrase together.";
+            current: root.selected == 2;
+        }
+    }
+}
+
+// 04-screens.md §7. **The hub**, shown after every load and reachable all session.
+//
+// Always in view: master fingerprint, network, script type, and whether a passphrase is in use.
+// The fingerprint is what a user with an existing wallet compares against their coordinator —
+// adequate here despite being a hint-only value for derivation, because here it faces a typo
+// rather than an attacker choosing collisions, and a typo cannot collide.
+//
+// **The network line stands alone and carries its weight by itself.** The fingerprint is
+// byte-identical on both networks (02-core.md §6), so it catches a passphrase typo and cannot
+// catch a network mistake; there is no second signal, which is why the copy states the network
+// in both directions and never as an absence.
+//
+// **Nothing else about a testnet session differs** — same chrome, same colours, no rehearsal
+// livery. A rehearsal has to look identical to the real thing or it is not a rehearsal, and a
+// mode dressed as a toy would teach the user to click through the exact ceremony we want
+// rehearsed.
+//
+//   130 facts + 14 + 240 actions = 384, against the floor's 458.
+component IdentityScreen inherits Rectangle {
+    in property <string> fingerprint;
+    in property <bool> testnet;
+    in property <bool> passphrase-in-use;
+    in property <[Account]> accounts;
+    in property <bool> camera;
+    in property <int> selected;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: 14px;
+
+        VerticalLayout {
+            spacing: 6px;
+
+            HorizontalLayout {
+                alignment: start;
+                spacing: 12px;
+
+                Text {
+                    text: "Master fingerprint";
+                    color: Palette.ink-dim;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: root.fingerprint;
+                    color: Palette.ink;
+                    font-family: "DejaVu Sans Mono";
+                    font-size: 20px;
+                    font-weight: 600;
+                }
+            }
+
+            Text {
+                text: root.testnet
+                    ? "Testnet / signet. This is not mainnet, and coins here are not real."
+                    : "Mainnet. This is not testnet or signet, and coins here are real.";
+                color: Palette.ink;
+                font-size: 14px;
+                wrap: word-wrap;
+            }
+
+            Text {
+                text: root.passphrase-in-use
+                    ? "A passphrase is in use."
+                    : "No passphrase is in use.";
+                color: Palette.ink;
+                font-size: 14px;
+            }
+
+            // All four, always, because all four are derived (02-core.md §6). No script-type
+            // choice is offered anywhere, so this is a statement rather than a selection — and
+            // it is the answer to *"is your old wallet BIP44 or BIP84?"*, a question the product
+            // refuses to ask because the user cannot referee it.
+            VerticalLayout {
+                for account in root.accounts: HorizontalLayout {
+                    height: 17px;
+                    alignment: start;
+                    spacing: 10px;
+
+                    Text {
+                        text: account.family;
+                        width: 58px;
+                        color: Palette.ink-mid;
+                        font-family: "DejaVu Sans Mono";
+                        font-size: 13px;
+                    }
+
+                    Text {
+                        text: account.script;
+                        width: 110px;
+                        color: Palette.ink;
+                        font-family: "DejaVu Sans Mono";
+                        font-size: 13px;
+                    }
+
+                    Text {
+                        text: account.path;
+                        color: Palette.ink-dim;
+                        font-family: "DejaVu Sans Mono";
+                        font-size: 13px;
+                    }
+                }
+            }
+        }
+
+        // §7's table, in its order. The two camera rows stay visible with the reason stated
+        // rather than being hidden, the same rule the start menu's third entry follows — and they
+        // are adjacent, which is what the frame's `move` had to grow a link for.
+        VerticalLayout {
+            spacing: 8px;
+
+            Choice {
+                height: 54px;
+                label: "Show the watch-only export";
+                note: "One QR for your coordinator. Public keys only.";
+                current: root.selected == 0;
+            }
+
+            Choice {
+                height: 54px;
+                label: "Sign a transaction";
+                note: root.camera
+                    ? "Scan the transaction QR."
+                    : "Unavailable: no camera was found.";
+                available: root.camera;
+                current: root.selected == 1;
+            }
+
+            Choice {
+                height: 54px;
+                label: "Verify a receive address";
+                note: root.camera
+                    ? "Scan an address QR and check it is one of ours."
+                    : "Unavailable: no camera was found.";
+                available: root.camera;
+                current: root.selected == 2;
+            }
+
+            // **Secondary, and its position is forced rather than chosen**: the
+            // passphrase-in-use bit rides in the backup's AAD, so the backup cannot exist before
+            // the passphrase is known (ADR-0007, 02-core.md §11).
+            Choice {
+                height: 54px;
+                label: "Export an encrypted backup";
+                note: "Eight words, and a QR that needs them.";
+                current: root.selected == 3;
+            }
+        }
+    }
+}
+
 // The honest placeholder. It exists so that choosing a real entry is not a dead press while
-// the screens behind it are still being built (#73, #75, #85).
+// the screens behind it are still being built (#75, #81, #84, #85).
 component Unbuilt inherits Rectangle {
     VerticalLayout {
         alignment: start;
@@ -534,7 +884,7 @@ component Unbuilt inherits Rectangle {
         }
 
         Text {
-            text: "That screen is not built yet. This appliance holds no wallet and signs nothing.";
+            text: "That screen is not built yet. Nothing has changed, and nothing was signed.";
             color: Palette.ink-mid;
             font-size: 16px;
             wrap: word-wrap;
@@ -616,6 +966,24 @@ export component AppWindow inherits Window {
     in property <int> retype-settled;
     in property <bool> retype-done;
 
+    // The load screen (04-screens.md §5). `passphrase` arrives already rendered — delimited,
+    // and with every space drawn as a mark — because the rendering is §5.1's mitigation and
+    // belongs in one testable place, not in a binding here. `network-testnet` is the selector's
+    // state and is set from Rust so that *mainnet preselected* is one fact in one file.
+    in property <bool> network-testnet;
+    in property <string> passphrase;
+    in property <int> passphrase-count;
+    in property <string> passphrase-note;
+
+    // The identity screen (§7). Four facts off the loaded wallet, and nothing derived here:
+    // `wallet-testnet` is the *loaded* network, which is not `network-testnet` above — that one
+    // is what the selector was showing before the load, and after it the two can never disagree
+    // because the passphrase and the network cannot change mid-session (02-core.md §12).
+    in property <string> fingerprint;
+    in property <bool> wallet-testnet;
+    in property <bool> passphrase-in-use;
+    in property <[Account]> accounts;
+
     callback intent(Intent);
     // The callbacks that carry a value rather than an intent, and so bypass the router
     // (standing rule 4): a die face is a byte the user typed, a letter of the retype is one
@@ -627,6 +995,12 @@ export component AppWindow inherits Window {
     callback typed(string);
     callback entry-back();
     callback entry-step(int);
+    // The load screen's three, for the same reason: a character of the passphrase is a byte the
+    // user typed, and **a network selection is a value too** — `04-screens.md` §5.2's selector is
+    // a parameter of derivation, not a destination, so it never crosses the router either.
+    callback network(bool);
+    callback passphrase-typed(string);
+    callback passphrase-back();
 
     // 04-screens.md §0's second breakpoint, one property for the whole appliance. Handed in
     // from `display::wide`, which already owns §0's arithmetic and can be tested; deriving it
@@ -642,6 +1016,12 @@ export component AppWindow inherits Window {
         : root.screen == Screen.dice ? 1
         : root.screen == Screen.words ? 1
         : root.screen == Screen.retype ? 1
+        // §5.2's two-state selector, then §5.1's confirm.
+        : root.screen == Screen.load ? 3
+        // §7's four actions. The *re-display the most recently signed transaction* row is
+        // absent rather than greyed: it appears once a transaction has been signed this session,
+        // and nothing in this build can sign one, so there is no state for it to be in.
+        : root.screen == Screen.identity ? 4
         : 0;
     property <int> rows: root.screen-rows + 1;
     property <int> session-row: root.rows - 1;
@@ -661,9 +1041,8 @@ export component AppWindow inherits Window {
     default-font-size: 15px;
     forward-focus: keys;
 
-    // Whether a row can be chosen. The only unavailable row the appliance has today is the
-    // one that needs a camera (04-screens.md §1); it stays visible and navigation steps past
-    // it, so the reason is readable and the press is never dead.
+    // Whether a row can be chosen. Every unavailable row stays visible with its reason stated
+    // and navigation steps past it, so the reason is readable and the press is never dead.
     //
     // The parentheses are load-bearing rather than decorative. If `?:` bound tighter than
     // `&&`, the unparenthesised form would read *start screen **and** (row 2 ? camera : yes)*,
@@ -685,6 +1064,11 @@ export component AppWindow inherits Window {
         if (root.screen == Screen.retype && row == 0) {
             return root.retype-done;
         }
+        // §7: *sign a transaction* and *verify a receive address* both need the camera, and they
+        // are **adjacent** — which is what forced the third link into `move` below.
+        if (root.screen == Screen.identity && (row == 1 || row == 2)) {
+            return root.camera-present;
+        }
         return true;
     }
 
@@ -692,14 +1076,20 @@ export component AppWindow inherits Window {
         return Math.mod(row + root.rows, root.rows);
     }
 
-    // One hop, then one more if the row it landed on is unavailable. A single extra step is
-    // enough while no two unavailable rows are adjacent, which the one-unavailable-row rule
-    // above guarantees — and it has to be, because Slint's functions have no loop. A screen
-    // that ever greys two neighbouring rows needs this rewritten, not extended.
+    // One hop, then up to two more while the rows it lands on are unavailable. Slint's functions
+    // have no loop, so the depth of this chain *is* the bound, and the bound is stated rather
+    // than assumed: **no three adjacent unavailable rows.**
+    //
+    // Two adjacent ones exist as of 04-screens.md §7 — *sign a transaction* and *verify a
+    // receive address* are both greyed with a stated reason on a machine with no camera — which
+    // is why one extra step is no longer enough. A screen that ever greys three neighbours needs
+    // another link here, and it will present as a cursor that lands on a row Enter refuses.
     function move(delta: int) {
         self.selected = self.available(self.wrap(root.selected + delta))
             ? self.wrap(root.selected + delta)
-            : self.wrap(root.selected + 2 * delta);
+            : self.available(self.wrap(root.selected + 2 * delta))
+                ? self.wrap(root.selected + 2 * delta)
+                : self.wrap(root.selected + 3 * delta);
     }
 
     function activate() {
@@ -723,6 +1113,23 @@ export component AppWindow inherits Window {
             root.intent(Intent.create-confirm);
         } else if (root.screen == Screen.retype) {
             root.intent(Intent.create-done);
+        } else if (root.screen == Screen.load) {
+            // Rows 0 and 1 are §5.2's selector and they carry a *value*, so they go through the
+            // value callback the dice and the retype use rather than through an intent (standing
+            // rule 4). Row 2 is §5.1's confirm, whose label has already stated which of the two
+            // things is about to happen.
+            if (root.selected == 0) {
+                root.network(false);
+            } else if (root.selected == 1) {
+                root.network(true);
+            } else {
+                root.intent(Intent.load-confirm);
+            }
+        } else if (root.screen == Screen.identity) {
+            root.intent(root.selected == 0 ? Intent.watch-only
+                : root.selected == 1 ? Intent.sign
+                : root.selected == 2 ? Intent.verify-address
+                : Intent.backup-export);
         }
     }
 
@@ -760,6 +1167,14 @@ export component AppWindow inherits Window {
                 root.entry-back();
                 return EventResult.accept;
             }
+            // The passphrase field's one correction key (04-screens.md §5.1). Read before the
+            // ring's for the reason the retype's are: Backspace means *character* here and means
+            // nothing to the ring, while Up/Down and Enter below keep working on this screen
+            // exactly as they do on every other.
+            if (root.screen == Screen.load && event.text == Key.Backspace) {
+                root.passphrase-back();
+                return EventResult.accept;
+            }
             if (event.text == Key.UpArrow) {
                 root.move(-1);
                 return EventResult.accept;
@@ -784,6 +1199,15 @@ export component AppWindow inherits Window {
             // land is named from the outcome core returns (02-core.md §4, behaviour 3).
             if (root.screen == Screen.retype) {
                 root.typed(event.text);
+                return EventResult.accept;
+            }
+            // And everything else on the load screen is a passphrase character, handed over as
+            // it arrived — **including the space bar**, which is a character here and not a
+            // commit: `"hunter2 "` and `"hunter2"` are different wallets (02-core.md §5). The
+            // shell decides nothing about it either: `load.rs` owns §5.1's printable-ASCII range
+            // in one place, and the key that did not land is named from there.
+            if (root.screen == Screen.load) {
+                root.passphrase-typed(event.text);
                 return EventResult.accept;
             }
             return EventResult.reject;
@@ -855,6 +1279,23 @@ export component AppWindow inherits Window {
                         note: root.retype-note;
                         settled: root.retype-settled;
                         done: root.retype-done;
+                        selected: root.selected;
+                    }
+
+                    if root.screen == Screen.load: LoadScreen {
+                        testnet: root.network-testnet;
+                        passphrase: root.passphrase;
+                        count: root.passphrase-count;
+                        note: root.passphrase-note;
+                        selected: root.selected;
+                    }
+
+                    if root.screen == Screen.identity: IdentityScreen {
+                        fingerprint: root.fingerprint;
+                        testnet: root.wallet-testnet;
+                        passphrase-in-use: root.passphrase-in-use;
+                        accounts: root.accounts;
+                        camera: root.camera-present;
                         selected: root.selected;
                     }
 
