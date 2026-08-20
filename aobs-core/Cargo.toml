@@ -25,6 +25,12 @@ bitcoin = "0.32"
 # GPL-3.0-compatible. Flagged rather than slipped in: the table is a closed decision and
 # this is an addition to it.
 unicode-normalization = "0.1.25"
+# UR/BC-UR, inbound and out. **The riskiest parser in the tree**, adopted knowingly: its
+# fountain decoder adopts an attacker's `sequence_count` unvalidated and is unfuzzed
+# upstream, so `src/ur.rs` clamps before it and `fuzz/fuzz_targets/fountain_decode.rs` is
+# ours (03-transport.md §1). **The crate is `ur`** — `ur-rs` is only the repository name and
+# is separately taken on crates.io by an unrelated project.
+ur = "0.5"
 # `ZeroizeOnDrop`, and the derive that makes it one line per secret type.
 zeroize = { version = "1.9.0", features = ["zeroize_derive"] }
 
