@@ -32,6 +32,7 @@ export enum Intent {
     create,
     create-continue,
     create-confirm,
+    create-done,
     import,
     restore,
     session-end,
@@ -47,6 +48,7 @@ export enum Screen {
     start,
     dice,
     words,
+    retype,
     unbuilt,
     ending,
 }
@@ -58,6 +60,18 @@ export enum Screen {
 export struct Word {
     position: int,
     text: string,
+}
+
+// One slot of the retype (04-screens.md §4). `text` is what the *user* typed — the committed
+// word, or the letters going into the slot they are on — and never the phrase: the answer is
+// in core, behind no accessor at all. `ghost` is the rest of the single remaining word, drawn
+// dim inline after the buffer, which is the one completion this component offers (02-core.md
+// §4's fifth behaviour: it finishes the word being typed and proposes none).
+export struct Slot {
+    position: int,
+    text: string,
+    ghost: string,
+    current: bool,
 }
 
 // The numbers the frame lays itself out with, in one place because one of them is an owed
@@ -266,8 +280,14 @@ component DiceScreen inherits Rectangle {
 // term in the owed measurement above.
 component WordRow inherits Rectangle {
     in property <Word> word;
+    // 04-screens.md §4: a wrong word in the retype returns here with its position marked for
+    // repair. The mark is on the row rather than in the copy because the copy already names
+    // the number, and what the user needs next is to find that line on the paper.
+    in property <bool> marked;
 
     height: Metrics.word-row;
+    border-radius: 3px;
+    background: root.marked ? Palette.ground : transparent;
 
     HorizontalLayout {
         spacing: 10px;
@@ -277,7 +297,7 @@ component WordRow inherits Rectangle {
             width: 28px;
             horizontal-alignment: right;
             vertical-alignment: center;
-            color: Palette.ink-dim;
+            color: root.marked ? Palette.focus : Palette.ink-dim;
             font-family: "DejaVu Sans Mono";
             font-size: 14px;
         }
@@ -304,6 +324,9 @@ component WordRow inherits Rectangle {
 component Words inherits Rectangle {
     in property <[Word]> left;
     in property <[Word]> right;
+    // The position the retype rejected, 1-based, or 0 when the phrase is simply being
+    // written down for the first time.
+    in property <int> marked;
     in property <int> selected;
 
     VerticalLayout {
@@ -317,14 +340,21 @@ component Words inherits Rectangle {
             spacing: 6px;
 
             Text {
-                text: "Write these 24 words on paper, in this order.";
+                // The repair copy names the position, because naming the position *is* the
+                // repair (04-screens.md §4) — and it names both possibilities, because the
+                // appliance knows a word came back different and not which side was wrong.
+                text: root.marked == 0
+                    ? "Write these 24 words on paper, in this order."
+                    : "What you typed for word " + root.marked + " is not word " + root.marked + ".";
                 color: Palette.ink;
                 font-size: 20px;
                 font-weight: 600;
             }
 
             Text {
-                text: "They are the only copy. Anyone who has them has the wallet, and nothing here is stored.";
+                text: root.marked == 0
+                    ? "They are the only copy. Anyone who has them has the wallet, and nothing here is stored."
+                    : "Check that line against your paper, fix whichever is wrong, and carry on. Nothing you typed is lost.";
                 color: Palette.ink-mid;
                 font-size: 13px;
             }
@@ -336,19 +366,157 @@ component Words inherits Rectangle {
             VerticalLayout {
                 for word in root.left: WordRow {
                     word: word;
+                    marked: word.position == root.marked;
                 }
             }
 
             VerticalLayout {
                 for word in root.right: WordRow {
                     word: word;
+                    marked: word.position == root.marked;
                 }
             }
         }
 
         Choice {
             height: Metrics.words-continue;
-            label: "I have written them down";
+            // 04-screens.md §4 rejects a `restart` control by name: it voids everything
+            // already written down and re-asks the same transcription of someone who has just
+            // proved they can slip. So there is one row here on both visits, and on the second
+            // it says what it does — carry on from where the rejection left off.
+            label: root.marked == 0 ? "I have written them down" : "Carry on typing";
+            current: root.selected == 0;
+        }
+    }
+}
+
+// One slot of the retype. The row height is Metrics' — the same 26 px the phrase is drawn at,
+// because the two screens are the same twelve-and-twelve geometry and the sum that has to fit
+// the 800×600 floor is one number for both (04-screens.md §3's measurement).
+component SlotRow inherits Rectangle {
+    in property <Slot> slot;
+
+    height: Metrics.word-row;
+    border-radius: 3px;
+    background: root.slot.current ? Palette.ground : transparent;
+
+    HorizontalLayout {
+        spacing: 10px;
+
+        Text {
+            text: root.slot.position;
+            width: 28px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            color: root.slot.current ? Palette.focus : Palette.ink-dim;
+            font-family: "DejaVu Sans Mono";
+            font-size: 14px;
+        }
+
+        HorizontalLayout {
+            alignment: start;
+            // Explicit, because the buffer and its ghosted completion have to read as one
+            // word: `abandon` typed as `aban` plus `don` cannot be `aban don`.
+            spacing: 0px;
+
+            Text {
+                text: root.slot.text;
+                vertical-alignment: center;
+                color: Palette.ink;
+                font-family: "DejaVu Sans Mono";
+                font-size: 17px;
+            }
+
+            // The single remaining word, ghosted inline (04-screens.md §6). It completes the
+            // word being typed and never proposes one — the appliance supplies no key material
+            // the user did not (02-core.md §4, behaviour 5).
+            Text {
+                text: root.slot.ghost;
+                vertical-alignment: center;
+                color: Palette.ink-dim;
+                font-family: "DejaVu Sans Mono";
+                font-size: 17px;
+            }
+
+            // The caret: a 2 px rule rather than a glyph, so it needs no font coverage and
+            // cannot be misread as a letter of the word being typed.
+            Rectangle {
+                width: 2px;
+                background: Palette.focus;
+                visible: root.slot.current;
+            }
+        }
+    }
+}
+
+// 04-screens.md §4. **The full 24-word retype, typed from paper, with the phrase off screen.**
+//
+// The arithmetic is what settles it: against a single mis-copied word — the top loss mode, the
+// one that surfaces years later — ticking *written down* detects 0% and a four-position sample
+// detects 4/24. The full retype detects all of it, and buys the thing neither alternative can:
+// the user rehearses the restore while the paper is still fresh enough to correct.
+//
+// **The reframe that decides everything on this screen: it is not a gate proving the phrase was
+// written down, it is an instrument for making the paper correct — so a failure is the feature
+// working.** Hence: committed words are echoed, because an off-by-one has to be visible as a
+// *shift* rather than as a mystery rejection at word 20; nothing is masked; a rejection names
+// the position and destroys nothing; and there is **no restart control** anywhere on it.
+component RetypeScreen inherits Rectangle {
+    in property <[Slot]> left;
+    in property <[Slot]> right;
+    in property <string> note;
+    in property <int> settled;
+    in property <bool> done;
+    in property <int> selected;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: Metrics.words-gap;
+
+        VerticalLayout {
+            height: Metrics.words-banner;
+            spacing: 6px;
+
+            Text {
+                text: "Type the 24 words from your paper.";
+                color: Palette.ink;
+                font-size: 20px;
+                font-weight: 600;
+            }
+
+            // The live line, and it sits *inside* the banner's fixed height rather than as a
+            // row of its own: that height is a term in §3's measurement, and this screen is
+            // built from the same numbers so the same sum covers both.
+            Text {
+                text: root.note;
+                color: Palette.ink-mid;
+                font-size: 13px;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 28px;
+
+            VerticalLayout {
+                for slot in root.left: SlotRow {
+                    slot: slot;
+                }
+            }
+
+            VerticalLayout {
+                for slot in root.right: SlotRow {
+                    slot: slot;
+                }
+            }
+        }
+
+        Choice {
+            height: Metrics.words-continue;
+            label: "Done";
+            note: root.done
+                ? "Press Enter to finish."
+                : root.settled + " of 24 typed.";
+            available: root.done;
             current: root.selected == 0;
         }
     }
@@ -437,13 +605,28 @@ export component AppWindow inherits Window {
     in property <bool> entropy-ready;
     in property <[Word]> left-column;
     in property <[Word]> right-column;
+    // The position §4's rejection marked on the phrase, 1-based, or 0 for none.
+    in property <int> marked;
+
+    // The retype (04-screens.md §4). Every one of these is *what the user typed*, computed in
+    // Rust from core's entry state: the phrase itself never reaches this screen.
+    in property <[Slot]> retype-left;
+    in property <[Slot]> retype-right;
+    in property <string> retype-note;
+    in property <int> retype-settled;
+    in property <bool> retype-done;
 
     callback intent(Intent);
-    // The two callbacks that carry a value rather than an intent, and so bypass the router
-    // (standing rule 4): a die face is a byte the user typed, and `gathered` is the entropy
-    // thread announcing itself from `upgrade_in_event_loop`.
+    // The callbacks that carry a value rather than an intent, and so bypass the router
+    // (standing rule 4): a die face is a byte the user typed, a letter of the retype is one
+    // too, and `gathered` is the entropy thread announcing itself from
+    // `upgrade_in_event_loop`. **None of them carries a decision** — `typed` hands a keystroke
+    // to core's wordlist, which is the only thing that knows whether it lands.
     callback roll(int);
     callback gathered();
+    callback typed(string);
+    callback entry-back();
+    callback entry-step(int);
 
     // 04-screens.md §0's second breakpoint, one property for the whole appliance. Handed in
     // from `display::wide`, which already owns §0's arithmetic and can be tested; deriving it
@@ -458,6 +641,7 @@ export component AppWindow inherits Window {
         : root.screen == Screen.ending ? 2
         : root.screen == Screen.dice ? 1
         : root.screen == Screen.words ? 1
+        : root.screen == Screen.retype ? 1
         : 0;
     property <int> rows: root.screen-rows + 1;
     property <int> session-row: root.rows - 1;
@@ -495,6 +679,12 @@ export component AppWindow inherits Window {
         if (root.screen == Screen.dice && row == 0) {
             return root.entropy-ready;
         }
+        // §4's Done, unlocked by core's own count of settled slots and nothing else. Locked it
+        // states how many words are in, which is the progress this screen reports — there is no
+        // bar, and no green tick for a word that matched.
+        if (root.screen == Screen.retype && row == 0) {
+            return root.retype-done;
+        }
         return true;
     }
 
@@ -531,6 +721,8 @@ export component AppWindow inherits Window {
             root.intent(Intent.create-continue);
         } else if (root.screen == Screen.words) {
             root.intent(Intent.create-confirm);
+        } else if (root.screen == Screen.retype) {
+            root.intent(Intent.create-done);
         }
     }
 
@@ -552,6 +744,22 @@ export component AppWindow inherits Window {
                 root.roll(event.text.to-float());
                 return EventResult.accept;
             }
+            // The retype's two correction keys (02-core.md §4). Read before the ring's,
+            // because Left/Right mean *word* and Backspace means *letter* here and neither
+            // means anything to the ring — while Up/Down and Enter below keep working on this
+            // screen exactly as they do on every other.
+            if (root.screen == Screen.retype && event.text == Key.LeftArrow) {
+                root.entry-step(-1);
+                return EventResult.accept;
+            }
+            if (root.screen == Screen.retype && event.text == Key.RightArrow) {
+                root.entry-step(1);
+                return EventResult.accept;
+            }
+            if (root.screen == Screen.retype && event.text == Key.Backspace) {
+                root.entry-back();
+                return EventResult.accept;
+            }
             if (event.text == Key.UpArrow) {
                 root.move(-1);
                 return EventResult.accept;
@@ -568,6 +776,14 @@ export component AppWindow inherits Window {
             // router's answer, not this frame's: it knows what it would go back to.
             if (event.text == Key.Escape) {
                 root.intent(Intent.cancel);
+                return EventResult.accept;
+            }
+            // Everything else on the retype is a letter or the space bar, handed over as it
+            // arrived. **The shell decides nothing about it**: core owns the wordlist, so what
+            // lands and what is refused is one function in one place, and the key that did not
+            // land is named from the outcome core returns (02-core.md §4, behaviour 3).
+            if (root.screen == Screen.retype) {
+                root.typed(event.text);
                 return EventResult.accept;
             }
             return EventResult.reject;
@@ -629,6 +845,16 @@ export component AppWindow inherits Window {
                     if root.screen == Screen.words: Words {
                         left: root.left-column;
                         right: root.right-column;
+                        marked: root.marked;
+                        selected: root.selected;
+                    }
+
+                    if root.screen == Screen.retype: RetypeScreen {
+                        left: root.retype-left;
+                        right: root.retype-right;
+                        note: root.retype-note;
+                        settled: root.retype-settled;
+                        done: root.retype-done;
                         selected: root.selected;
                     }
 

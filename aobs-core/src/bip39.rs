@@ -11,8 +11,9 @@
 //! 32 bytes is 24 words. Import accepts 12/15/18/21/24, which is the *only* reason the
 //! shorter lengths appear below.
 //!
-//! What is deliberately *not* here: prefix matching and the 24-slot reducer
-//! (`02-core.md` §4's import reducer, its own slice), and BIP-32 derivation from the seed.
+//! What is deliberately *not* here: prefix matching and the 24-slot reducer, which are
+//! [`crate::entry`]'s because three of the four screens driving them hold no mnemonic at
+//! all, and BIP-32 derivation from the seed.
 //! [`Mnemonic`] carries word indices rather than text because that is the whole secret — the
 //! wordlist itself is public, so a word looked up by index leaks nothing that
 //! [`WORDS`] does not already publish.
@@ -24,6 +25,7 @@ use core::fmt;
 use bitcoin::hashes::{hmac::Hmac, hmac::HmacEngine, sha256, sha512, Hash, HashEngine};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
+use crate::entry::Entry;
 use crate::secret::{redacted, Entropy, Passphrase, Seed};
 
 pub use english::WORDS;
@@ -159,6 +161,20 @@ impl Mnemonic {
         let mut bytes = Zeroizing::new([0u8; Entropy::CAPACITY]);
         bytes[..entropy_len].copy_from_slice(&packed[..entropy_len]);
         Entropy::prefix(*bytes, entropy_len)
+    }
+
+    /// The retype, as an [`Entry`] that already knows the answer (`04-screens.md` §4).
+    ///
+    /// The indices go in and no accessor brings them back out, which is how *the mnemonic is
+    /// never re-shown during the retype* is a property of the types rather than a rule a
+    /// screen has to remember. It is also why this lives here instead of the shell building
+    /// the entry itself: the per-word comparison is core's byte compare against the generated
+    /// phrase (standing rule 4), and the shell never sees the phrase it is comparing to.
+    #[must_use]
+    pub fn type_back(&self) -> Entry {
+        // A phrase is 12 to 24 words and `MAX_SLOTS` is 24, so the constructor's conditions
+        // are all facts about this type. `AOBS-E04` covers being wrong about that.
+        Entry::type_back(&WORDS, &self.indices[..self.len]).expect("a phrase is at most 24 words")
     }
 
     /// The 512-bit seed: `PBKDF2-HMAC-SHA512(phrase, "mnemonic" ‖ passphrase, 2048)`.

@@ -71,6 +71,7 @@ the shell or is deleted.
 | **Address verification** | Derived addresses across all four families matched in both lowercase and uppercase QR forms. |
 | **The fee warning** | Fee exactly equal to the payment total (the boundary — the rule is `≥`), a consolidation with no non-change outputs (undefined, silent), change plus a one-satoshi payment, and a legitimate high-congestion transaction well under the ratio that **must stay silent**. |
 | **Amount and fee writing, authored by us** | The rules `04-screens.md` §11.2.1 settles, at their boundaries: zero, one satoshi and `Amount::MAX` in the eight-decimal BTC form; the satoshi grouping at each group-boundary length; a fee equal to the amount paying (`100.000%` — the same `≥` boundary the fee-warning row walks); a consolidation with no non-change outputs (no percentage at all, rather than a zero or a dash); and the two round-to-zero bounds, a non-zero fee that would print `0.0 sat/vB` and a non-zero ratio that would print `0.000%`. The extremes are where a formatter turns into an evaluator (`02-core.md` §9). |
+| **Word entry, authored by us** | `02-core.md` §4's six behaviours *through* the reducer rather than by inspection: four characters of **every one of the 2048 words** resolving to that word, a word that is also a prefix (`add` against `address`) committing as itself, a unique prefix committing **nothing** without a space, the three off-list keystroke classes — a capital, a digit, a letter with a diacritic — and both correction keys. Plus the type-back's own half: a wrong word refused **by position** with every other slot intact, the last word refused the same way, and the same code driving a wordlist that is not BIP-39's. |
 | **Passphrase** | Idempotence `nfkd(nfkd(x)) == nfkd(x)`; no-trim — `"a"`, `" a"` and `"a "` derive three distinct seeds; 128 bytes accepted and 129 refused at the shell. |
 | **Network, authored by us** | **The master fingerprint of one seed is byte-identical on mainnet and testnet** — the identity screen's only network signal rests on this and it is read from the BIP-32 text rather than measured, so the assertion is the alarm if it ever stops holding. Plus: the same seed derives different account xpubs and different addresses across the two; a testnet PSBT against a mainnet-loaded wallet lands on the "no input is ours" refusal carrying the coin-type-disagreement variant. |
 
@@ -81,6 +82,11 @@ the shell or is deleted.
 - BIP39 round-trip: `entropy → mnemonic → entropy` at every accepted length.
 - Address formatting: chunking is lossless, and the concatenation of the rendered groups equals the
   address.
+- **The retype places nothing we did not generate.** For any sequence of keystrokes, every
+  filled slot holds the word the generated phrase has at that position, and the state stays
+  inside its fixed arrays. The first half is the type-back's whole safety claim, asserted
+  against sequences nobody wrote a case for; the second is because an out-of-bounds index in a
+  reducer is a session ending mid-transcription.
 - **The outbound animation never refuses.** For every message length, at the fragment length
   `03-transport.md` §9 settles, no emitted part exceeds v27-L's 2 132-character budget — charging the
   sequence number its full `u32` width rather than the one it happens to be emitted at. This is the

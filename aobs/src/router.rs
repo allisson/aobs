@@ -21,6 +21,7 @@ use std::rc::Rc;
 
 use slint::ComponentHandle;
 
+use crate::confirm::Confirm;
 use crate::create::Create;
 use crate::power;
 use crate::{AppWindow, Intent, Screen};
@@ -64,7 +65,7 @@ impl Ending {
 /// event loop: `slint::quit_event_loop` is what ends `ui.run()`, and it carries nothing.
 /// `None` after the loop returns is 06-codes.md §5's `AOBS-E03` — a loop that ended without
 /// anyone asking it to.
-pub fn wire(ui: &AppWindow, create: Rc<Create>) -> Rc<Cell<Option<Ending>>> {
+pub fn wire(ui: &AppWindow, create: Rc<Create>, confirm: Rc<Confirm>) -> Rc<Cell<Option<Ending>>> {
     let ending = Rc::new(Cell::new(None));
 
     let sink = ending.clone();
@@ -78,12 +79,21 @@ pub fn wire(ui: &AppWindow, create: Rc<Create>) -> Rc<Cell<Option<Ending>>> {
             // destination. `begin` shows the dice screen and starts gathering behind it;
             // `words` mixes what was gathered and shows the phrase. Neither returns a value
             // to branch on, and nothing here reads a roll, a byte or a word.
-            Intent::Create => create.begin(&ui),
+            //
+            // `forget` is not a second decision: choosing *create* is choosing a phrase, and
+            // a retype in progress was typed against the previous one. Dropping it here is
+            // what keeps the two from being compared to each other.
+            Intent::Create => {
+                confirm.forget();
+                create.begin(&ui);
+            }
             Intent::CreateContinue => create.words(&ui),
 
-            // The retype is #73's screen (04-screens.md §4). Until it exists the frame says
-            // so rather than swallowing the press (standing rule 8).
-            Intent::CreateConfirm => ui.set_screen(Screen::Unbuilt),
+            // 04-screens.md §4's retype, from either side of it: the first visit and the
+            // return from a marked position are the same destination, because the entry state
+            // is kept and *nothing is destroyed*. `done` is `⏎`, which core answers.
+            Intent::CreateConfirm => confirm.begin(&ui, &create),
+            Intent::CreateDone => confirm.done(&ui),
 
             // The other two start entries. Their screens arrive in later slices.
             Intent::Import | Intent::Restore => ui.set_screen(Screen::Unbuilt),
@@ -103,7 +113,14 @@ pub fn wire(ui: &AppWindow, create: Rc<Create>) -> Rc<Cell<Option<Ending>>> {
             // loaded cannot keep this line, because 04-screens.md §13 rules that any *close
             // the wallet and return to the start screen* is a switch wearing a different
             // name — cancelling §13's confirm has to return to the screen the user was on.
-            Intent::Cancel => ui.set_screen(Screen::Start),
+            //
+            // The retype is the first screen with a nearer answer than the start menu, and
+            // 04-screens.md §4 is why: cancelling out of it has to return to the phrase, with
+            // the mark still on it, because the paper is what the user is holding.
+            Intent::Cancel => match ui.get_screen() {
+                Screen::Retype => ui.set_screen(Screen::Words),
+                _ => ui.set_screen(Screen::Start),
+            },
 
             Intent::ShutDown => {
                 sink.set(Some(Ending::Shutdown));

@@ -25,6 +25,7 @@ use std::time::{Duration, Instant};
 
 use aobs_core::bip39::Mnemonic;
 use aobs_core::entropy::mix;
+use aobs_core::entry::Entry;
 use aobs_core::secret::{Csprng32, Dice, Luma};
 use slint::{ComponentHandle, ModelRc, Timer, TimerMode, VecModel};
 use zeroize::Zeroizing;
@@ -73,6 +74,13 @@ pub struct Create {
     ticker: Timer,
     gathering: Cell<bool>,
     failure: Cell<Option<Failure>>,
+    /// The phrase, once it exists, for as long as the session does.
+    ///
+    /// It stays in core's zeroizing type and never becomes anything else here: 04-screens.md
+    /// §4's retype compares against it and 02-core.md §4 puts that comparison in core, so what
+    /// this module can do with it is hand out an [`Entry`] that already holds it
+    /// ([`Self::type_back`]) — and read the words for the screen, which is what §3 is.
+    phrase: RefCell<Option<Mnemonic>>,
 }
 
 /// Build the state and wire the two callbacks that carry a value rather than an intent.
@@ -91,6 +99,7 @@ pub fn wire(ui: &AppWindow) -> Rc<Create> {
         ticker: Timer::default(),
         gathering: Cell::new(false),
         failure: Cell::new(None),
+        phrase: RefCell::new(None),
     });
 
     let handle = ui.as_weak();
@@ -237,12 +246,29 @@ impl Create {
         // words is 24 words in a frame buffer. What crosses is `&'static str` out of the
         // public wordlist — the secret is the *sequence*, and the sequence now lives in the
         // two models for the rest of the session, because 04-screens.md §4's retype returns
-        // to this screen with a position marked. `Mnemonic` and `Entropy` are both dropped,
-        // and so zeroized, as this function returns.
+        // to this screen with a position marked. `Entropy` is dropped, and so zeroized, as
+        // this function returns.
         let (left, right) = columns(&mnemonic);
         ui.set_left_column(ModelRc::new(VecModel::from(left)));
         ui.set_right_column(ModelRc::new(VecModel::from(right)));
+        // A first arrival at the phrase marks nothing: the mark is §4's rejection, and this
+        // screen is reached from both sides.
+        ui.set_marked(0);
         ui.set_screen(Screen::Words);
+
+        // The `Mnemonic` itself stays, in the type that zeroizes it, because the retype has
+        // to compare against it and the load path has to derive from it.
+        self.phrase.replace(Some(mnemonic));
+    }
+
+    /// The retype's entry state: core's byte compare, already holding the answer
+    /// (04-screens.md §4).
+    ///
+    /// `None` before a phrase exists, which the one caller cannot reach — the intent that
+    /// leads here is fired from the phrase screen, and that screen is what [`Self::words`]
+    /// shows after storing one.
+    pub fn type_back(&self) -> Option<Entry> {
+        self.phrase.borrow().as_ref().map(Mnemonic::type_back)
     }
 
     /// The failure that ended the session, if one did.
