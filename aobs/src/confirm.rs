@@ -170,9 +170,10 @@ impl Confirm {
                 ui.set_marked(i32::try_from(position).unwrap_or_default() + 1);
                 ui.set_screen(Screen::Words);
             }
-            // §5's passphrase-and-network screen is a later slice, so the frame says so
-            // rather than swallowing the press (standing rule 8).
-            Outcome::Complete => ui.set_screen(Screen::Unbuilt),
+            // §5's one load screen, which every path reaches: the passphrase and the network
+            // enter at derivation, so a phrase that has just been proved correct is a phrase
+            // with nothing left to do but be loaded.
+            Outcome::Complete => ui.set_screen(Screen::Load),
             Outcome::Accepted | Outcome::Ignored => {}
         }
     }
@@ -259,7 +260,15 @@ fn refusal(entry: &Entry, action: Action, outcome: Outcome) -> String {
     }
 }
 
-/// The standing line: how to type a word, and what the screen is not showing.
+/// The standing line: **the keymap**, how to type a word, and what the screen is not showing.
+///
+/// The keymap is named before the user starts, which 04-screens.md §5.1 requires of every typing
+/// screen and §6 requires of the word-entry ones by name. Here it degrades more gently than on
+/// the passphrase field: the wordlist is `a`–`z`, the pinned `us` keymap puts those on the same
+/// physical keys on every board, and only the legends can mislead — after which an off-list
+/// keystroke names itself on this same line. It takes the standing line rather than a line of its
+/// own because that line's height is a term in §3's measurement, and it is replaced the moment
+/// the user types, which is exactly *before the user starts*.
 ///
 /// It puts a fragment of the phrase — the prefix, and the word it resolves to — into a
 /// `String`, and that is the same trade `create.rs` names for the phrase itself: those bytes
@@ -268,7 +277,9 @@ fn refusal(entry: &Entry, action: Action, outcome: Outcome) -> String {
 fn hint(entry: &Entry) -> String {
     let typed = entry.buffer();
     if typed.is_empty() {
-        "Four letters and the space bar are enough for any word. Backspace steps back.".to_owned()
+        "US keyboard layout. Four letters and the space bar are enough for any word. \
+         Backspace steps back."
+            .to_owned()
     } else if entry.matches() == 1 {
         format!("“{typed}{}” — press space to place it.", entry.ghost())
     } else {
@@ -366,7 +377,18 @@ mod tests {
         let outcome = entry.apply(Action::Commit);
         assert_eq!(outcome, Outcome::Accepted);
         assert_eq!(refusal(&entry, Action::Commit, outcome), "");
-        assert!(hint(&entry).starts_with("Four letters"));
+        assert!(hint(&entry).starts_with("US keyboard layout."));
+    }
+
+    /// 04-screens.md §5.1 and §6: **the screen names the keymap before the user starts.** The
+    /// standing line is what "before" means here — it is on screen at the first paint and is
+    /// replaced by the live line as soon as a key lands.
+    #[test]
+    fn the_standing_line_names_the_keymap_and_stops_doing_so_once_typing_begins() {
+        let mut entry = retype();
+        assert!(hint(&entry).contains("US keyboard layout"));
+        letters(&mut entry, "aban");
+        assert!(!hint(&entry).contains("US keyboard layout"));
     }
 
     #[test]

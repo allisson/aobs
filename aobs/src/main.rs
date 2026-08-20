@@ -9,6 +9,8 @@
 //! chrome that does not vanish, and §13's ending. Creating a wallet is
 //! [#72](https://github.com/allisson/aobs/issues/72) — `create`, the dice and the 24 words —
 //! and [#73](https://github.com/allisson/aobs/issues/73) closes it with `confirm`, the retype.
+//! [#74](https://github.com/allisson/aobs/issues/74) is `load`, `session` and `identity`: the
+//! passphrase, the network, ADR-0010's `OnceLock`, and the hub the first journey ends on.
 //! No QR yet, and no scanning screen.
 
 mod buildinfo;
@@ -19,9 +21,14 @@ mod create;
 mod display;
 mod entropy;
 mod fail;
+mod identity;
+mod load;
 mod notify;
 mod power;
 mod router;
+mod session;
+
+use std::rc::Rc;
 
 use fail::Failure;
 use router::Ending;
@@ -131,9 +138,20 @@ fn run() -> Result<Ending, Failure> {
     // module holds only what the screen draws.
     let confirm = confirm::wire(&ui);
 
+    // ADR-0010's `OnceLock`, and the reason it is a local rather than a `static`: a `static` is
+    // never dropped, so the wallet's wrapped master key would never be zeroized and §5's wipe
+    // would rest on `init_on_free` alone. This dies as `run` returns, which is before `main`
+    // exits into the shutdown status.
+    let session = Rc::new(session::Session::new());
+
+    // §5's one load screen, and the three callbacks that carry a value rather than an intent. It
+    // holds the phrase's owner and the session, because confirming is where a wallet comes into
+    // existence and both are what that needs.
+    let load = load::wire(&ui, create.clone(), session.clone());
+
     // Everything the user can ask for goes through here, and nothing else. The cell is where
     // §13's answer lands, because the event loop is what ends and it carries nothing back.
-    let ending = router::wire(&ui, create.clone(), confirm);
+    let ending = router::wire(&ui, create.clone(), confirm, load, session);
 
     // The readiness line, printed from inside the running event loop rather than before
     // it. That placement is the point: the line asserts the loop came up, which is what

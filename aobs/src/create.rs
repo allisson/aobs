@@ -271,6 +271,17 @@ impl Create {
         self.phrase.borrow().as_ref().map(Mnemonic::type_back)
     }
 
+    /// Run `f` over the phrase, which never leaves this module.
+    ///
+    /// A closure rather than an accessor, for the reason `Wallet::with_master` gives: a
+    /// `Mnemonic` handed out by value would be key material with a second lifetime to reason
+    /// about, and the load path wants exactly one thing from it — the seed. `None` before a
+    /// phrase exists, which the one caller cannot reach: 04-screens.md §5's screen is arrived at
+    /// from the retype, and the retype is arrived at from the phrase.
+    pub fn with_phrase<T>(&self, f: impl FnOnce(&Mnemonic) -> T) -> Option<T> {
+        self.phrase.borrow().as_ref().map(f)
+    }
+
     /// The failure that ended the session, if one did.
     pub fn failure(&self) -> Option<Failure> {
         self.failure.get()
