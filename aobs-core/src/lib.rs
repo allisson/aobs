@@ -2,12 +2,14 @@
 //!
 //! BIP39, derivation, PSBT validation and signing, entropy mixing, backup crypto, UR
 //! encode/decode, the review model and the watch-only export model all land here as
-//! modules. Six of them exist: [`secret`], [`entropy`] and [`bip39`]
+//! modules. Seven of them exist: [`secret`], [`entropy`] and [`bip39`]
 //! ([#70](https://github.com/allisson/aobs/issues/70)), then [`derive`] and the address half
 //! of [`format`] ([#71](https://github.com/allisson/aobs/issues/71)), whose amount half arrived
 //! with the writing rules ([#100](https://github.com/allisson/aobs/issues/100)) — but not the
 //! review model those numbers come from — and [`entry`], the word-entry component the retype
-//! and three later screens drive ([#73](https://github.com/allisson/aobs/issues/73)). The rest
+//! and three later screens drive ([#73](https://github.com/allisson/aobs/issues/73)), and
+//! [`psbt`], whose structural half of the rejection policy arrived without the derivation
+//! check or the review model ([#79](https://github.com/allisson/aobs/issues/79)). The rest
 //! do not — the walking
 //! skeleton ([#39](https://github.com/allisson/aobs/issues/39)) built the boot layer first,
 //! because the boot layer is where the unproven claims were.
@@ -29,4 +31,15 @@ pub mod derive;
 pub mod entropy;
 pub mod entry;
 pub mod format;
+pub mod psbt;
 pub mod secret;
+
+/// The adversarial corpus and the `AOBS-R##` registry bijection
+/// (`05-testing-and-release.md` §5, `06-codes.md` §7).
+///
+/// At the crate root rather than beside one module because the registry spans several: the
+/// structural refusals are [`psbt`]'s, and the QR boundary's and the backup's will add their
+/// cases to the same table.
+#[cfg(test)]
+#[path = "corpus_tests.rs"]
+mod corpus;

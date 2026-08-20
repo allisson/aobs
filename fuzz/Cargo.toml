@@ -17,8 +17,8 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 
 # §4's three targets all fuzz core: the fountain decoder through our clamping wrapper, the
-# PSBT parser on raw bytes, and the validator seeded with our own key material. The edge
-# is declared now so the first one of them is a file and not a manifest argument.
+# PSBT parser on raw bytes, and the validator seeded with our own key material. The second
+# of them is here; the other two arrive with the code they fuzz.
 [dependencies.aobs-core]
 path = "../aobs-core"
 
@@ -29,8 +29,8 @@ path = "../aobs-core"
 panic = "unwind"
 
 [[bin]]
-name = "placeholder"
-path = "fuzz_targets/placeholder.rs"
+name = "psbt_parse"
+path = "fuzz_targets/psbt_parse.rs"
 test = false
 doc = false
 bench = false

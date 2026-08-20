@@ -1,10 +1,11 @@
 #!/bin/sh
 # The fuzz gate (05-testing-and-release.md §4).
 #
-# §4 names three targets we write ourselves and none of the code they fuzz exists yet, so
-# what this proves today is the harness: cargo-fuzz builds inside the one build
-# environment, links libFuzzer, and runs a target to completion. Wiring it now means the
-# first real target is a file and not a toolchain investigation.
+# §4 names three targets we write ourselves. One of them exists — the PSBT parser on raw
+# bytes (#79); the other two arrive with the code they fuzz. The gate was wired before any
+# of them, on a placeholder, so that the first real target was a file and not a toolchain
+# investigation — and that is why this runs every target `cargo fuzz list` reports rather
+# than a name written here: adding a target must not also mean editing this script.
 #
 # A separate gate from the test run and from coverage, because §1 says coverage is
 # necessary and not sufficient: the fuzz targets are not a subset of the coverage run.
@@ -23,13 +24,33 @@ cd "$(dirname "$0")/.."
 # is `-max_total_time`, run by hand against a real target.
 : "${AOBS_FUZZ_RUNS:=20000}"
 
+# §4 asks the PSBT target for *no unbounded allocation*, which is a limit libFuzzer enforces
+# rather than an assertion we write: `-malloc_limit_mb` aborts on a single allocation above
+# the bound. 64 MiB against a 64 KiB input is three orders of magnitude of headroom over the
+# dependency's own 4 MB per-vector cap, so anything tripping it is the finding.
+#
+# `-max_len` is the transport bound itself (03-transport.md §2): fuzzing above it would spend
+# the budget on inputs the QR channel cannot deliver.
+: "${AOBS_FUZZ_MAX_LEN:=65536}"
+: "${AOBS_FUZZ_MALLOC_LIMIT_MB:=64}"
+
 echo "== cargo fuzz list"
-cargo "+${AOBS_FUZZ_TOOLCHAIN}" fuzz list
+targets="$(cargo "+${AOBS_FUZZ_TOOLCHAIN}" fuzz list)"
+echo "${targets}"
+if [ -z "${targets}" ]; then
+    echo "FAIL  no fuzz targets at all" >&2
+    exit 1
+fi
 
 echo "== cargo fuzz build"
 cargo "+${AOBS_FUZZ_TOOLCHAIN}" fuzz build
 
-echo "== cargo fuzz run placeholder -runs=${AOBS_FUZZ_RUNS}"
-cargo "+${AOBS_FUZZ_TOOLCHAIN}" fuzz run placeholder -- "-runs=${AOBS_FUZZ_RUNS}"
+for target in ${targets}; do
+    echo "== cargo fuzz run ${target} -runs=${AOBS_FUZZ_RUNS}"
+    cargo "+${AOBS_FUZZ_TOOLCHAIN}" fuzz run "${target}" -- \
+        "-runs=${AOBS_FUZZ_RUNS}" \
+        "-max_len=${AOBS_FUZZ_MAX_LEN}" \
+        "-malloc_limit_mb=${AOBS_FUZZ_MALLOC_LIMIT_MB}"
+done
 
-echo "ok    the fuzz harness builds and runs end to end"
+echo "ok    every fuzz target builds and runs end to end"
