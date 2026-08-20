@@ -256,6 +256,27 @@ if [ -n "${AOBS_QEMU_EXPECT_PANEL:-}" ]; then
     fi
 fi
 
+# 04-screens.md §3's owed measurement, as a line rather than as a screenshot: the words
+# screen's own heights — the properties its layout is built from — against the canvas the
+# appliance learned. **The ramfb row is the binding one**, because it runs at OVMF's default
+# 800x600 and that is the only geometry where this can fail: at or above the design size the
+# logical canvas is never smaller than 1280x800 (04-screens.md §0). A refusal row draws
+# nothing and prints no such line, which is why this only runs where a UI came up.
+if [ "${expect}" = "ready" ]; then
+    if ! grep -q '^AOBS_WORDS ' "${log}"; then
+        echo "FAIL  no AOBS_WORDS line, so the words screen never measured itself" >&2
+        exit 1
+    fi
+    words="$(grep -m1 '^AOBS_WORDS ' "${log}")"
+    case "${words}" in
+        *fits=yes*) echo "ok    words: ${words}" ;;
+        *)
+            echo "FAIL  two columns of 12 words do not fit this canvas: ${words}" >&2
+            exit 1
+            ;;
+    esac
+fi
+
 # The first of the eight measurements 00-overview.md owes. Derived as 1–16 s under
 # `random.trust_cpu=off`; this is the number, from a machine rather than from random.c.
 # QEMU is not target hardware, so it does not discharge the obligation — it tracks it.

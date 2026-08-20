@@ -15,6 +15,9 @@
 
 use std::time::Instant;
 
+use aobs_core::secret::Csprng32;
+use zeroize::Zeroizing;
+
 #[cfg(not(all(target_arch = "x86_64", target_os = "linux")))]
 compile_error!(
     "aobs targets x86_64 Linux only (01-boot-layer.md §7: UEFI amd64). \
@@ -73,6 +76,26 @@ fn fill(buf: &mut [u8]) -> Result<(), EntropyUnavailable> {
         }
     }
     Ok(())
+}
+
+/// The wallet's 32 bytes, from one `getrandom(2)` and nothing between us and it.
+///
+/// **This is the site the provenance release gate traces** (05-testing-and-release.md
+/// §6.2): one syscall during a seed generation, and the wallet's entropy byte-identical to
+/// what it returned once core has XORed the supplements in. A crate here would be exactly
+/// the indirection a build change is free to re-resolve underneath that trace, which is how
+/// Coldcard shipped a software PRNG for five years with correct source.
+///
+/// It blocks, like every call in this module. By the time a user reaches the create screen
+/// the pool is long initialised — `time_until_ready` waited for it before the UI came up —
+/// so the wait is nominally over; 04-screens.md §2 still shows it rather than assuming it,
+/// which is why this runs off the event loop.
+pub fn csprng_32() -> Result<Csprng32, EntropyUnavailable> {
+    // The array the syscall fills is a second copy of the material, and it is not the one
+    // the secret type will zeroize. `Zeroizing` is what wipes it on the way out of scope.
+    let mut buf = Zeroizing::new([0u8; Csprng32::LEN]);
+    fill(&mut *buf)?;
+    Ok(Csprng32::new(*buf))
 }
 
 /// Block until the kernel CSPRNG is ready and report how many milliseconds that took.

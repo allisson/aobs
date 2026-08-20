@@ -21,6 +21,7 @@ use std::rc::Rc;
 
 use slint::ComponentHandle;
 
+use crate::create::Create;
 use crate::power;
 use crate::{AppWindow, Intent, Screen};
 
@@ -63,7 +64,7 @@ impl Ending {
 /// event loop: `slint::quit_event_loop` is what ends `ui.run()`, and it carries nothing.
 /// `None` after the loop returns is 06-codes.md §5's `AOBS-E03` — a loop that ended without
 /// anyone asking it to.
-pub fn wire(ui: &AppWindow) -> Rc<Cell<Option<Ending>>> {
+pub fn wire(ui: &AppWindow, create: Rc<Create>) -> Rc<Cell<Option<Ending>>> {
     let ending = Rc::new(Cell::new(None));
 
     let sink = ending.clone();
@@ -73,9 +74,19 @@ pub fn wire(ui: &AppWindow) -> Rc<Cell<Option<Ending>>> {
             return;
         };
         match intent {
-            // The three start entries. Their screens arrive in later slices; until then the
-            // frame says so rather than swallowing the press (standing rule 8).
-            Intent::Create | Intent::Import | Intent::Restore => ui.set_screen(Screen::Unbuilt),
+            // 04-screens.md §2 and §3, and the shape of the rule holds: each arm is a
+            // destination. `begin` shows the dice screen and starts gathering behind it;
+            // `words` mixes what was gathered and shows the phrase. Neither returns a value
+            // to branch on, and nothing here reads a roll, a byte or a word.
+            Intent::Create => create.begin(&ui),
+            Intent::CreateContinue => create.words(&ui),
+
+            // The retype is #73's screen (04-screens.md §4). Until it exists the frame says
+            // so rather than swallowing the press (standing rule 8).
+            Intent::CreateConfirm => ui.set_screen(Screen::Unbuilt),
+
+            // The other two start entries. Their screens arrive in later slices.
+            Intent::Import | Intent::Restore => ui.set_screen(Screen::Unbuilt),
 
             // §13's confirm, reached identically from the footer row and from the physical
             // button. Idempotent on purpose: a second press is not a faster path to

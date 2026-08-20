@@ -139,7 +139,11 @@ as a hang.**
   and burying it also buries the one line of copy that does the work.
 
 A camera frame is captured here for the mix, silently, and skipped silently when no camera is
-present.
+present. **Silently also covers late**: the capture and the `getrandom` call run independently, so a
+driver that never hands over a buffer cannot hold up the readiness that unlocks Continue — whatever
+has arrived by the time the user presses on goes into the mix, and whatever has not is an absent
+supplement, which `02-core.md` §3 already treats as the camera-less case. No timeout is written down
+anywhere, because there is nothing for one to decide.
 
 ## 3. Create — the 24 words
 
@@ -156,10 +160,17 @@ other half. A 4×6 grid fits but has no natural reading order.
 
 An instructional banner above the words stays; it carries information.
 
-*Owed: that two columns of 12 fit the **minimum canvas** — 800×600 — at the settled type size. The
-binding case moved there when §0 fixed the floor: at or above the design size the logical canvas is
-never smaller than 1280×800, so 800×600 is the only geometry where this can fail. Measured in a 16:10
-browser frame, not on hardware.*
+**Measured, and now asserted on every boot** ([#72](https://github.com/allisson/aobs/issues/72)).
+The binding case moved to the floor when §0 fixed it: at or above the design size the logical canvas
+is never smaller than 1280×800, so 800×600 is the only geometry where this can fail. The screen is
+built from named heights — a 52 px banner, a 14 px gap, twelve **26 px** rows, a second gap and a
+48 px continue row — which sum to **440 logical px**, against the **458 px** the chrome leaves in the
+minimum canvas: 600 less a 44 px header, two 1 px rules, a 48 px footer and 24 px of slot padding top
+and bottom. The appliance reads those same properties off the layout and prints
+`AOBS_WORDS required=440 available=458 fits=yes` before the first paint; `ci/qemu-boot.sh` refuses a
+boot reporting `fits=no`, and the `ramfb` row runs at exactly that geometry. **What a sum cannot
+cover is a person looking at the panel** — `docs/qa-checklist.md` carries that row, and it is the one
+that would catch a banner that wrapped to a third line.
 
 ## 4. Create — the confirmation
 

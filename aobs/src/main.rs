@@ -1,16 +1,19 @@
 //! `aobs` — the shell.
 //!
-//! It draws, it reads the keyboard, it answers the power button, and in later slices it runs
-//! the camera. **It decides nothing about money and branches on no validation outcome**
-//! (`04-screens.md`); that rule is what keeps it honestly outside the coverage gate, and
-//! `router` is where it is visible rather than asserted.
+//! It draws, it reads the keyboard, it answers the power button, and it takes the one camera
+//! frame the entropy mix wants. **It decides nothing about money and branches on no
+//! validation outcome** (`04-screens.md`); that rule is what keeps it honestly outside the
+//! coverage gate, and `router` is where it is visible rather than asserted.
 //!
 //! The frame is [#69](https://github.com/allisson/aobs/issues/69): the start menu, the
-//! chrome that does not vanish, and §13's ending. No wallet logic, no camera, no QR.
+//! chrome that does not vanish, and §13's ending. Creating a wallet is
+//! [#72](https://github.com/allisson/aobs/issues/72) — `create`, the dice and the 24 words.
+//! No QR yet, and no scanning screen.
 
 mod buildinfo;
 mod camera;
 mod console;
+mod create;
 mod display;
 mod entropy;
 mod fail;
@@ -87,6 +90,24 @@ fn run() -> Result<Ending, Failure> {
             scale_factor: scale,
         });
 
+    // 04-screens.md §3's owed measurement, taken against the canvas the appliance just
+    // learned rather than in a browser frame: the words screen's own heights — the same
+    // properties the layout is built from — against the room the chrome leaves it. Printed
+    // on every boot, and asserted by the CI row that runs at the 800×600 floor
+    // (05-testing-and-release.md §6.2), which is the only geometry where it can fail: at or
+    // above the design size the logical canvas is never smaller than 1280×800.
+    let metrics = ui.global::<Metrics>();
+    let words_required = metrics.get_words_required();
+    let words_available = logical_height as f32 - metrics.get_words_chrome();
+    console::emit(&format!(
+        "AOBS_WORDS required={words_required:.0} available={words_available:.0} fits={}",
+        if words_required <= words_available {
+            "yes"
+        } else {
+            "no"
+        },
+    ));
+
     // 04-screens.md §1: with no camera the third start entry is visibly unavailable with its
     // reason stated, not hidden. Probed here because this is where the start menu is about
     // to be drawn — 01-boot-layer.md §7 enumerates V4L2 devices at the point of use, so a
@@ -99,9 +120,13 @@ fn run() -> Result<Ending, Failure> {
     // an input like the mode itself, not something the layout recomputes.
     ui.set_wide(display::wide(mode.width, mode.height));
 
+    // The create path's own state, and the two callbacks that carry a value rather than an
+    // intent (04-screens.md §2). Wired before the router, which holds it to reach §2 and §3.
+    let create = create::wire(&ui);
+
     // Everything the user can ask for goes through here, and nothing else. The cell is where
     // §13's answer lands, because the event loop is what ends and it carries nothing back.
-    let ending = router::wire(&ui);
+    let ending = router::wire(&ui, create.clone());
 
     // The readiness line, printed from inside the running event loop rather than before
     // it. That placement is the point: the line asserts the loop came up, which is what
@@ -139,7 +164,17 @@ fn run() -> Result<Ending, Failure> {
     // display was there, since it drew. `AOBS-E02` is no longer that case — 06-codes.md §5
     // narrowed it to *no display at all* — and E03 is what covers a loop nothing asked to
     // return.
-    ui.run().map_err(|_| Failure::EventLoopExited)?;
+    let outcome = ui.run();
+
+    // A failure raised from inside the loop outranks both the ending and the loop's own
+    // return, because it is *why* the loop ended: `AOBS-E01` is the only one that can be,
+    // and it means the kernel refused a request that is not supposed to be refusable
+    // (06-codes.md §5). Read before `outcome`, so the real reason is not overwritten by the
+    // generic one.
+    if let Some(failure) = create.failure() {
+        return Err(failure);
+    }
+    outcome.map_err(|_| Failure::EventLoopExited)?;
 
     // Nothing but §13 ends the loop, so a loop that ended with no ending in the cell ended
     // for a reason nobody asked for — which is exactly what `AOBS-E03` is (06-codes.md §5).
