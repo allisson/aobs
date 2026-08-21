@@ -234,6 +234,16 @@ call it a pass. `address-one-line=unknown` is what the appliance says when the m
 or below zero, and `ci/qemu-boot.sh` fails that too — a green on a measurement that never happened is
 worse than a red (standing rule 8).
 
+**And it is the one line the harness *waits* for** ([#82](https://github.com/allisson/aobs/issues/82)).
+Every other marker is printed before the first paint, so readiness implies it is already in the log.
+This one is printed after `AOBS_READY` by design, and the wait loop breaks the instant it sees
+readiness — so checking it in the same breath gave the measurement **zero** time. The face it needs is
+`DejaVu Sans Mono`, which nothing earlier in the boot has drawn in, so it is a cold font load every
+time. It raced and lost on CI while passing locally, which is the worst way for a gate to behave: **a
+gate that depends on winning a race is not a gate.** The fix is a bounded wait rather than moving the
+readiness line, because the two lines assert different things and are ready at different moments —
+`AOBS_READY` says the loop came up, and delaying it behind a font load would change what it means.
+
 | Row | Proves |
 |---|---|
 | **Entropy provenance** — trace the `getrandom` syscall during a seed generation and assert the wallet's entropy bytes are **byte-identical** to what the traced syscall returned; assert `crng init done` in `dmesg`; assert **zero opens of `/dev/urandom`**. | The linkage, not the intention. |
