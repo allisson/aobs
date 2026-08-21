@@ -11,7 +11,7 @@
 //! which carries a stable `AOBS-R##` and offers exactly one action — discard.
 //!
 //! **Two stages, and the order is the design.** The structural refusals — `AOBS-R01`–`R05`,
-//! `R07`, `R15` and `R16` — need no key material at all, so they run first and a hostile PSBT
+//! `R07`, `R15`, `R16` and `R17` — need no key material at all, so they run first and a hostile PSBT
 //! is thrown out before our own seed is asked anything
 //! ([#79](https://github.com/allisson/aobs/issues/79)). Then the derivation check (`R06`, `R08`,
 //! `R09`) and the review model ([#80](https://github.com/allisson/aobs/issues/80)), which need
@@ -174,6 +174,31 @@ pub enum Refusal {
     /// not of reviewing) — so two of them can claim `u64::MAX` each and every number the review
     /// panel is about would overflow the type that carries it.
     AmountOutOfRange,
+    /// `AOBS-R17` — an input that already carries a signature
+    /// ([#115](https://github.com/allisson/aobs/issues/115), `02-core.md` §7).
+    ///
+    /// **Five fields, signatures and finalized alike**: `partial_sigs`, `tap_key_sig`,
+    /// `tap_script_sigs`, `final_script_sig` and `final_script_witness`. BIP-174 has a Finalizer
+    /// *remove* `partial_sigs` when it writes the final script, so the last two are the same
+    /// signature in the other encoding and refusing one while accepting the other would draw the
+    /// line exactly where an attacker chooses.
+    ///
+    /// **It is what lets [`crate::sign::sign`] assert the delta.** `Psbt::sign` declines a
+    /// taproot key path when `tap_key_sig` is already set, so before this refusal a PSBT arriving
+    /// with 64 bytes of nonsense in that field was accepted, reviewed, held for three seconds and
+    /// handed back unchanged under a screen reading *Signed*. Nothing here checks whether an
+    /// arriving signature is *valid*, and nothing needs to: the document is refused for carrying
+    /// one at all.
+    ///
+    /// **The rule is about the input, not about ownership.** It needs no key material, so it runs
+    /// with the structural refusals and therefore before anything knows whose the input is — a
+    /// pre-signed input we do not own is refused too. We sign single-sig, so we are the only
+    /// Signer there is, and BIP-174 gives one no reason to accept an input somebody already
+    /// signed.
+    InputAlreadySigned {
+        /// Zero-based index into the inputs; the copy states it one-based.
+        input: usize,
+    },
     /// `AOBS-R06` — no input re-derives to our own key material.
     ///
     /// **Four copy requirements, one code** (`02-core.md` §7), because this refusal would
@@ -221,7 +246,7 @@ impl Refusal {
     /// which input tripped it.
     /// One entry per variant, not per copy: [`Refusal::NoInputOfOurs`] has four sentences and
     /// appears once, and the four are asserted in `psbt_tests.rs` instead.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::DuplicateKey,
         Self::PreviousTransactionAbsent { input: 0 },
         Self::PreviousTransactionMismatch { input: 0 },
@@ -232,6 +257,7 @@ impl Refusal {
         Self::UnrenderableOutput { output: 0 },
         Self::TooManyOutputs { count: 7 },
         Self::AmountOutOfRange,
+        Self::InputAlreadySigned { input: 0 },
         Self::NoInputOfOurs {
             network: Network::Mainnet,
             passphrase_in_use: false,
@@ -258,6 +284,7 @@ impl Refusal {
             Self::UnrenderableOutput { .. } => "AOBS-R07",
             Self::TooManyOutputs { .. } => "AOBS-R15",
             Self::AmountOutOfRange => "AOBS-R16",
+            Self::InputAlreadySigned { .. } => "AOBS-R17",
             Self::NoInputOfOurs { .. } => "AOBS-R06",
             Self::ChangeMismatch { .. } => "AOBS-R08",
             Self::UnscannableChangePath { .. } => "AOBS-R09",
@@ -320,6 +347,12 @@ impl Refusal {
                  the 21 million bitcoin that will ever exist, so at least one of the amounts \
                  in it is false."
                 .to_owned(),
+            Self::InputAlreadySigned { input } => format!(
+                "Input {} already carries a signature. aobs signs single-signature inputs, so \
+                 it is the only signer there is, and a transaction that already holds a \
+                 signature for an input is not asking aobs for one.",
+                input + 1
+            ),
             Self::NoInputOfOurs {
                 network,
                 passphrase_in_use,
@@ -635,6 +668,14 @@ fn check(psbt: &Psbt) -> Result<Vec<Spend>, Refusal> {
     let mut spends = Vec::with_capacity(psbt.inputs.len());
     let mut input_total: u128 = 0;
     for (index, (txin, input)) in psbt.unsigned_tx.input.iter().zip(&psbt.inputs).enumerate() {
+        // `AOBS-R17` first in the loop, because it is the one question here that needs nothing
+        // at all — not the spent output, not the script type, not our key material. An input
+        // that is both pre-signed and starved is refused for the signature, which is the more
+        // specific fact about it (`02-core.md` §7,
+        // [#115](https://github.com/allisson/aobs/issues/115)).
+        if arrived_signed(input) {
+            return Err(Refusal::InputAlreadySigned { input: index });
+        }
         let spent = spent_output(input, txin.previous_output, index)?;
         let script = classify(&spent.script_pubkey, input)
             .ok_or(Refusal::UnsupportedInputScript { input: index })?;
@@ -1012,6 +1053,21 @@ fn classify(spk: &Script, input: &Input) -> Option<InputScript> {
         return redeem.is_p2wpkh().then_some(InputScript::P2shP2wpkh);
     }
     None
+}
+
+/// Whether this input arrived carrying a signature — the whole of what
+/// [`Refusal::InputAlreadySigned`] asks, where the five fields and the reason they are five are
+/// argued.
+///
+/// It is a function rather than a line because [`crate::sign`] reads it as well, as the *arrived
+/// unsigned* half of its delta assertion: the negation of this refusal is what makes that
+/// assertion sayable, so the two must be the same predicate and not two lists to keep in step.
+pub(crate) fn arrived_signed(input: &Input) -> bool {
+    !input.partial_sigs.is_empty()
+        || input.tap_key_sig.is_some()
+        || !input.tap_script_sigs.is_empty()
+        || input.final_script_sig.is_some()
+        || input.final_script_witness.is_some()
 }
 
 /// Whether this input's sighash commits to the whole transaction.

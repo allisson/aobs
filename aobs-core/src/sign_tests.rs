@@ -31,7 +31,8 @@ use bitcoin::{Psbt, ScriptBuf, TapSighash, Transaction, TxOut, Witness};
 
 use super::sign;
 use crate::corpus::{
-    declare_input, from_hex, our_key, our_path, our_spk, psbt, psbt_for, wallet, wallet_on,
+    declare_input, from_hex, nonsense_schnorr_signature, our_key, our_path, our_spk, psbt,
+    psbt_for, wallet, wallet_on,
 };
 use crate::derive::{Family, Network, Wallet};
 use crate::psbt::{validate, Accepted};
@@ -496,6 +497,24 @@ fn an_input_declared_under_a_foreign_fingerprint_is_still_signed() {
 
     let accepted = accept(&wallet, &psbt);
     assert_eq!(sign(&wallet, &accepted).inputs[0].partial_sigs.len(), 1);
+}
+
+/// **The delta assertion has teeth** ([#115](https://github.com/allisson/aobs/issues/115)).
+///
+/// `AOBS-R17` is what keeps this shape out of the accepted set, so the only way to reach the
+/// assertion is from inside the crate: an `Accepted` obtained honestly, with a `tap_key_sig`
+/// planted afterwards. That is the shape `Psbt::sign` silently declines to sign — the whole
+/// reason #113 could not assert the delta — and a test that only checked the outgoing document
+/// would pass on it, which is what makes this the assertion's own case rather than a repeat of
+/// `each_family_signs_into_the_field_its_family_uses`.
+#[test]
+#[should_panic(expected = "arrived already signed")]
+fn an_accepted_input_that_arrived_signed_is_a_crate_bug() {
+    let wallet = wallet();
+    let mut accepted = accept(&wallet, &spend(Family::Bip86));
+    accepted.psbt.inputs[0].tap_key_sig = Some(nonsense_schnorr_signature());
+
+    let _ = sign(&wallet, &accepted);
 }
 
 /// And the other half of the same bound: **a path this wallet would never scan derives nothing.**

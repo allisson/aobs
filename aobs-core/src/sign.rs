@@ -36,6 +36,15 @@
 //! so *ours* and *signable* are one question, and the set of inputs the byte-compare found ours
 //! travels on the [`Accepted`] for this function to assert against. A document that came back with
 //! nothing in it under a screen reading *Signed* is the failure this closes.
+//!
+//! **The promise is the delta, and one refusal is what made it sayable**
+//! ([#115](https://github.com/allisson/aobs/issues/115)). #113 could only assert it of the document
+//! going out, because `Psbt::sign` declines a taproot key path whose `tap_key_sig` is already set:
+//! a signature that *arrived* satisfied the assertion, and a hostile PSBT could therefore be
+//! reviewed, held and handed back unchanged under a screen reading *Signed*. `AOBS-R17` removes
+//! that shape from the accepted set — an input arriving with a signature in any of five fields is
+//! refused before any key material — so this function can assert both halves: every input the
+//! wallet owns **arrived unsigned and comes back signed.**
 
 use core::convert::Infallible;
 
@@ -55,10 +64,12 @@ use crate::psbt::Accepted;
 ///
 /// # Panics
 ///
-/// If `Psbt::sign` reports an error, or if any input `crate::psbt::validate` found ours comes
-/// back unsigned. Both mean a precondition that function is supposed to have established did not
-/// hold — `06-codes.md` §5's `AOBS-E04` and not a refusal, because there is no refusal code for
-/// it and there is nothing here that can fail without the crate being internally inconsistent.
+/// If `Psbt::sign` reports an error, or if any input `crate::psbt::validate` found ours arrived
+/// already signed or comes back unsigned. All three mean a precondition that function is supposed
+/// to have established did not hold — `06-codes.md` §5's `AOBS-E04` and not a refusal, because
+/// there is no refusal code for it and there is nothing here that can fail without the crate being
+/// internally inconsistent. The arrived-signed half is `AOBS-R17`'s job, which is why a hostile
+/// PSBT reaches that refusal rather than this panic.
 #[must_use]
 pub fn sign(wallet: &Wallet, accepted: &Accepted) -> Psbt {
     let mut psbt = accepted.psbt.clone();
@@ -79,19 +90,34 @@ pub fn sign(wallet: &Wallet, accepted: &Accepted) -> Psbt {
     // *every input this wallet owns comes back signed.* `Psbt::sign` reports an error only for a
     // precondition it could not evaluate; an input it silently declined is an `Ok` with nothing in
     // it, which is the shape that would put a document with no signature in it under a screen
-    // reading *Signed*. What makes this sayable is that `crate::psbt` now reads an input's claim
-    // out of the map its family is signed from, so *ours* and *signable* are the same question
-    // asked once.
+    // reading *Signed*. What makes this sayable is that `crate::psbt` reads an input's claim out of
+    // the map its family is signed from, so *ours* and *signable* are the same question asked once.
     //
-    // **It is a claim about the document going out, not about this call's delta**, and that is
-    // deliberate. `Psbt::sign` declines a taproot key path when `tap_key_sig` is *already* set, so
-    // a PSBT arriving with 64 bytes of nonsense in that field would make an added-a-signature
-    // assertion panic — `AOBS-E04`, a crash and a 24-word retype, on bytes an attacker chooses,
-    // which is the trade §8a rejected. The screen's claim is that the document carries a signature
-    // for every input the wallet owns, and that is exactly what this reads. Whether a signature
-    // that arrived is a *valid* one is a different question, and it is
-    // [#115](https://github.com/allisson/aobs/issues/115) rather than answered here.
+    // **It is now the delta, which is what the screen actually claims**
+    // ([#115](https://github.com/allisson/aobs/issues/115)). #113 could only assert it of the
+    // document going out: `Psbt::sign` declines a taproot key path when `tap_key_sig` is *already*
+    // set, so an added-a-signature assertion would have panicked on a PSBT arriving with 64 bytes
+    // of nonsense in that field — `AOBS-E04`, a crash and a 24-word retype, on bytes an attacker
+    // chooses. `AOBS-R17` removed that shape from the accepted set instead, so both halves can be
+    // said, and asserting the first is what pins the refusal this one rests on.
+    //
+    // **The two halves are deliberately different predicates.** *Arrived unsigned* is `AOBS-R17`'s
+    // own five-field test, shared with the check that refuses it rather than restated. *Comes back
+    // signed* is the narrow pair this call writes — `partial_sigs` and `tap_key_sig` — because a
+    // `tap_script_sigs` entry is not the signature the input's family is signed from, and reusing
+    // the wide predicate here would let one stand in for the missing key-path signature.
+    //
+    // **And both are scoped to the inputs this call signs, where `AOBS-R17` is about every input.**
+    // That is not the assertion falling short of the refusal: what this function promises is its own
+    // delta, and for a foreign input it adds nothing and claims nothing, so a signature arriving
+    // there is not a fact about anything said here. The wider rule is the validator's, asserted
+    // where it lives — `psbt_tests.rs` on the input that is not ours, and §4's third fuzz invariant
+    // on every plan.
     for &index in &accepted.ours {
+        assert!(
+            !crate::psbt::arrived_signed(&accepted.psbt.inputs[index]),
+            "an input the validator accepted arrived already signed: {index}"
+        );
         let input = &psbt.inputs[index];
         assert!(
             !input.partial_sigs.is_empty() || input.tap_key_sig.is_some(),

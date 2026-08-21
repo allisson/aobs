@@ -10,15 +10,16 @@
 use bitcoin::bip32::{ChildNumber, Fingerprint};
 use bitcoin::hashes::Hash as _;
 use bitcoin::psbt::{Error as PsbtError, PsbtSighashType};
-use bitcoin::{Amount, ScriptBuf};
+use bitcoin::{ecdsa, Amount, PublicKey, ScriptBuf, Witness};
 
 use crate::bip39::Mnemonic;
 
 use super::*;
 use crate::corpus::declare_input;
 use crate::corpus::{
-    declare_output, from_hex, normal, one_in_one_out, our_key, our_path, our_spk, psbt, psbt_for,
-    taproot_internal_key_orphaned, taproot_key_path_diverted, wallet, wallet_on,
+    declare_output, from_hex, nonsense_schnorr_signature, normal, one_in_one_out, our_key,
+    our_path, our_spk, psbt, psbt_for, taproot_internal_key_orphaned, taproot_key_path_diverted,
+    wallet, wallet_on,
 };
 use crate::derive::{Branch, Family};
 use crate::secret::{Entropy, Passphrase};
@@ -414,9 +415,10 @@ fn all_holds_every_variant() {
             Refusal::UnrenderableOutput { .. } => 7,
             Refusal::TooManyOutputs { .. } => 8,
             Refusal::AmountOutOfRange => 9,
-            Refusal::NoInputOfOurs { .. } => 10,
-            Refusal::ChangeMismatch { .. } => 11,
-            Refusal::UnscannableChangePath { .. } => 12,
+            Refusal::InputAlreadySigned { .. } => 10,
+            Refusal::NoInputOfOurs { .. } => 11,
+            Refusal::ChangeMismatch { .. } => 12,
+            Refusal::UnscannableChangePath { .. } => 13,
         }
     }
 
@@ -801,6 +803,116 @@ fn two_inputs_summing_past_u64_are_refused_rather_than_wrapped() {
     );
 
     assert_eq!(refusal(&wallet(), &psbt), Refusal::AmountOutOfRange);
+}
+
+// --- a pre-signed input, `AOBS-R17` (`02-core.md` §7, #115) --------------------------------
+
+/// **The shape #115 was opened for.** A taproot input of ours arriving with 64 bytes of nonsense
+/// in `tap_key_sig`: `bitcoin` 0.32's key path declines an input whose `tap_key_sig` is already
+/// set, so before this refusal such a document was accepted, reviewed, held for three seconds and
+/// handed back unchanged under a screen reading *Signed*.
+#[test]
+fn a_taproot_input_arriving_with_a_key_signature_is_refused() {
+    let spk = our_spk(&wallet(), Family::Bip84);
+    let mut psbt = psbt(&[(Family::Bip86, 100_000)], &[(spk, 90_000)]);
+    psbt.inputs[0].tap_key_sig = Some(nonsense_schnorr_signature());
+
+    assert_eq!(
+        refusal(&wallet(), &psbt),
+        Refusal::InputAlreadySigned { input: 0 }
+    );
+}
+
+/// All five fields, one at a time, each on the family that can carry it. §7's argument for the
+/// width is that BIP-174 has a Finalizer *remove* `partial_sigs` when it writes the final script,
+/// so the two `final_script_*` fields are the same signature in the other encoding — and a rule
+/// that refused one and accepted the other would draw the line where the attacker chooses.
+#[test]
+fn every_signature_field_an_input_can_arrive_with_is_refused() {
+    let spk = our_spk(&wallet(), Family::Bip84);
+    let ecdsa: Vec<fn(&mut Input)> = vec![
+        |input| {
+            input.partial_sigs.insert(
+                PublicKey::new(our_key(&wallet(), Family::Bip84, 0, 0).public_key),
+                nonsense_ecdsa_signature(),
+            );
+        },
+        |input| input.final_script_sig = Some(ScriptBuf::from_bytes(vec![0x51])),
+        |input| input.final_script_witness = Some(Witness::from_slice(&[[0x42; 64].as_slice()])),
+    ];
+    for plant in ecdsa {
+        let mut psbt = psbt(&[(Family::Bip84, 100_000)], &[(spk.clone(), 90_000)]);
+        plant(&mut psbt.inputs[0]);
+        assert_eq!(
+            refusal(&wallet(), &psbt),
+            Refusal::InputAlreadySigned { input: 0 },
+            "a planted signature field was not refused"
+        );
+    }
+
+    let taproot: Vec<fn(&mut Input)> = vec![
+        |input| input.tap_key_sig = Some(nonsense_schnorr_signature()),
+        |input| {
+            let internal = input.tap_internal_key.expect("the fixture declares one");
+            input.tap_script_sigs.insert(
+                (internal, TapLeafHash::from_byte_array([0x44; 32])),
+                nonsense_schnorr_signature(),
+            );
+        },
+    ];
+    for plant in taproot {
+        let mut psbt = psbt(&[(Family::Bip86, 100_000)], &[(spk.clone(), 90_000)]);
+        plant(&mut psbt.inputs[0]);
+        assert_eq!(
+            refusal(&wallet(), &psbt),
+            Refusal::InputAlreadySigned { input: 0 },
+            "a planted taproot signature field was not refused"
+        );
+    }
+}
+
+/// **The width the check's position implies.** It needs no key material, so it runs with the
+/// structural refusals and therefore before anything knows whose the input is: a pre-signed input
+/// belonging to somebody else is refused for being pre-signed rather than reaching `AOBS-R06`.
+/// §7 argues that is the right answer independently — we are the only Signer there is.
+#[test]
+fn a_pre_signed_input_that_is_not_ours_is_refused_for_being_pre_signed() {
+    let spk = our_spk(&wallet(), Family::Bip84);
+    let mut psbt = psbt_for(&stranger(), &[(Family::Bip84, 100_000)], &[(spk, 90_000)]);
+    psbt.inputs[0].final_script_witness = Some(Witness::from_slice(&[[0x42; 64].as_slice()]));
+
+    // Without the planted field this same PSBT is `AOBS-R06`, which is what makes the assertion
+    // about the *order* rather than about the bytes.
+    assert_eq!(
+        refusal(&wallet(), &psbt),
+        Refusal::InputAlreadySigned { input: 0 }
+    );
+}
+
+/// The position is stated one-based, like every other per-input refusal, and the second input is
+/// the one that tripped it.
+#[test]
+fn the_pre_signed_refusal_names_the_input_one_based() {
+    let spk = our_spk(&wallet(), Family::Bip84);
+    let mut psbt = psbt(
+        &[(Family::Bip84, 100_000), (Family::Bip84, 100_000)],
+        &[(spk, 150_000)],
+    );
+    psbt.inputs[1].final_script_sig = Some(ScriptBuf::from_bytes(vec![0x51]));
+
+    let refusal = refusal(&wallet(), &psbt);
+    assert_eq!(refusal, Refusal::InputAlreadySigned { input: 1 });
+    assert!(refusal.reason().contains("Input 2"), "{}", refusal.reason());
+}
+
+/// `partial_sigs`, whose value is a DER-encoded ECDSA signature: the low-`s` form
+/// of `(1, 1)`, which parses and verifies nothing.
+fn nonsense_ecdsa_signature() -> ecdsa::Signature {
+    ecdsa::Signature {
+        signature: bitcoin::secp256k1::ecdsa::Signature::from_der(&from_hex("3006020101020101"))
+            .expect("a well-formed DER signature"),
+        sighash_type: EcdsaSighashType::All,
+    }
 }
 
 // --- the one advisory warning (`02-core.md` §9) --------------------------------------------

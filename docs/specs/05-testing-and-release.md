@@ -114,17 +114,22 @@ Three we write, one we skip, one deliberate exception.
    transport bounds**. Highest-value surface in the transport layer, and upstream ships no target for
    it.
 2. **The PSBT parser** on raw bytes — no panic, bounded allocation.
-3. **The validator**, structure-aware and seeded with our own test key material, asserting the two
+3. **The validator**, structure-aware and seeded with our own test key material, asserting the three
    invariants that matter: *it never accepts a transaction containing an output classified as ours
-   whose scriptPubKey we did not ourselves produce*, and — added by
+   whose scriptPubKey we did not ourselves produce*; — added by
    [#113](https://github.com/allisson/aobs/issues/113) — *every input it accepts as ours is one
-   `sign` produces a signature for.* Both are re-derived in the target with its own path arithmetic
-   through `Wallet::address`, never by asking the code under test whether it agrees with itself.
-   **The second is why this target signs**, at one signature per input of every accepted plan: the
-   set of inputs `sign` asserts over is `psbt.rs`'s own, so an independent re-derivation is the only
-   thing that turns a widened map read back into a finding. It is also the only target that calls a
-   *second* module of the crate, which is deliberate — the defect it exists for lives in the seam
-   between the two (`02-core.md` §8a).
+   `sign` produces a signature for*; and — added by
+   [#115](https://github.com/allisson/aobs/issues/115) — *an input arriving with a signature already
+   in it is never accepted at all.* The first two are re-derived in the target with its own path
+   arithmetic through `Wallet::address`, never by asking the code under test whether it agrees with
+   itself. **The second is why this target signs**, at one signature per input of every accepted
+   plan: the set of inputs `sign` asserts over is `psbt.rs`'s own, so an independent re-derivation is
+   the only thing that turns a widened map read back into a finding. It is also the only target that
+   calls a *second* module of the crate, which is deliberate — the defect it exists for lives in the
+   seam between the two (`02-core.md` §8a). **The third is what makes the second a claim about the
+   delta**: `Psbt::sign` declines a taproot key path whose `tap_key_sig` is already set, so without
+   `AOBS-R17` a signature that merely *arrived* would satisfy it — and the third invariant names no
+   code, because which one a refusal earns is the corpus's assertion and never a target's.
 4. **Skipped: Bytewords and CBOR encode/decode** — `ur` fuzzes those three targets upstream.
    Recorded so a later reviewer does not read the gap as an oversight.
 5. **Deliberate exception: the address-verification path gets no fuzz target.** Its "parser" is a
@@ -184,6 +189,9 @@ The cases:
   BIP-371's declaration ([#113](https://github.com/allisson/aobs/issues/113));
 - **a taproot input whose only verifying claim is not the internal key's** — `AOBS-R06`, the shape
   that would otherwise be accepted and come back with no signature in it (#113);
+- **a taproot input arriving with a signature already in `tap_key_sig`** — `AOBS-R17`, the shape the
+  dependency's key path silently declines, which was accepted and handed back unchanged under a
+  screen reading *Signed* ([#115](https://github.com/allisson/aobs/issues/115));
 - address-shaped entries: mixed-case bech32, truncated bech32, a valid address differing by one
   character, a valid address differing only in case, `bitcoin:` with a query string, an uppercase
   BIP-21 URI, and a correctly-formed address from the *wrong* account;

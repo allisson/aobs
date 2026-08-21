@@ -34,8 +34,9 @@ use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint, Xpub};
 use bitcoin::hashes::Hash as _;
 use bitcoin::opcodes::all::{OP_CHECKMULTISIG, OP_CHECKSIG, OP_PUSHNUM_1, OP_RETURN};
 use bitcoin::psbt::{Input, Output, Psbt, PsbtSighashType};
-use bitcoin::secp256k1::Secp256k1;
-use bitcoin::taproot::TapNodeHash;
+use bitcoin::secp256k1::{schnorr, Secp256k1};
+use bitcoin::sighash::TapSighashType;
+use bitcoin::taproot::{self, TapNodeHash};
 use bitcoin::transaction::Version;
 use bitcoin::{absolute, Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness};
 
@@ -251,6 +252,20 @@ pub(crate) fn psbt_for(
         );
     }
     psbt
+}
+
+/// 64 bytes an attacker can write into `tap_key_sig` or a `tap_script_sigs` entry
+/// ([#115](https://github.com/allisson/aobs/issues/115)).
+///
+/// Nothing verifies it, and that is `AOBS-R17`'s whole point: the refusal is for the input carrying
+/// a signature at all, so a fixture that took the trouble to be *valid* would be testing a shape no
+/// attacker needs.
+pub(crate) fn nonsense_schnorr_signature() -> taproot::Signature {
+    taproot::Signature {
+        signature: schnorr::Signature::from_slice(&[0x42; 64])
+            .expect("64 bytes is a signature's length"),
+        sighash_type: TapSighashType::Default,
+    }
 }
 
 /// The commonest honest shape: one P2WPKH input of 100 000 sat paying 90 000 to a P2WPKH
@@ -680,6 +695,22 @@ pub(crate) const CASES: &[Case] = &[
                 &[(spk, 90_000)],
             )
             .serialize()
+        },
+    },
+    Case {
+        name: "a taproot input arriving with a signature already in it",
+        code: "AOBS-R17",
+        refusal: None,
+        bytes: || {
+            // **The shape #115 was opened for.** 64 bytes of nonsense in `tap_key_sig` on an
+            // input that re-derives to ours: `bitcoin` 0.32's key path declines an input whose
+            // `tap_key_sig` is already set, so before `AOBS-R17` this document was accepted,
+            // reviewed, held for three seconds and handed back unchanged under a screen reading
+            // *Signed*. Nothing here checks the signature — that it is nonsense is the point.
+            let spk = our_spk(&wallet(), Family::Bip84);
+            let mut psbt = psbt(&[(Family::Bip86, 100_000)], &[(spk, 90_000)]);
+            psbt.inputs[0].tap_key_sig = Some(nonsense_schnorr_signature());
+            psbt.serialize()
         },
     },
     Case {
@@ -1265,8 +1296,8 @@ fn the_registry_parses_to_the_codes_it_states() {
         registry_codes(),
         [
             "AOBS-R01", "AOBS-R02", "AOBS-R03", "AOBS-R04", "AOBS-R05", "AOBS-R06", "AOBS-R07",
-            "AOBS-R15", "AOBS-R16", "AOBS-R08", "AOBS-R09", "AOBS-R10", "AOBS-R11", "AOBS-R12",
-            "AOBS-R13", "AOBS-R14",
+            "AOBS-R15", "AOBS-R16", "AOBS-R17", "AOBS-R08", "AOBS-R09", "AOBS-R10", "AOBS-R11",
+            "AOBS-R12", "AOBS-R13", "AOBS-R14",
         ]
     );
 }
