@@ -36,6 +36,15 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+/// The dependency, re-exported, because parts of this crate's surface are made of its types.
+///
+/// [`psbt::Review`] carries every number as a `bitcoin::Amount` (`02-core.md` §9) and every
+/// output's address as a `bitcoin::Address`, and [`format`]'s functions take `Amount`. A caller
+/// that could not name those types could not read the review model, so the shell would have to
+/// depend on `bitcoin` itself — and two paths to the same crate is two versions waiting to
+/// diverge. One path, named here.
+pub use bitcoin;
+
 pub mod bip39;
 pub mod derive;
 pub mod entropy;

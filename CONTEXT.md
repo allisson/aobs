@@ -211,6 +211,10 @@ exists for it.
 **The per-address screen** — one full-width screen per payment address, walked before a signature is
 produced, so the destination was provably alone on screen at the moment of approval.
 
+**The refusal screen** — where a refused transaction ends: the reason in plain language, its
+`AOBS-R##` code, and **one action, discard.** Distinct from a *bad scan*, which carries no code and
+leaves the camera up.
+
 **The gate** — the confirm action itself: hold to sign, single press to refuse. **Byte-identical with
 and without a warning.**
 

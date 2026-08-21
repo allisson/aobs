@@ -277,6 +277,37 @@ if [ "${expect}" = "ready" ]; then
     esac
 fi
 
+# 04-screens.md §11.2's two owed measurements, on the same terms: **six output rows fit the
+# minimum canvas non-scrolling beneath the stacked money facts**, and a 62-character P2TR
+# address in 4-character groups **holds one line** in it. The ramfb row is the binding one for
+# both, for the reason the words row is — and this is the row 05-testing-and-release.md §6.2
+# recorded as *waiting for the review panel*.
+#
+# `address-one-line=unknown` fails too. It is what the appliance prints when the font
+# measurement came back at or below zero, and a green on a measurement that never happened is
+# the one outcome worse than a red (standing rule 8).
+if [ "${expect}" = "ready" ]; then
+    if ! grep -q '^AOBS_REVIEW ' "${log}"; then
+        echo "FAIL  no AOBS_REVIEW line, so the review panel never measured itself" >&2
+        exit 1
+    fi
+    review="$(grep -m1 '^AOBS_REVIEW ' "${log}")"
+    case "${review}" in
+        *rows-fit=yes*) : ;;
+        *)
+            echo "FAIL  six output rows do not fit this canvas: ${review}" >&2
+            exit 1
+            ;;
+    esac
+    case "${review}" in
+        *address-one-line=yes*) echo "ok    review: ${review}" ;;
+        *)
+            echo "FAIL  a 62-character address does not hold one line here: ${review}" >&2
+            exit 1
+            ;;
+    esac
+fi
+
 # The first of the eight measurements 00-overview.md owes. Derived as 1–16 s under
 # `random.trust_cpu=off`; this is the number, from a machine rather than from random.c.
 # QEMU is not target hardware, so it does not discharge the obligation — it tracks it.

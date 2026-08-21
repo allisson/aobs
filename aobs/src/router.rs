@@ -27,6 +27,7 @@ use crate::confirm::Confirm;
 use crate::create::Create;
 use crate::load::Load;
 use crate::power;
+use crate::review::Review;
 use crate::scan::Scan;
 use crate::session::Session;
 use crate::{AppWindow, Intent, Screen};
@@ -76,6 +77,7 @@ pub fn wire(
     confirm: Rc<Confirm>,
     load: Rc<Load>,
     scan: Rc<Scan>,
+    review: Rc<Review>,
     session: Rc<Session>,
 ) -> Rc<Cell<Option<Ending>>> {
     let ending = Rc::new(Cell::new(None));
@@ -123,11 +125,21 @@ pub fn wire(
             // fingerprint that comes back.
             Intent::LoadConfirm => load.confirm(&ui),
 
-            // §7's two camera actions, which are §11.1's other two configurations. What
-            // follows a completed scan — the review panel, the address verdict — is a later
-            // slice's screen, and `Screen::Unbuilt` is what the scan dismisses to until then.
+            // §7's two camera actions, which are §11.1's other two configurations. A completed
+            // transaction scan lands on §11.2's panel and a completed address scan still lands
+            // on `Screen::Unbuilt` — but neither destination is chosen here: the payload is a
+            // value, so it goes to `review` from inside the screen that received it rather than
+            // through an arm of this match.
             Intent::Sign => scan.begin(&ui, Class::Psbt),
             Intent::VerifyAddress => scan.begin(&ui, Class::Address),
+
+            // 04-screens.md §11.2's one action and §11.3's one press. Destinations like every
+            // other arm: `sign` shows the first payment address and `advance` shows the next or
+            // the gate, and **neither reads anything about the transaction** — which output is
+            // a payment was decided by core's byte-compare, and where the walk is is `review`'s
+            // own state.
+            Intent::ReviewSign => review.sign(&ui),
+            Intent::AddressConfirm => review.advance(&ui),
 
             // §7's other two. One destination for two intents, because they *have* one
             // destination in this build — the frame names what the user asked for and says so
@@ -159,11 +171,21 @@ pub fn wire(
             // drops the scanner, and it is a no-op on every screen that has neither. It lives
             // here because Escape — and the one row a stopped scan offers, which fires this
             // same intent — is the only way off §11.1's screen that is not a completed scan.
+            //
+            // **§11.3's walk has a nearer answer too, and for the same reason the retype does:**
+            // it is a walk *through* the review, so cancelling out of it returns to the panel
+            // with the transaction still in hand. Everywhere else `review.leave` drops that
+            // transaction, which is what makes Escape off the panel and the refusal screen's one
+            // row 02-core.md §7's *discard, and nothing else* rather than a screen change.
             Intent::Cancel => {
                 scan.leave();
                 match ui.get_screen() {
                     Screen::Retype => ui.set_screen(Screen::Words),
-                    _ if session.loaded() => ui.set_screen(Screen::Identity),
+                    Screen::Address => review.back(&ui),
+                    _ if session.loaded() => {
+                        review.leave();
+                        ui.set_screen(Screen::Identity);
+                    }
                     _ => ui.set_screen(Screen::Start),
                 }
             }

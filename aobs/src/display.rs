@@ -55,6 +55,30 @@ pub fn wide(width: u32, height: u32) -> bool {
     logical(width, height).0 >= DESIGN_WIDTH as u32
 }
 
+/// How much width an address has to lay itself out in, at each of the two places one is drawn
+/// at full width: the review panel's output column, and §11.3's walk.
+///
+/// **Handed to the layout rather than read off it.** An address block's *height* is a function
+/// of how many lines its groups take, which is a function of this width — and a layout whose
+/// constraint is derived from the width it produces is the shape Slint reports as a binding
+/// loop. So the same reason [`wide`] is computed here applies one level down, with one addition:
+/// this is also the number `AOBS_REVIEW` is printed from, so the width the panel wraps against
+/// and the width CI asserts against cannot be two numbers.
+///
+/// The walk gets the whole content width in both states. The panel gets it too when the money
+/// facts are stacked above the outputs, and loses the rail and its gap when they are beside
+/// them (04-screens.md §0's second breakpoint, §11.2).
+pub fn rooms(logical_width: u32, wide: bool, padding: f32, rail: f32, gap: f32) -> (f32, f32) {
+    let content = (logical_width as f32 - 2.0 * padding).max(0.0);
+    let review = if wide {
+        (content - rail - gap).max(0.0)
+    } else {
+        content
+    };
+
+    (review, content)
+}
+
 /// Whether this mode is below the floor, in physical pixels.
 pub fn below_floor(width: u32, height: u32) -> bool {
     width < FLOOR_WIDTH || height < FLOOR_HEIGHT
@@ -118,7 +142,7 @@ pub fn window_failure() -> Failure {
 
 #[cfg(test)]
 mod tests {
-    use super::{below_floor, logical, scale, wide};
+    use super::{below_floor, logical, rooms, scale, wide};
 
     #[test]
     fn the_design_canvas_and_everything_under_it_scales_by_one() {
@@ -155,6 +179,26 @@ mod tests {
         // A tall, narrow mode is the reason this reads the logical width and not the scale:
         // the height would happily scale, and the address column is what is short.
         assert!(!wide(1024, 1600));
+    }
+
+    /// 04-screens.md §11.2: **the stacked state hands the whole width to the address column**,
+    /// and the wide state gives the rail a fixed share of it. The floor's number is the one the
+    /// owed measurement is taken against.
+    #[test]
+    fn the_stacked_state_hands_the_whole_content_width_to_the_address_column() {
+        // The floor, at the narrow breakpoint's padding.
+        assert_eq!(rooms(800, false, 24.0, 300.0, 24.0), (752.0, 752.0));
+        // The design canvas, at the wide breakpoint's padding: the rail and its gap come off
+        // the panel's column and off nothing else.
+        assert_eq!(rooms(1280, true, 44.0, 300.0, 24.0), (868.0, 1192.0));
+    }
+
+    /// A rail wider than the canvas is not a mode this appliance has — [`wide`] is false below
+    /// the design width — but the arithmetic must not go negative on the way to saying so.
+    #[test]
+    fn a_rail_wider_than_the_canvas_leaves_no_room_rather_than_negative_room() {
+        assert_eq!(rooms(200, true, 24.0, 300.0, 24.0), (0.0, 152.0));
+        assert_eq!(rooms(20, false, 24.0, 300.0, 24.0), (0.0, 0.0));
     }
 
     #[test]

@@ -89,8 +89,14 @@ three-output one.
 **Addresses wrap where they still do not fit; they are never truncated.** Wrapping in 4-character groups
 keeps every character on screen, and it remains the treatment at §11.3's larger type, where a 22 px
 address exceeds any canvas — that screen already wraps at 30 characters, so this is established rather
-than invented here. Note that the in-tree prototype renders only 42-character P2WPKH addresses, so
-**nothing in-tree has been measured against the widest address class we ship**.
+than invented here.
+
+**Both numbers above are now measured on the built ISO** ([#81](https://github.com/allisson/aobs/issues/81),
+`00-overview.md`): the appliance measures a 4-character group in this face at this size and prints
+`AOBS_REVIEW … address-required=699 address-available=752 address-one-line=yes` at the floor. The 698
+derived here was right to within a pixel. *Nothing in-tree has been measured against the widest address
+class we ship* is retired with it — the panel draws 62 characters at the floor on every boot CI takes,
+and §11.3's screen wraps the same 62 into two lines — 12 groups then 4 — at 22 px.
 
 **Keyboard only.** The software renderer draws no mouse cursor and the appliance has no pointer; the
 UI is fully keyboard-navigable by design, not by retrofit. Escape cancels wherever a cancel exists.
@@ -484,9 +490,44 @@ change outputs both count — a row is a row. The count is checked in core, befo
 Six is **set by the minimum canvas, not by the panel in front of the user**: 600 px less chrome, the
 stacked money facts, the list header and the footer leaves roughly 320 px of rows, and a single-line
 output row costs about 57 px. A bound derived from the live mode would sign a PSBT on one machine and
-refuse it on another, which no test row and no user could reason about. *Owed: that six rows fit the
-minimum canvas. Provisional in the same way the RAM floor is provisional, and movable only before the
-first signed ISO ships.*
+refuse it on another, which no test row and no user could reason about.
+
+**The tree carries this panel** as of [#81](https://github.com/allisson/aobs/issues/81) —
+`aobs/src/review.rs` and `ReviewPanel` in `aobs/ui/app.slint` — and the measurement above is no longer
+owed: it is `AOBS_REVIEW`, printed on every boot that draws and asserted by `ci/qemu-boot.sh` at the
+floor, beside `AOBS_WORDS` and for the same reason (§3, `05-testing-and-release.md` §6.2). The row
+count and the row height are two properties of `Metrics` rather than one sum, because §11.2's fallback
+is *lower the bound* and a bound can only be lowered if it is a number of its own. Six rows come to
+**447 logical px against the floor's 458** — the derivation above was pessimistic about the money
+facts and optimistic about the row, and the two errors happened to cancel.
+
+Five things it had to settle:
+
+- **The width of a 4-character group is measured, not stated.** §0's `698 px` is arithmetic over
+  DejaVu Sans Mono's advance width, and an assertion that only ever re-ran our own arithmetic would
+  prove nothing about the shipped ISO. So `AddressBlock` carries a hidden `Text` holding one group in
+  the face and size it draws in, and the console line divides that measured width by four. It comes
+  back **699 px against 752 available** at the floor, which is §0's own number to within a pixel — the derivation was
+  right, and now it is checked. A measurement that returns zero prints `address-one-line=unknown`
+  rather than a pass, for the reason `display::tier` prints `unknown` (standing rule 8).
+- **The address's width is handed in, not read off the element.** An address block's *height* is a
+  function of how many lines its groups take, which is a function of the width — and a layout whose
+  constraint is derived from the width it produces is what Slint reports as a binding loop. So
+  `display::rooms` owns the arithmetic, one level down from `display::wide` and for the same reason,
+  and the number the panel wraps against is the number the console line asserts.
+- **The wrap is arithmetic, not a flow.** Slint has no flow layout, so the groups are placed by index
+  — `x` from the position within a line, `y` from the line — against a count of groups per line
+  computed from the measured width. That is also what makes *never truncated* structural: there is no
+  clip and no elide anywhere on the address, so an address that does not fit overflows the panel and
+  the console line says so.
+- **The walk is over payments; the panel is over outputs.** Two lists, and §11.3 is why: change was
+  settled by the byte-compare, so a confirmation screen for it would spend the user's attention on the
+  one row that needs none. A consolidation therefore has no walk at all and goes straight to the gate.
+- **02-core.md §7's refusal screen is here**, which is what [#79](https://github.com/allisson/aobs/issues/79)
+  deferred to *the scanning and review work*: the reason and the code, both computed in core, and one
+  row that discards. The other half of §7 lands on the scanning screen instead — bytes that never
+  became a PSBT carry no code, so the sentence goes up, the camera stays live and the decoder is
+  replaced, which is the same shape as a wrong-class refusal (§11.1).
 
 ### 11.2.1 How the numbers are written
 
@@ -571,6 +612,13 @@ list. A device that pages 200 outputs has a review that quietly does not happen.
 
 Typed confirmation of address characters was considered and rejected: it trains the habit of checking
 only the substring typed, which is exactly what a vanity-grinding attacker matches.
+
+**Escape returns to the panel, not to the hub** ([#81](https://github.com/allisson/aobs/issues/81)).
+§0 says Escape cancels wherever a cancel exists and the router decides that by having somewhere to go
+back to; a walk *through* the review has the review as its nearest answer, the same shape §4's retype
+already has with the phrase. Everywhere else a cancel drops the transaction, which is what makes
+Escape off the panel and the refusal screen's one row 02-core.md §7's *discard, and nothing else*
+rather than a screen change.
 
 ### 11.4 The gate
 

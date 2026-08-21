@@ -47,6 +47,12 @@ export enum Intent {
     sign,
     verify-address,
     backup-export,
+    // 04-screens.md §11.2's one action: the review panel's *sign*, which starts §11.3's walk
+    // rather than producing a signature. And §11.3's own press, which advances the walk. Two
+    // names for two presses, because the frame names what the user asked for — and neither
+    // carries a position: the walk's place is `review`'s state, not a value crossing here.
+    review-sign,
+    address-confirm,
     session-end,
     shut-down,
     restart,
@@ -64,6 +70,12 @@ export enum Screen {
     load,
     identity,
     scan,
+    // 04-screens.md §11.2's panel, §11.3's per-address walk, and the discard-only screen
+    // 02-core.md §7 ends a refusal on. All three are reached from a completed transaction
+    // scan and from nowhere else.
+    review,
+    address,
+    refused,
     unbuilt,
     ending,
 }
@@ -98,6 +110,19 @@ export struct Account {
     path: string,
 }
 
+// One output row of the review panel (04-screens.md §11.2). Every field arrives already
+// written: `amount` is `format::btc`'s digits, `groups` is `format::address_groups`'s own
+// split, and `settled` is the re-derivation statement — which is present exactly when core
+// said the byte-compare ran, because §11.2's *change is settled* may not be a sentence this
+// file decides to draw.
+export struct Output {
+    index: string,
+    label: string,
+    settled: string,
+    amount: string,
+    groups: [string],
+}
+
 // The numbers the frame lays itself out with, in one place because one of them is an owed
 // measurement (00-overview.md, 04-screens.md §3): *that two columns of 12 words fit the
 // 800×600 minimum canvas at the settled type size*. The shell reads `words-required` and
@@ -126,8 +151,60 @@ export global Metrics {
     out property <length> preview-width: 320px;
     out property <length> preview-height: 240px;
 
-    out property <length> words-chrome: root.header-height + 2 * root.rule + root.footer-height
+    // What the chrome costs the screen slot at the floor, which is the narrow breakpoint's
+    // padding: the header, both rules, the footer and the slot's own padding top and bottom.
+    // One property rather than one per screen, because it is a fact about the frame — the
+    // words screen and the review panel are measured against the same number.
+    out property <length> slot-chrome: root.header-height + 2 * root.rule + root.footer-height
         + 2 * root.slot-padding;
+
+    // 04-screens.md §11.2, as the heights the panel is actually built from — the second owed
+    // measurement this global exists for. The rail's numbers and the output rows are separate
+    // properties because the bound is a *row count*: if the sum does not fit, §11.2 says the
+    // row count drops, and it can only drop if the row is a number of its own.
+    //
+    // §0 fixes the address at 17–22 px logical. The panel takes the floor of that range and
+    // §11.3's walk takes the top of it, which is the one place in this appliance where a
+    // larger type is worth a wrapped line.
+    out property <length> address-size: 17px;
+    out property <length> walk-address-size: 22px;
+    // A fact cell: the small label above the digits (§11.2.1 — the unit is a separate label,
+    // dimmer and smaller, and the digits carry no unit of their own).
+    out property <length> fact-label: 15px;
+    out property <length> fact-value: 20px;
+    out property <length> fact-cell: root.fact-label + root.fact-value;
+    out property <length> facts-spacing: 5px;
+    // The fee's three secondary readings on one line, and the advisory warning under them.
+    // Both are the fee cell's continuation rather than rows of their own, which is what keeps
+    // the warning **inline on the fee row** (§11.2) while the facts stay a two-row grid.
+    //
+    // `fee-note` is counted in the sum **whether or not the warning fires**: a transaction that
+    // trips it has to fit the same panel as one that does not, and a measurement taken without
+    // it would be a measurement of the easy case.
+    out property <length> fee-detail: 19px;
+    out property <length> fee-note: 17px;
+    out property <length> facts-stacked: 2 * root.fact-cell + root.facts-spacing
+        + root.fee-detail + root.fee-note;
+    out property <length> outputs-header: 15px;
+    out property <length> review-spacing: 6px;
+    // One output row: the label line — index, what the output is, and the amount — above the
+    // address at full width. A **minimum** rather than a fixed height, because an address that
+    // wraps must grow the row instead of being clipped (§0: never truncated). The measurement
+    // below is what asserts it does not have to at the floor.
+    out property <length> output-label: 18px;
+    out property <length> output-row: root.output-label + 1.3 * root.address-size + 3px;
+    // §11.2's bound, and 02-core.md §7 refuses a seventh before this screen exists.
+    out property <int> output-bound: 6;
+    // §11.2's one control, which the sum has to carry: a panel measured without the row that
+    // starts §11.3's walk is a panel measured without the thing it is for.
+    out property <length> review-action: 44px;
+    out property <length> review-required: root.facts-stacked + root.review-spacing
+        + root.outputs-header + root.review-spacing
+        + root.output-bound * root.output-row + root.review-spacing + root.review-action;
+    // The rail in the wide state (§11.2: *a fixed left rail*). Fixed, so the address column's
+    // width is a number rather than whatever is left over after the longest amount.
+    out property <length> rail-width: 300px;
+    out property <length> rail-gap: 24px;
 }
 
 export global Palette {
@@ -217,6 +294,129 @@ component Heading inherits Text {
     color: Palette.ink;
     font-size: 26px;
     font-weight: 600;
+}
+
+// A run of monospace groups separated by 04-screens.md §0's **sub-cell gap of about 0.25 em,
+// never a space character occupying a full monospace cell.** One component, because the two
+// places that grouping appears must not disagree about the gap: an address in 4-character
+// groups (§0) and the fee's satoshi digits in threes (§11.2.1). The group *size* differs
+// because the jobs do — four for characters compared one at a time, three for digits read as
+// a magnitude — and neither is this component's business: it is handed groups.
+//
+// Single-line. The wrapping case is [`AddressBlock`], and it is separate because wrapping
+// needs the width it is wrapping into, which a satoshi amount never comes close to.
+component Grouped inherits HorizontalLayout {
+    in property <[string]> groups;
+    in property <length> size;
+    in property <color> ink: Palette.ink;
+    in property <int> weight: 400;
+
+    alignment: start;
+    spacing: 0.25 * root.size;
+
+    for group in root.groups: Text {
+        text: group;
+        color: root.ink;
+        font-family: "DejaVu Sans Mono";
+        font-size: root.size;
+        font-weight: root.weight;
+        vertical-alignment: center;
+    }
+}
+
+// One address at full width, in §0's 4-character groups, **wrapped where the column is still
+// narrower than the address and never truncated.**
+//
+// The layout is arithmetic rather than a flow, and the arithmetic needs the width of a group.
+// **That width is measured, not stated.** `ruler` is a hidden Text carrying one group in the
+// same face and size the groups are drawn in, so `group-width` is what this font actually
+// renders rather than a metric copied out of a font table — which is the difference between an
+// assertion about the shipped ISO and an assertion about our arithmetic. The owed measurement
+// in 00-overview.md is discharged from this property (`main.rs`, `AOBS_REVIEW`).
+//
+// `room` is handed in rather than read off `self.width`. The height of this element depends on
+// how many lines the groups take, which depends on the width — and a layout whose constraint
+// is derived from the width it produces is the shape Slint reports as a binding loop. It comes
+// from `display::room`, which owns the same arithmetic the console line is printed from, so the
+// number the panel wraps against and the number CI asserts are one number.
+component AddressBlock inherits Rectangle {
+    in property <[string]> groups;
+    in property <length> size;
+    in property <length> room;
+    // §0: **both ends emphasised — the emphasis carried by weight and ink, not luminance.**
+    // Off for a change or input address, which is verified or ours and is not being compared
+    // against anything.
+    in property <bool> emphasise: true;
+
+    ruler := Text {
+        text: "0000";
+        font-family: "DejaVu Sans Mono";
+        font-size: root.size;
+        visible: false;
+    }
+
+    out property <length> group-width: ruler.preferred-width;
+    out property <length> gap: 0.25 * root.size;
+    out property <length> line: 1.3 * root.size;
+    property <int> per-line: Math.max(1,
+        Math.floor((root.room + root.gap) / (root.group-width + root.gap)));
+    out property <int> lines: Math.ceil(root.groups.length / root.per-line);
+
+    height: root.lines * root.line;
+
+    for group[i] in root.groups: Text {
+        x: Math.mod(i, root.per-line) * (root.group-width + root.gap);
+        y: Math.floor(i / root.per-line) * root.line;
+        height: root.line;
+        text: group;
+        color: root.emphasise && (i == 0 || i == root.groups.length - 1)
+            ? Palette.ink : Palette.ink-mid;
+        font-family: "DejaVu Sans Mono";
+        font-size: root.size;
+        font-weight: root.emphasise && (i == 0 || i == root.groups.length - 1) ? 700 : 400;
+        vertical-alignment: center;
+    }
+}
+
+// One money fact: 04-screens.md §11.2.1's label above the digits, with **the unit as a
+// separate label, dimmer and smaller** — and `BTC` on both networks, because ADR-0015 makes a
+// testnet session look identical and a unit label is the one place the money would have leaked
+// the network.
+component Fact inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <string> unit: "BTC";
+
+    Text {
+        text: root.label;
+        height: Metrics.fact-label;
+        color: Palette.ink-dim;
+        font-size: 13px;
+        vertical-alignment: center;
+    }
+
+    HorizontalLayout {
+        alignment: start;
+        spacing: 6px;
+
+        Text {
+            text: root.value;
+            height: Metrics.fact-value;
+            color: Palette.ink;
+            font-family: "DejaVu Sans Mono";
+            font-size: Metrics.address-size;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.unit;
+            visible: root.unit != "";
+            height: Metrics.fact-value;
+            color: Palette.ink-dim;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
 }
 
 // 04-screens.md §1. A flat three-entry menu, labelled by the input the user is holding —
@@ -1006,8 +1206,564 @@ component ScanScreen inherits Rectangle {
     }
 }
 
+// §11.2.1's **second form in satoshis that no other row carries** — grouped in threes with §0's
+// gap, because the fee is the number the eight-decimal form serves worst and the only one
+// compared against a market quoted in satoshis.
+component FeeSat inherits HorizontalLayout {
+    in property <[string]> sat;
+
+    height: Metrics.fee-detail;
+    alignment: start;
+    spacing: 5px;
+
+    Grouped {
+        groups: root.sat;
+        size: 14px;
+        ink: Palette.ink-mid;
+    }
+
+    Text {
+        text: "sat";
+        color: Palette.ink-dim;
+        font-size: 12px;
+        vertical-alignment: center;
+    }
+}
+component FeeRate inherits Text {
+    in property <string> rate;
+
+    text: root.rate + " sat/vB";
+    height: Metrics.fee-detail;
+    color: Palette.ink-mid;
+    font-family: "DejaVu Sans Mono";
+    font-size: 14px;
+    vertical-alignment: center;
+}
+// **Absent for a consolidation.** §11.2.1: the ratio is undefined with no non-change outputs,
+// and the formatter returns nothing rather than a zero, an infinity or a dash — so the absence
+// stays typed all the way to here, and this element does not exist rather than showing a dash.
+component FeePercent inherits Text {
+    in property <string> percent;
+
+    text: root.percent + "% of the amount paying";
+    height: Metrics.fee-detail;
+    color: Palette.ink-mid;
+    font-size: 14px;
+    vertical-alignment: center;
+}
+// The fee's three secondary readings, on one line: §11.2.1's **second form in satoshis that no
+// other row carries** — grouped in threes with §0's gap, because the fee is the number the
+// eight-decimal form serves worst and the only one compared against a market quoted in satoshis
+// — then the rate, then the percentage.
+//
+// **The percentage is absent for a consolidation.** §11.2.1: the ratio is undefined with no
+// non-change outputs, and the formatter returns nothing rather than a zero, an infinity or a
+// dash — so the absence stays typed all the way to here.
+component FeeDetail inherits Rectangle {
+    in property <[string]> sat;
+    in property <string> rate;
+    in property <string> percent;
+    in property <bool> stacked;
+
+    // One line at the narrow breakpoint, three in the rail. **Which way round is deliberate:**
+    // the stacked state has 752 px of width and 458 px of height, the rail has 300 and 658, and
+    // `Metrics.fee-detail` is the stacked height because that is the state the owed measurement
+    // is taken in. Found by building it — the one-line form is about 353 px and drew straight
+    // over the output column.
+    height: root.stacked ? Metrics.fee-detail : 3 * Metrics.fee-detail;
+
+    if root.stacked: HorizontalLayout {
+        alignment: start;
+        spacing: 14px;
+
+        FeeSat {
+            sat: root.sat;
+        }
+
+        FeeRate {
+            rate: root.rate;
+        }
+
+        if root.percent != "": FeePercent {
+            percent: root.percent;
+        }
+    }
+
+    if !root.stacked: VerticalLayout {
+        alignment: start;
+
+        FeeSat {
+            sat: root.sat;
+        }
+
+        FeeRate {
+            rate: root.rate;
+        }
+
+        if root.percent != "": FeePercent {
+            percent: root.percent;
+        }
+    }
+}
+
+
+
+
+// 04-screens.md §11.2's one advisory warning, **inline on the fee row**, as a full sentence in
+// colour and weight.
+//
+// No icon — an icon needs a legend and there is nowhere to put one. No banner and no dedicated
+// screen — either would sever the statement from the number it is about and manufacture a
+// dismissal keystroke. And **no acknowledgement**: there is nothing to acknowledge and no key to
+// press, so this is text and not a control.
+//
+// The sentence arrives written, from the one `match` over core's typed variant (`review.rs`).
+// Nothing here re-tests the condition that produced it (02-core.md §9).
+component FeeNote inherits Text {
+    // A **minimum**, not a height. The sentence is one line in the 752 px the stacked state
+    // gives it — which is what `Metrics.fee-note` reserves — and two in the rail, where a fixed
+    // height clipped the second one.
+    min-height: Metrics.fee-note;
+    color: Palette.crit;
+    font-size: 14px;
+    font-weight: 600;
+    vertical-alignment: center;
+    wrap: word-wrap;
+}
+
+// §11.2's money facts, in both of §0's two states and **nothing dropped in either**: it is the
+// same six facts, in one column instead of two.
+//
+// **A layout and not a Rectangle.** A conditional child of a Rectangle is absolutely positioned
+// and contributes no height, so a reflowing block built that way reports nothing to the layout
+// above it and draws straight through whatever follows. Found by building it.
+//
+// The fee's two continuation lines are siblings of both branches rather than inside them, so
+// they are the same two elements at both breakpoints — and in both they sit directly under the
+// Fee cell, which is what *inline on the fee row* comes to once the facts are a grid.
+component MoneyFacts inherits VerticalLayout {
+    in property <string> leaving;
+    in property <string> paying;
+    in property <string> returning;
+    in property <string> inputs;
+    in property <string> input-total;
+    in property <string> fee;
+    in property <[string]> fee-sat;
+    in property <string> fee-rate;
+    in property <string> fee-percent;
+    in property <string> warning;
+    in property <bool> stacked;
+
+    alignment: start;
+
+    // Stacked: two rows of cells, which hands the whole width to the address column below
+    // (§0's second breakpoint). The Fee leads the second row so its continuation lines land
+    // under it.
+    if root.stacked: VerticalLayout {
+        spacing: Metrics.facts-spacing;
+
+        HorizontalLayout {
+            spacing: 18px;
+
+            Fact {
+                label: "Leaving this wallet";
+                value: root.leaving;
+            }
+
+            Fact {
+                label: "Paying the recipients";
+                value: root.paying;
+            }
+
+            Fact {
+                label: "Returning to this wallet";
+                value: root.returning;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 18px;
+
+            Fact {
+                label: "Fee";
+                value: root.fee;
+            }
+
+            Fact {
+                label: "Inputs";
+                value: root.inputs;
+                unit: "";
+            }
+
+            Fact {
+                label: "Input total";
+                value: root.input-total;
+            }
+        }
+    }
+
+    // The fixed left rail (§11.2): the same facts read down instead of across, in the same
+    // order, so a user who has seen one breakpoint recognises the other.
+    if !root.stacked: VerticalLayout {
+        spacing: Metrics.facts-spacing;
+
+        Fact {
+            label: "Leaving this wallet";
+            value: root.leaving;
+        }
+
+        Fact {
+            label: "Paying the recipients";
+            value: root.paying;
+        }
+
+        Fact {
+            label: "Returning to this wallet";
+            value: root.returning;
+        }
+
+        Fact {
+            label: "Fee";
+            value: root.fee;
+        }
+    }
+
+    FeeDetail {
+        sat: root.fee-sat;
+        rate: root.fee-rate;
+        percent: root.fee-percent;
+        stacked: root.stacked;
+    }
+
+    // Absent rather than blank when nothing fired. The sum above reserves its height anyway,
+    // so the panel is measured against the transaction that trips it.
+    if root.warning != "": FeeNote {
+        text: root.warning;
+    }
+
+    if !root.stacked: VerticalLayout {
+        spacing: Metrics.facts-spacing;
+        padding-top: Metrics.facts-spacing;
+
+        Fact {
+            label: "Inputs";
+            value: root.inputs;
+            unit: "";
+        }
+
+        Fact {
+            label: "Input total";
+            value: root.input-total;
+        }
+    }
+}
+
+// One output row: what it is, what it pays, and the address at full width beneath it.
+//
+// **Change is presented as settled, not as a thing to check** (§11.2) — labelled as re-derived
+// from the seed at its path and matched byte for byte. That sentence comes from core's verdict
+// and is absent when there is none, which is what keeps it honest: the statement exists exactly
+// where the byte-compare ran.
+component OutputRow inherits VerticalLayout {
+    in property <Output> output;
+    in property <length> room;
+
+    // A **minimum**, and a layout rather than a Rectangle so it is one: an address that wraps
+    // has to grow the row, because §0 says it is never truncated and a fixed row height would
+    // have drawn the second line over the next output. Found by building it.
+    min-height: Metrics.output-row;
+    alignment: start;
+    spacing: 3px;
+
+    HorizontalLayout {
+        height: Metrics.output-label;
+        spacing: 8px;
+
+        Text {
+            text: root.output.index;
+            width: 16px;
+            color: Palette.ink-dim;
+            font-family: "DejaVu Sans Mono";
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.output.label;
+            color: Palette.ink;
+            font-size: 14px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+
+        // The one thing on this panel that may be shortened, and §0 says which: change and
+        // input addresses may be, *because they are verified or ours*. This is not an address
+        // at all — it is the statement about one — and the path it names is repeated on §11.3's
+        // screen for every payment. A payment address is never elided anywhere.
+        Text {
+            text: root.output.settled;
+            visible: root.output.settled != "";
+            color: Palette.ink-dim;
+            font-size: 13px;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+
+        Text {
+            text: root.output.amount;
+            color: Palette.ink;
+            font-family: "DejaVu Sans Mono";
+            font-size: 15px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: "BTC";
+            color: Palette.ink-dim;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+
+    AddressBlock {
+        groups: root.output.groups;
+        size: Metrics.address-size;
+        room: root.room;
+    }
+}
+
+// The output list and the one control the panel carries. Its own component so the two
+// breakpoints hang the same thing in two places rather than two copies of it.
+component Outputs inherits VerticalLayout {
+    in property <[Output]> outputs;
+    in property <length> room;
+    in property <int> selected;
+
+    alignment: start;
+    spacing: Metrics.review-spacing;
+
+    Text {
+        text: "Outputs";
+        height: Metrics.outputs-header;
+        color: Palette.ink-dim;
+        font-size: 13px;
+        letter-spacing: 0.8px;
+        vertical-alignment: center;
+    }
+
+    VerticalLayout {
+        for output in root.outputs: OutputRow {
+            output: output;
+            room: root.room;
+        }
+    }
+
+    // §11.3: pressing sign walks one full-width screen per payment address **before** the
+    // signature is produced. The label says so, because a control that said *sign* and then
+    // showed another screen would have lied about what the press does.
+    Choice {
+        height: Metrics.review-action;
+        label: "Sign this transaction";
+        note: "Each payment address is shown on its own screen first.";
+        current: root.selected == 0;
+    }
+}
+
+// 04-screens.md §11.2. **A single non-scrolling panel carrying the whole transaction** — no
+// `Flickable`, no `ScrollView` and no clipped region anywhere in it, which is why the two
+// numbers `main.rs` prints are the guard rather than a comment: the panel cannot hide an
+// overflow, so a canvas it does not fit is a boot CI fails.
+//
+// **Nothing that should stop a transaction appears here.** Refusals happen in core before this
+// screen is drawn at all (02-core.md §7), and the one thing on it that is neither a number nor
+// an address is the advisory sentence on the fee row.
+component ReviewPanel inherits VerticalLayout {
+    in property <string> leaving;
+    in property <string> paying;
+    in property <string> returning;
+    in property <string> inputs;
+    in property <string> input-total;
+    in property <string> fee;
+    in property <[string]> fee-sat;
+    in property <string> fee-rate;
+    in property <string> fee-percent;
+    in property <string> warning;
+    in property <[Output]> outputs;
+    in property <length> room;
+    in property <bool> wide;
+    in property <int> selected;
+
+    alignment: start;
+    spacing: Metrics.review-spacing;
+
+    if root.wide: HorizontalLayout {
+        spacing: Metrics.rail-gap;
+
+        MoneyFacts {
+            width: Metrics.rail-width;
+            stacked: false;
+            leaving: root.leaving;
+            paying: root.paying;
+            returning: root.returning;
+            inputs: root.inputs;
+            input-total: root.input-total;
+            fee: root.fee;
+            fee-sat: root.fee-sat;
+            fee-rate: root.fee-rate;
+            fee-percent: root.fee-percent;
+            warning: root.warning;
+        }
+
+        Outputs {
+            outputs: root.outputs;
+            room: root.room;
+            selected: root.selected;
+        }
+    }
+
+    if !root.wide: MoneyFacts {
+        stacked: true;
+        leaving: root.leaving;
+        paying: root.paying;
+        returning: root.returning;
+        inputs: root.inputs;
+        input-total: root.input-total;
+        fee: root.fee;
+        fee-sat: root.fee-sat;
+        fee-rate: root.fee-rate;
+        fee-percent: root.fee-percent;
+        warning: root.warning;
+    }
+
+    if !root.wide: Outputs {
+        outputs: root.outputs;
+        room: root.room;
+        selected: root.selected;
+    }
+}
+
+// 04-screens.md §11.3. **One full-width screen per payment address**, and the only structure
+// that guarantees the address was alone on screen at the moment of approval — destination
+// substitution is the attack this whole screen exists to catch.
+//
+// **The warning is absent here.** These screens exist for one job, and a fee statement on them
+// dilutes exactly the property they were bought for. There is no other number on them either
+// beyond the one this output pays.
+component AddressScreen inherits Rectangle {
+    in property <string> heading;
+    in property <string> amount;
+    in property <[string]> groups;
+    in property <length> room;
+    in property <bool> last;
+    in property <int> selected;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: 18px;
+
+        Heading {
+            text: root.heading;
+        }
+
+        HorizontalLayout {
+            alignment: start;
+            spacing: 8px;
+
+            Text {
+                text: root.amount;
+                color: Palette.ink;
+                font-family: "DejaVu Sans Mono";
+                font-size: 20px;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: "BTC";
+                color: Palette.ink-dim;
+                font-size: 14px;
+                vertical-alignment: center;
+            }
+        }
+
+        // §0: the wrapping treatment remains at §11.3's larger type, where a 22 px address
+        // exceeds any canvas we ship. Wrapped in the same 4-character groups, never truncated.
+        AddressBlock {
+            groups: root.groups;
+            size: Metrics.walk-address-size;
+            room: root.room;
+        }
+
+        Choice {
+            label: root.last ? "This is the address I mean" : "This is the address I mean — show the next one";
+            note: "Escape returns to the review panel.";
+            current: root.selected == 0;
+        }
+    }
+}
+
+// 02-core.md §7's refusal, as the screen it ends on: **the specific reason in plain language, a
+// stable machine-readable code alongside it, and exactly one action — discard.**
+//
+// No *proceed anyway*, not behind a confirmation and not in an advanced menu. Both strings are
+// computed in core, which is where the refusal is (standing rule 4); this file adds no sentence
+// of its own, because a second copy of a refusal's copy is a second copy that can drift.
+component RefusedScreen inherits Rectangle {
+    in property <string> reason;
+    in property <string> code;
+    in property <int> selected;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: 18px;
+
+        Heading {
+            text: "This transaction was refused.";
+        }
+
+        Rectangle {
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: Palette.crit;
+            background: Palette.panel;
+
+            HorizontalLayout {
+                padding: 16px;
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 6px;
+
+                    Text {
+                        text: root.reason;
+                        color: Palette.ink;
+                        font-size: 17px;
+                        wrap: word-wrap;
+                    }
+
+                    Text {
+                        text: root.code;
+                        color: Palette.crit;
+                        font-family: "DejaVu Sans Mono";
+                        font-size: 13px;
+                    }
+                }
+            }
+        }
+
+        Choice {
+            label: "Discard";
+            note: "Nothing was signed. The transaction is gone.";
+            current: root.selected == 0;
+        }
+    }
+}
+
 // The honest placeholder. It exists so that choosing a real entry is not a dead press while
-// the screens behind it are still being built (#75, #81, #84, #85).
+// the screens behind it are still being built (#75, #82, #84, #85).
 component Unbuilt inherits Rectangle {
     VerticalLayout {
         alignment: start;
@@ -1131,6 +1887,65 @@ export component AppWindow inherits Window {
     in property <string> scan-code;
     in property <bool> scan-stopped;
 
+    // The review panel (§11.2) and §11.3's walk. **Every string here arrives already written**
+    // — `format.rs` wrote the digits, `format::address_groups` did the 4-character split, core
+    // wrote the refusal's sentence, and `review.rs` turned the one typed warning variant into
+    // the one sentence. Nothing in this file formats an amount, splits an address or tests a
+    // condition (standing rule 4, 02-core.md §9).
+    //
+    // `review-percent` and `review-warning` are empty when the fact does not exist: a
+    // consolidation has no ratio and most transactions trip no warning, and §11.2.1 makes both
+    // absences typed in core rather than rendered as a zero or a dash.
+    in property <string> review-leaving;
+    in property <string> review-paying;
+    in property <string> review-returning;
+    in property <string> review-inputs;
+    in property <string> review-input-total;
+    in property <string> review-fee;
+    in property <[string]> review-fee-sat;
+    in property <string> review-fee-rate;
+    in property <string> review-fee-percent;
+    in property <string> review-warning;
+    in property <[Output]> review-outputs;
+    in property <string> address-heading;
+    in property <string> address-amount;
+    in property <[string]> address-groups;
+    in property <bool> address-last;
+    // 02-core.md §7's two halves, both computed in core.
+    in property <string> refusal-reason;
+    in property <string> refusal-code;
+
+    // How much width an address has to lay itself out in, at each of the two places one is
+    // drawn at full width. Handed in from `display::room` rather than read off an element's
+    // own width: the address block's *height* is a function of this, and a layout whose
+    // constraint is derived from the width it produces is what Slint reports as a binding loop.
+    // It is also what makes the number the panel wraps against the same number `AOBS_REVIEW`
+    // asserts (05-testing-and-release.md §6.2).
+    in property <length> review-room;
+    in property <length> walk-room;
+
+    // The measuring instrument behind that assertion, and it is deliberately **the component
+    // that draws**: `AddressBlock` measures one 4-character group in the face and size it
+    // renders in, so `AOBS_REVIEW` reports what this font does on this machine rather than a
+    // metric copied out of a font table. Zero-sized and clipped rather than hidden, so it is
+    // laid out by exactly the code path a real address goes through.
+    //
+    // It carries no groups: `group-width` is a property of the ruler inside it, not of the
+    // address handed to it.
+    Rectangle {
+        width: 0px;
+        height: 0px;
+        clip: true;
+
+        gauge := AddressBlock {
+            size: Metrics.address-size;
+            room: 0px;
+        }
+    }
+
+    out property <length> address-cell: gauge.group-width / 4;
+    out property <length> address-gap: gauge.gap;
+
     callback intent(Intent);
     // The callbacks that carry a value rather than an intent, and so bypass the router
     // (standing rule 4): a die face is a byte the user typed, a letter of the retype is one
@@ -1178,6 +1993,13 @@ export component AppWindow inherits Window {
         // A refusal that leaves the camera up therefore adds no row either, which is what
         // makes *the screen stays live* structural rather than remembered.
         : root.screen == Screen.scan ? (root.scan-stopped ? 1 : 0)
+        // §11.2's one action, §11.3's one press, and §7's one action. Each of these screens
+        // carries exactly one row, and on the refusal screen that is the whole of 02-core.md
+        // §7's *exactly one action: discard* — there is no second row for this frame to grow a
+        // *proceed anyway* into.
+        : root.screen == Screen.review ? 1
+        : root.screen == Screen.address ? 1
+        : root.screen == Screen.refused ? 1
         : 0;
     property <int> rows: root.screen-rows + 1;
     property <int> session-row: root.rows - 1;
@@ -1285,6 +2107,18 @@ export component AppWindow inherits Window {
             // The one row a stopped scan has, and it fires the same intent Escape does: the
             // router already knows what this screen came from, so there is nothing here to
             // decide about where *back* is.
+            root.intent(Intent.cancel);
+        } else if (root.screen == Screen.review) {
+            root.intent(Intent.review-sign);
+        } else if (root.screen == Screen.address) {
+            // One intent for every screen of the walk. Which address this was is `review`'s
+            // state, and *whether another follows* is its answer too — a frame that counted
+            // them would be a second place that knows how many payments there are.
+            root.intent(Intent.address-confirm);
+        } else if (root.screen == Screen.refused) {
+            // The same intent Escape fires, for the reason the stopped scan's row does: §7's
+            // one action is *discard*, the router already knows where a discard goes, and a
+            // second path to it is a second path that can drift.
             root.intent(Intent.cancel);
         } else if (root.screen == Screen.identity) {
             root.intent(root.selected == 0 ? Intent.watch-only
@@ -1468,6 +2302,38 @@ export component AppWindow inherits Window {
                         note: root.scan-note;
                         code: root.scan-code;
                         stopped: root.scan-stopped;
+                        selected: root.selected;
+                    }
+
+                    if root.screen == Screen.review: ReviewPanel {
+                        leaving: root.review-leaving;
+                        paying: root.review-paying;
+                        returning: root.review-returning;
+                        inputs: root.review-inputs;
+                        input-total: root.review-input-total;
+                        fee: root.review-fee;
+                        fee-sat: root.review-fee-sat;
+                        fee-rate: root.review-fee-rate;
+                        fee-percent: root.review-fee-percent;
+                        warning: root.review-warning;
+                        outputs: root.review-outputs;
+                        room: root.review-room;
+                        wide: root.wide;
+                        selected: root.selected;
+                    }
+
+                    if root.screen == Screen.address: AddressScreen {
+                        heading: root.address-heading;
+                        amount: root.address-amount;
+                        groups: root.address-groups;
+                        room: root.walk-room;
+                        last: root.address-last;
+                        selected: root.selected;
+                    }
+
+                    if root.screen == Screen.refused: RefusedScreen {
+                        reason: root.refusal-reason;
+                        code: root.refusal-code;
                         selected: root.selected;
                     }
 
