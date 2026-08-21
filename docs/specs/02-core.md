@@ -317,7 +317,7 @@ a check are hostile until proven otherwise — discard, zeroize, no retry with t
 | Any input lacking a **`non_witness_utxo` that hashes to its outpoint's txid** — taproot excepted, where `witness_utxo` suffices | The amount is otherwise an unverified assertion the user cannot check. |
 | Sighash other than `SIGHASH_ALL` (or `SIGHASH_DEFAULT` for taproot) | No user can evaluate what signing under `SIGHASH_SINGLE` exposes them to. |
 | Sum of outputs exceeds sum of inputs | Structurally impossible; a lie by construction. |
-| An input whose script type is outside BIP44/49/84/86 single-sig | We would be signing something we do not model. |
+| An input whose script type is outside BIP44/49/84/86 single-sig — **including a taproot input that does not declare its internal key** (§8a) | We would be signing something we do not model. |
 | An input that does not re-derive to our own key material | Foreign inputs mean the displayed cost is not the user's alone. |
 | An output we cannot render as an address | The user would be approving hex. |
 | **More than six outputs**, payment and change counted together | The review panel is non-scrolling and holds six rows in the minimum canvas (`04-screens.md` §11.2). A seventh output could only be shown by scrolling, clipping or summarising it, and all three mean approving what was not seen. |
@@ -435,6 +435,58 @@ refusal model, computed here — the shell must not branch on it (standing rule 
 - **Named cost:** our output is as large as their input.
 - **Owed:** pin whether BIP-174 explicitly forbids a Signer removing fields, rather than resting on
   the role separation alone.
+
+### 8a. What building §8 settled
+
+Three things this section could not have known, recorded here because a later reader would otherwise
+take the prose above literally and find something missing
+([#82](https://github.com/allisson/aobs/issues/82)).
+
+**`sign` is total over everything `validate` accepts, and making that true changed §7.** It takes an
+`Accepted` and returns a `Psbt` — no `Result`, and no refusal code, because `06-codes.md` has none
+and a signing failure is `AOBS-E04` rather than something a screen states. That is only honest if
+nothing the validator accepts can fail to sign, and two gaps had to be closed for it:
+
+- **A taproot input must declare its internal key**, which is now part of `AOBS-R05`. `Psbt::sign`
+  reads the key-path spend out of `PSBT_IN_TAP_INTERNAL_KEY`, and BIP-371 makes that field the
+  declaration that the spend *is* a key path — so an input without it has not declared the script
+  type §7's fifth row is about. Accepting one would mean accepting a transaction we cannot sign, and
+  the PSBT would leave the appliance looking signed and carrying nothing. It is the existing code
+  because it is the existing question, not a new refusal.
+- **The signing key source ignores the fingerprint**, which is §7's own input rule one layer down.
+  The dependency's `impl GetKey for Xpriv` answers only for a matching fingerprint, so a transaction
+  accepted under §7's *"a coordinator that filled the fingerprint in wrongly should not make a
+  wallet unsignable"* would have been accepted and then signed nothing. What bounds the key source
+  instead is `Wallet`'s own scanning rule — five children, one of our four accounts on the loaded
+  network, `path[-2] ∈ {0, 1}`, a normal final index — so the set of paths a private key can be
+  derived at is decided by the module that owns what *ours* means and never by a PSBT.
+
+**One gap stays open, named rather than closed, and it is the reason `sign` does not assert that it
+signed anything.** A taproot input whose declared internal key is *not* the key its `scriptPubKey` is
+the tweak of passes every structural check and every derivation check above — `AOBS-R05` sees a
+declared key-path spend and `AOBS-R06` is satisfied by whichever claim byte-verifies — and is then
+unsignable, because the dependency signs the key path from `PSBT_IN_TAP_INTERNAL_KEY` and that key is
+not ours. Such an input is unfinalizable by anybody, so no honest coordinator produces one. **What to
+do about it is not answered here.** Refusing needs either a code `06-codes.md` does not define or a
+widening of the derivation check to compare the declared internal key against the one the output key
+is the tweak of; asserting would turn a hostile PSBT into a crash and a 24-word retype, which is a
+worse trade than the alternative. So the document goes back out as it came in and the coordinator
+refuses it in seconds, and **closing it properly is [#113](https://github.com/allisson/aobs/issues/113).**
+
+**`sign_schnorr_no_aux_rand` is the deterministic arm, and which arm gets used is a feature flag
+rather than a call site.** `Psbt::sign` reaches `sign_schnorr` with fresh auxiliary randomness when
+`secp256k1`'s `rand-std` is enabled anywhere in the graph. Nothing in the workspace enables it, and
+the alarm is a test asserting that two signatures over the same transaction are byte-identical — a
+non-deterministic signature still verifies, so nothing else would notice.
+
+**BIP-341's key-path vectors are the suite, and BIP-340's are nearly not.** Only the index-0 row of
+`bip-0340/test-vectors.csv` has all-zero auxiliary randomness, so it is the only row of that file
+this path can reproduce. **All seven of `bip-0341/wallet-test-vectors.json`'s key-path signatures were
+generated with 32 zero bytes**, which is exactly what `sign_schnorr_no_aux_rand` computes — checked
+against an independent BIP-340 implementation before the tests were written. That is seven cases
+covering every sighash type and three non-trivial merkle roots, which is what makes the *tweak*
+asserted rather than assumed: a wrong tweak still produces a valid BIP-340 signature, under a key
+that does not spend the output.
 
 ## 9. The review model
 

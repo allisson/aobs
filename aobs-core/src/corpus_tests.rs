@@ -234,6 +234,12 @@ pub(crate) fn psbt_for(
         if family == Family::Bip49 {
             slot.redeem_script = Some(our_redeem_script(wallet));
         }
+        // BIP-371's declaration that this is a key-path spend, which `AOBS-R05` requires and
+        // which the taproot signing path reads the internal key out of. The *internal*
+        // x-only key, untweaked — the tweak is what the `scriptPubKey` already carries.
+        if family == Family::Bip86 {
+            slot.tap_internal_key = Some(our_key(wallet, family, 0, 0).to_x_only_pub());
+        }
         // The origin an honest coordinator declares. Without it no input re-derives to ours and
         // every case here would refuse on `AOBS-R06` before reaching what it is about.
         declare_input(

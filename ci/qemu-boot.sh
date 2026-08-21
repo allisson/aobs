@@ -286,10 +286,36 @@ fi
 # `address-one-line=unknown` fails too. It is what the appliance prints when the font
 # measurement came back at or below zero, and a green on a measurement that never happened is
 # the one outcome worse than a red (standing rule 8).
+#
+# **This one is waited for, and the others are not.** Every other line above is printed before
+# the first paint, so readiness implies it is already in the log. `AOBS_REVIEW` is deliberately
+# printed from *inside* the event loop, after `AOBS_READY`, because the address half is a font
+# measurement and a `Text`'s preferred width is not a number this backend has before the font is
+# loaded (§6.2). The loop above breaks the instant it sees readiness, so checking this one
+# immediately gives the measurement **zero** time — and the face it needs is `DejaVu Sans Mono`,
+# which nothing before it has drawn in, so it is a cold font load on every boot. That raced and
+# lost on CI ([#82](https://github.com/allisson/aobs/issues/82)) while passing locally, which is
+# the worst way for a gate to behave: a gate that depends on winning a race is not a gate.
 if [ "${expect}" = "ready" ]; then
-    if ! grep -q '^AOBS_REVIEW ' "${log}"; then
-        echo "FAIL  no AOBS_REVIEW line, so the review panel never measured itself" >&2
+    measured="${AOBS_QEMU_MEASURE_WAIT:-120}"
+    reviewed=0
+    elapsed=0
+    while [ "${elapsed}" -le "${measured}" ]; do
+        if grep -q '^AOBS_REVIEW ' "${log}" 2>/dev/null; then
+            reviewed=1
+            break
+        fi
+        # A machine that went down is not going to print it. Say which of the two happened.
+        kill -0 "${qemu}" 2>/dev/null || break
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    if [ "${reviewed}" -eq 0 ]; then
+        echo "FAIL  no AOBS_REVIEW line after ${elapsed}s, so the review panel never measured itself" >&2
         exit 1
+    fi
+    if [ "${elapsed}" -gt 0 ]; then
+        echo "  ${elapsed}s for the review panel to measure itself"
     fi
     review="$(grep -m1 '^AOBS_REVIEW ' "${log}")"
     case "${review}" in

@@ -138,7 +138,6 @@ None of these blocks implementation. All of them block the release gate
 | That the four-descriptor `crypto-account` payload fits one QR at ECC H (estimated ~460 B CBOR → ~1,000 UR chars). | [#27](https://github.com/allisson/aobs/issues/27) |
 | That a phone camera reads our v27 output at arm's length (v40 is the documented fallback — and the maximum UR fragment length is re-derived from the new cap, `03-transport.md` §9). | [#30](https://github.com/allisson/aobs/issues/30) |
 | The capture-resolution floor for reading an inbound v40 symbol. | [#31](https://github.com/allisson/aobs/issues/31) |
-| That the predicted signed-transaction vsize the fee rate divides by matches a real signed transaction across all four script types (derived: a weight-unit sum charging each ECDSA input a 71-byte signature element, so it errs high by a fraction of a percent — `04-screens.md` §11.2.1). | [#100](https://github.com/allisson/aobs/issues/100) |
 
 **Discharged.** Three rows have left this table, and all three left it as *standing* assertions rather
 than one-off readings — printed by the appliance and checked by `ci/qemu-boot.sh` on every boot that
@@ -160,6 +159,21 @@ the thing that knows the answer, and every other row on this table asks about ha
   re-run of our own arithmetic. The prototype's *nothing in-tree has been measured against the widest
   address class we ship* no longer holds: the panel renders 62 characters at the floor on every boot
   CI takes.
+
+**Discharged, differently.** A fourth row has left the table, and it left as a *test* rather than as a
+printed line, because the appliance is not what knows the answer — a signed transaction is.
+
+- *That the predicted signed-transaction vsize the fee rate divides by matches a real signed
+  transaction across all four script types*: **measured against transactions this suite signs and then
+  finalizes by hand** ([#82](https://github.com/allisson/aobs/issues/82), `02-core.md` §8a). The
+  prediction is never above the real vsize and never more than one vbyte per ECDSA input below it, so
+  `04-screens.md` §11.2.1's promise holds in the stated direction: **the displayed rate is never lower
+  than the rate that will be paid.** The 1-in/2-out figures land exactly — P2WPKH 141 predicted and
+  141 real, P2TR 154 and 154 — and **P2PKH is 225 predicted against 226 real**, which is the one
+  discrepancy and is the published 226 figure arriving from the other direction: it charges the
+  72-byte DER element we deliberately do not. A ten-input P2WPKH consolidation is 719 against 720.
+  Finalizing is a test-only step; §8 forbids the appliance the Finalizer role, and what is forbidden
+  is emitting a finalized document rather than measuring one.
 
 Eight verification obligations, distinct from measurements:
 
@@ -193,6 +207,12 @@ Eight verification obligations, distinct from measurements:
 
 - **Pin whether BIP-174 explicitly forbids a Signer removing fields**, rather than resting on the
   role separation alone ([#30](https://github.com/allisson/aobs/issues/30)).
+- **A taproot input whose declared internal key is not the key its `scriptPubKey` is the tweak of is
+  accepted and then unsignable** ([#82](https://github.com/allisson/aobs/issues/82),
+  `02-core.md` §8a). It is unfinalizable by anybody, so no honest coordinator produces one, and the
+  current outcome is a PSBT the coordinator refuses rather than a refusal we state. Closing it needs
+  either a new `AOBS-R##` or a widening of the derivation check, and the spec answers neither, so it is
+  [#113](https://github.com/allisson/aobs/issues/113) rather than a decision taken in code.
 - **Nunchuk's `crypto-account` support is unverified**, not assumed
   ([#27](https://github.com/allisson/aobs/issues/27)).
 - **That the master fingerprint is identical on every network** is read from the BIP-32 text, not

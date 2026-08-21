@@ -15,6 +15,9 @@
 //! grew the capture loop, `qr` is `rqrr` on a luma plane, and `scan` is §11.1's one screen in
 //! its three configurations. [#81](https://github.com/allisson/aobs/issues/81) is `review`:
 //! §11.2's panel, §11.3's per-address walk, and the screen 02-core.md §7's refusal ends on.
+//! [#82](https://github.com/allisson/aobs/issues/82) is the far side of it: §11.4's hold-to-confirm
+//! gate, core's signing call, and `outbound` — §11.5's animation at 4 fps and 02-core.md §12's one
+//! re-display slot.
 
 mod buildinfo;
 mod camera;
@@ -24,9 +27,11 @@ mod create;
 mod display;
 mod entropy;
 mod fail;
+mod gate;
 mod identity;
 mod load;
 mod notify;
+mod outbound;
 mod power;
 mod qr;
 mod review;
@@ -148,6 +153,15 @@ fn run() -> Result<Ending, Failure> {
     ui.set_review_room(review_room);
     ui.set_walk_room(walk_room);
 
+    // §11.5's symbol is a square, so it takes the tighter of the two axes — and it is handed in
+    // for the reason the two rooms above are: a square sized by what is left over is a constraint
+    // derived from the space it consumes.
+    ui.set_outbound_room(display::qr_side(
+        walk_room,
+        slot_height,
+        metrics.get_outbound_chrome(),
+    ));
+
     // 04-screens.md §1: with no camera the third start entry is visibly unavailable with its
     // reason stated, not hidden. Probed here because this is where the start menu is about
     // to be drawn — 01-boot-layer.md §7 enumerates V4L2 devices at the point of use, so a
@@ -178,7 +192,16 @@ fn run() -> Result<Ending, Failure> {
     // the one thing on this path that needs the wallet, and it is built before `scan` because a
     // completed transaction scan hands its payload straight to it (standing rule 4: a payload is
     // a value and does not cross the router).
-    let review = review::wire(session.clone());
+    // §11.4's hold. Wired before the router because it produces an intent the router marshals,
+    // and it holds nothing but a clock (04-screens.md §11.4).
+    let _gate = gate::wire(&ui);
+
+    // §11.5's animation and 02-core.md §12's one slot. Built before `review`, which holds it:
+    // signed bytes are a value, so they go from the screen that produced them to the screen that
+    // shows them rather than through the router (standing rule 4).
+    let outbound = outbound::wire();
+
+    let review = review::wire(session.clone(), outbound.clone());
 
     // §11.1's one scanning screen, in whichever of its three configurations the router asks
     // for. It holds no wallet and no payload: the camera thread and core's `Scanner` are the
@@ -187,7 +210,18 @@ fn run() -> Result<Ending, Failure> {
 
     // Everything the user can ask for goes through here, and nothing else. The cell is where
     // §13's answer lands, because the event loop is what ends and it carries nothing back.
-    let ending = router::wire(&ui, create.clone(), confirm, load, scan, review, session);
+    let ending = router::wire(
+        &ui,
+        router::Screens {
+            create: create.clone(),
+            confirm,
+            load,
+            scan,
+            review,
+            outbound,
+            session,
+        },
+    );
 
     // The readiness line, printed from inside the running event loop rather than before
     // it. That placement is the point: the line asserts the loop came up, which is what

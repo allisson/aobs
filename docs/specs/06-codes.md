@@ -122,7 +122,7 @@ Structural, from `02-core.md` §7:
 | `AOBS-R02` | An input lacking a `non_witness_utxo` that hashes to its outpoint's txid (taproot excepted). |
 | `AOBS-R03` | A sighash other than `SIGHASH_ALL`, or `SIGHASH_DEFAULT` for taproot. |
 | `AOBS-R04` | The sum of outputs exceeds the sum of inputs. |
-| `AOBS-R05` | An input whose script type is outside BIP44/49/84/86 single-sig. |
+| `AOBS-R05` | An input whose script type is outside BIP44/49/84/86 single-sig — **including a taproot input that does not declare its internal key** ([#82](https://github.com/allisson/aobs/issues/82), `02-core.md` §8a). Widened rather than given a code of its own, because BIP-371 makes `PSBT_IN_TAP_INTERNAL_KEY` the declaration that the spend *is* a key path: an input without it has not declared the script type this row is about. |
 | `AOBS-R06` | No input re-derives to our own key material. **Four copy variants, one code** — the passphrase, account 0, the loaded network, and the coin-type mismatch (`02-core.md` §7). |
 | `AOBS-R07` | An output we cannot render as an address. |
 | `AOBS-R15` | More than six outputs, payment and change counted together — the review panel is non-scrolling and holds six rows in the minimum canvas ([#58](https://github.com/allisson/aobs/issues/58)). Numbered after `R14` rather than beside the other structural refusals, because the registry is sequential and never renumbered for tidiness. |

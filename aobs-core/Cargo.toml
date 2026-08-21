@@ -18,6 +18,7 @@ description = "Wallet logic for aobs: no hardware, no I/O, no clock."
 # that HMAC is fifteen lines in bip39.rs rather than a `pbkdf2` + `hmac` + `sha2` trio,
 # which would put a second SHA-512 implementation in the closure for the same arithmetic.
 bitcoin = "0.32"
+
 # **Not in §1's table.** NFKD is mandated — 02-core.md §5, and the Japanese vectors are
 # mandatory in 05-testing-and-release.md §2 — and it is unimplementable without the Unicode
 # decomposition tables, so the choice was one crate or hand-rolled UCD data. This is the
@@ -33,8 +34,19 @@ unicode-normalization = "0.1.25"
 ur = "0.5"
 # `ZeroizeOnDrop`, and the derive that makes it one line per secret type.
 zeroize = { version = "1.9.0", features = ["zeroize_derive"] }
+# The outbound QR symbol (03-transport.md §6, §8). Zero dependencies, `#![forbid(unsafe_code)]`,
+# one source file — Project Nayuki's reference implementation, and the one crate whose
+# `encode_segments_advanced` takes a **maximum version** and returns `Err` rather than exceeding
+# it, which is §6's two rules as the library's behaviour instead of ours.
+qrcodegen = "1.8"
 
 # Test-only, so outside the shipped closure entirely. 05-testing-and-release.md §3 requires
 # property tests; this is what runs them.
 [dev-dependencies]
 proptest = "1.11.0"
+# **Not in 02-core.md §1's table**, and flagged rather than slipped in the way
+# `unicode-normalization` was. It parses BIP-341's own `wallet-test-vectors.json`, committed
+# verbatim beside `sign_tests.rs`: the alternative was transcribing seven cases of hex into a
+# Rust table, which is a copy that can drift from the vectors it claims to be. Test-only, so
+# outside the shipped closure entirely.
+serde_json = "1"

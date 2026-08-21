@@ -83,6 +83,26 @@ fn a_taproot_input_needs_only_its_witness_utxo() {
     accept(&psbt);
 }
 
+/// `AOBS-R05`, tightened by [#82](https://github.com/allisson/aobs/issues/82): **a taproot input
+/// must declare its internal key.**
+///
+/// BIP-371 makes `PSBT_IN_TAP_INTERNAL_KEY` the field that says *this is a key-path spend*, so an
+/// input without it has not declared the script type §7's fifth row is about. It is also what makes
+/// `crate::sign` total over everything this module accepts: the taproot signing path reads the key
+/// out of that field, so an accepted input lacking it would be one we cannot sign — and the PSBT
+/// would leave the appliance looking signed and carrying nothing.
+#[test]
+fn a_taproot_input_without_its_internal_key_is_an_unsupported_script_type() {
+    let spk = our_spk(&wallet(), Family::Bip84);
+    let mut psbt = psbt(&[(Family::Bip86, 100_000)], &[(spk, 90_000)]);
+    psbt.inputs[0].tap_internal_key = None;
+
+    assert_eq!(
+        refusal(&wallet(), &psbt),
+        Refusal::UnsupportedInputScript { input: 0 }
+    );
+}
+
 #[test]
 fn a_non_taproot_input_needs_only_its_previous_transaction() {
     let mut psbt = one_in_one_out();

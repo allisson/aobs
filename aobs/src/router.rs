@@ -26,6 +26,7 @@ use aobs_core::ur::Class;
 use crate::confirm::Confirm;
 use crate::create::Create;
 use crate::load::Load;
+use crate::outbound::Outbound;
 use crate::power;
 use crate::review::Review;
 use crate::scan::Scan;
@@ -64,6 +65,25 @@ impl Ending {
     }
 }
 
+/// Everything the router marshals to.
+///
+/// One struct rather than seven parameters, and it earns its place twice: the argument list had
+/// outgrown what a reader can check against the call site, and **a later slice adding a screen
+/// adds a field here and an arm below** — which is [#69](https://github.com/allisson/aobs/issues/69)'s
+/// acceptance criterion still holding at the seventh screen.
+///
+/// It carries no state of its own and makes no decision. Every field is a handle to a module
+/// that owns one screen's state, and the session, which owns the wallet.
+pub struct Screens {
+    pub create: Rc<Create>,
+    pub confirm: Rc<Confirm>,
+    pub load: Rc<Load>,
+    pub scan: Rc<Scan>,
+    pub review: Rc<Review>,
+    pub outbound: Rc<Outbound>,
+    pub session: Rc<Session>,
+}
+
 /// Wire the frame's one callback and the power button, and hand back the cell the ending
 /// lands in.
 ///
@@ -71,15 +91,16 @@ impl Ending {
 /// event loop: `slint::quit_event_loop` is what ends `ui.run()`, and it carries nothing.
 /// `None` after the loop returns is 06-codes.md §5's `AOBS-E03` — a loop that ended without
 /// anyone asking it to.
-pub fn wire(
-    ui: &AppWindow,
-    create: Rc<Create>,
-    confirm: Rc<Confirm>,
-    load: Rc<Load>,
-    scan: Rc<Scan>,
-    review: Rc<Review>,
-    session: Rc<Session>,
-) -> Rc<Cell<Option<Ending>>> {
+pub fn wire(ui: &AppWindow, screens: Screens) -> Rc<Cell<Option<Ending>>> {
+    let Screens {
+        create,
+        confirm,
+        load,
+        scan,
+        review,
+        outbound,
+        session,
+    } = screens;
     let ending = Rc::new(Cell::new(None));
 
     let sink = ending.clone();
@@ -141,6 +162,28 @@ pub fn wire(
             Intent::ReviewSign => review.sign(&ui),
             Intent::AddressConfirm => review.advance(&ui),
 
+            // 04-screens.md §11.4's hold, completed. **The one arm in this match that a single
+            // press cannot fire**, and the only one behind which a signature comes into
+            // existence — and it is a destination like every other: `confirm` signs and shows
+            // §11.5's animation, and nothing here reads the transaction, the amounts or the
+            // signature. Refusing at the gate is `Cancel` below, which is the same discard every
+            // other exit from this path already is.
+            Intent::SignConfirm => review.confirm(&ui),
+
+            // §11.5's one "done", and §7's row that brings the same screen back. Two arms because
+            // the frame names two different asks — and neither carries the transaction: the slot
+            // is `outbound`'s own state (02-core.md §12).
+            //
+            // Done takes the animation down and drops the reviewed transaction, because the
+            // signature has left. The **slot** is untouched, which is what makes the absent
+            // *did it scan?* prompt safe.
+            Intent::OutboundDone => {
+                outbound.leave();
+                review.leave();
+                ui.set_screen(Screen::Identity);
+            }
+            Intent::Redisplay => outbound.redisplay(&ui),
+
             // §7's other two. One destination for two intents, because they *have* one
             // destination in this build — the frame names what the user asked for and says so
             // rather than swallowing the press (standing rule 8), and each of them becomes its
@@ -177,8 +220,14 @@ pub fn wire(
             // with the transaction still in hand. Everywhere else `review.leave` drops that
             // transaction, which is what makes Escape off the panel and the refusal screen's one
             // row 02-core.md §7's *discard, and nothing else* rather than a screen change.
+            // `outbound.leave` joins `scan.leave` as teardown for the same reason: §11.5's
+            // animation is the only other thing on this appliance that keeps running after the
+            // screen it belongs to has been left, and it is a no-op everywhere else. **The slot
+            // it does not touch** — Escape off the outbound screen is *I am done showing this*,
+            // not *destroy it* (04-screens.md §11.5).
             Intent::Cancel => {
                 scan.leave();
+                outbound.leave();
                 match ui.get_screen() {
                     Screen::Retype => ui.set_screen(Screen::Words),
                     Screen::Address => review.back(&ui),

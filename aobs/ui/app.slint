@@ -53,6 +53,16 @@ export enum Intent {
     // carries a position: the walk's place is `review`'s state, not a value crossing here.
     review-sign,
     address-confirm,
+    // §11.4's gate, and it is the **only** intent in this enum a single press cannot fire: it
+    // is dispatched by the hold clock below, once, when the hold completes. Refusing is
+    // `cancel`, which is what every other cancel on this path already is — 02-core.md §7's
+    // *discard, and nothing else*.
+    sign-confirm,
+    // §11.5's one "done", and §7's row that brings the same screen back. Two names because the
+    // frame names what the user asked for, and these are two different asks that happen to draw
+    // the same thing.
+    outbound-done,
+    redisplay,
     session-end,
     shut-down,
     restart,
@@ -75,6 +85,10 @@ export enum Screen {
     // scan and from nowhere else.
     review,
     address,
+    // §11.4's gate and §11.5's outbound animation. The gate is the last screen before a
+    // signature exists and the animation is the first one after it.
+    gate,
+    outbound,
     refused,
     unbuilt,
     ending,
@@ -205,6 +219,39 @@ export global Metrics {
     // width is a number rather than whatever is left over after the longest amount.
     out property <length> rail-width: 300px;
     out property <length> rail-gap: 24px;
+
+    // §11.4's gate. **The hold, as a duration and a tick**, and the two are one decision: the
+    // clock advances by `hold-tick` while a key is down and the hold completes at
+    // `hold-duration`, so the tick is what the bar moves by and nothing else reads it.
+    //
+    // Three seconds is the prototype's number (`docs/prototypes/transaction-review.html` — *Hold
+    // to sign 3s*), which §0 calls a starting point rather than a mandate. 50 ms is four ticks
+    // per frame at 4 fps: fine enough that the bar reads as continuous and coarse enough that it
+    // costs nothing on the software renderer.
+    //
+    // **Neither is a function of anything about the transaction** (§11.4): the gate is
+    // byte-identical with and without the warning, so a hold that lengthened when the warning
+    // fired would convert an advisory into a soft block and teach that duration carries meaning.
+    out property <duration> hold-duration: 3s;
+    out property <duration> hold-tick: 50ms;
+    out property <length> hold-bar: 6px;
+
+    // §11.5's outbound animation. **4 fps** is the frame rate 03-transport.md §6 names and the
+    // rate the recovery-time arithmetic was computed at, so keeping it keeps those numbers valid.
+    out property <duration> outbound-frame: 250ms;
+    // The quiet zone, in modules. Four is the standard's own minimum, and it is the painter's
+    // rather than the encoder's: it is background, not data (`aobs-core::outbound`).
+    out property <int> quiet-zone: 4;
+    out property <length> outbound-heading: 34px;
+    out property <length> outbound-note: 46px;
+    out property <length> outbound-action: 66px;
+    out property <length> outbound-spacing: 18px;
+    // What the chrome and the three text rows leave for the symbol itself. The shell hands the
+    // side length in rather than the layout deriving it, for the reason `review-room` is handed
+    // in: a square whose side is a function of the space left over is a constraint derived from
+    // the width it produces.
+    out property <length> outbound-chrome: root.outbound-heading + root.outbound-note
+        + root.outbound-action + 3 * root.outbound-spacing;
 }
 
 export global Palette {
@@ -957,6 +1004,8 @@ component IdentityScreen inherits Rectangle {
     in property <bool> passphrase-in-use;
     in property <[Account]> accounts;
     in property <bool> camera;
+    // Whether §7's re-display row exists at all (02-core.md §12).
+    in property <bool> signed;
     in property <int> selected;
 
     VerticalLayout {
@@ -1072,6 +1121,22 @@ component IdentityScreen inherits Rectangle {
                 current: root.selected == 2;
             }
 
+            // §7's fifth row, which **appears** once a transaction has been signed this session
+            // rather than greying before then — there is no state for it to be in, and a greyed
+            // row states a reason, which here would be *you have not signed anything*.
+            //
+            // **One slot, and the copy says so** (02-core.md §12): *most recently* is
+            // load-bearing, because signing again replaces what this row shows. There is no list
+            // and no selection UI, which is the point — with no names, no labels and no clock the
+            // only distinguishing facts would be amount and destination, exactly what §11.5
+            // removes from this path.
+            if root.signed: Choice {
+                height: 54px;
+                label: "Show the last signed transaction again";
+                note: "The most recent one. Signing another replaces it.";
+                current: root.selected == 3;
+            }
+
             // **Secondary, and its position is forced rather than chosen**: the
             // passphrase-in-use bit rides in the backup's AAD, so the backup cannot exist before
             // the passphrase is known (ADR-0007, 02-core.md §11).
@@ -1079,7 +1144,9 @@ component IdentityScreen inherits Rectangle {
                 height: 54px;
                 label: "Export an encrypted backup";
                 note: "Eight words, and a QR that needs them.";
-                current: root.selected == 3;
+                // Parenthesised for the reason the frame's own `available` is: a reader should
+                // not have to be sure of `?:` against `==` to know which row this is.
+                current: root.signed ? (root.selected == 4) : (root.selected == 3);
             }
         }
     }
@@ -1705,6 +1772,149 @@ component AddressScreen inherits Rectangle {
     }
 }
 
+// 04-screens.md §11.4's gate. **Signing is hold-to-confirm; refusing is a single press.** The
+// asymmetry is the whole design: the irreversible action costs more than the safe one, and refusal
+// is always reachable without hunting.
+//
+// **This component is byte-identical with and without the warning, structurally.** It has no
+// property that could carry one — not an unused one, none — so there is nothing here for a fee, a
+// ratio or an advisory to reach. Lengthening the hold when the warning fires would convert an
+// advisory into a soft block, punish the user who is legitimately paying a high fee, and teach that
+// hold duration carries meaning. The amounts are absent for the reason §11.5's are: the review was
+// the moment of truth and this screen is the commitment to it.
+//
+// `progress` is 0..1, driven by the frame's own clock while the key is down. It is a bar and not a
+// countdown: a number ticking down invites watching the number instead of deciding.
+component GateScreen inherits Rectangle {
+    in property <int> selected;
+    in property <float> progress;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: 18px;
+
+        Heading {
+            text: "Sign this transaction?";
+        }
+
+        Text {
+            text: "Nothing has been signed yet. Holding produces the signature; a single press does not.";
+            color: Palette.ink-mid;
+            font-size: 16px;
+            wrap: word-wrap;
+        }
+
+        // The hold row. It is a `Choice` in everything but the fill, and the fill is drawn
+        // *inside* it so the row's height does not change as the hold advances — a row that grew
+        // would move the refusal underneath it while the user was committing.
+        Rectangle {
+            height: 66px;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: root.selected == 0 ? Palette.focus : Palette.line-soft;
+            background: root.selected == 0 ? Palette.ground : Palette.panel;
+            clip: true;
+
+            VerticalLayout {
+                padding-left: 18px;
+                padding-right: 18px;
+                alignment: center;
+                spacing: 6px;
+
+                Text {
+                    text: "Hold Enter to sign";
+                    color: Palette.ink;
+                    font-size: 19px;
+                    font-weight: root.selected == 0 ? 600 : 400;
+                }
+
+                // Zero-width at rest rather than hidden, so the bar's track is the same shape
+                // whether or not a hold is in progress.
+                Rectangle {
+                    height: Metrics.hold-bar;
+                    border-radius: Metrics.hold-bar / 2;
+                    background: Palette.line-soft;
+
+                    Rectangle {
+                        x: 0;
+                        width: parent.width * root.progress;
+                        height: parent.height;
+                        border-radius: parent.border-radius;
+                        background: Palette.focus;
+                    }
+                }
+            }
+        }
+
+        Choice {
+            label: "Do not sign";
+            note: "The transaction is discarded. Escape does the same.";
+            current: root.selected == 1;
+        }
+    }
+}
+
+// 04-screens.md §11.5's outbound QR. **The title, the symbol and a static part count, and nothing
+// else.**
+//
+// **No repeat of the amounts**: the review was the moment of truth, and restating money facts
+// afterwards invites verification at the one moment when nothing can be changed. **No counter and
+// no percentage**: BC-UR is rateless, so looping properly means generating fresh parts —
+// *"part 3 of 4"* becomes a lie on the second pass and any percentage would describe our animation
+// rather than their reception. The symbol's own flicker carries liveness.
+//
+// **One "done" and no second exit.** There is no *sign another*: that action lives on the identity
+// screen one keystroke away, and a second control here is a second thing to press by accident at
+// the moment the user should be holding the device still.
+component OutboundScreen inherits Rectangle {
+    in property <image> qr;
+    in property <string> parts;
+    in property <length> side;
+    in property <int> selected;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: Metrics.outbound-spacing;
+
+        Heading {
+            text: "Signed. Show this to your wallet.";
+        }
+
+        // The symbol, on its own white ground with the quiet zone as padding. `pixelated` is
+        // load-bearing rather than a preference: the image is one pixel per module, so a smoothing
+        // filter would blur the module edges a scanner is looking for.
+        Rectangle {
+            width: root.side;
+            height: root.side;
+            background: #ffffff;
+            border-width: 1px;
+            border-color: Palette.line-soft;
+
+            Image {
+                source: root.qr;
+                width: parent.width;
+                height: parent.height;
+                image-fit: contain;
+                image-rendering: pixelated;
+            }
+        }
+
+        Text {
+            text: root.parts;
+            visible: root.parts != "";
+            color: Palette.ink-mid;
+            font-size: 16px;
+            wrap: word-wrap;
+        }
+
+        Choice {
+            label: "Done";
+            note: "Returns to the wallet screen. This transaction stays available there.";
+            current: root.selected == 0;
+        }
+    }
+}
+
 // 02-core.md §7's refusal, as the screen it ends on: **the specific reason in plain language, a
 // stable machine-readable code alongside it, and exactly one action — discard.**
 //
@@ -1763,7 +1973,7 @@ component RefusedScreen inherits Rectangle {
 }
 
 // The honest placeholder. It exists so that choosing a real entry is not a dead press while
-// the screens behind it are still being built (#75, #82, #84, #85).
+// the screens behind it are still being built (#75, #84, #85).
 component Unbuilt inherits Rectangle {
     VerticalLayout {
         alignment: start;
@@ -1915,6 +2125,19 @@ export component AppWindow inherits Window {
     in property <string> refusal-reason;
     in property <string> refusal-code;
 
+    // §11.5's outbound animation. `outbound-qr` is one pixel per QR module, built in `outbound.rs`
+    // from the matrix `aobs-core::outbound` computed — this file scales it and draws no module of
+    // its own. `outbound-parts` is the **static** sentence, empty in the single-part case, because
+    // §11.5 says *nothing at all* there and an absence is what typed emptiness looks like once it
+    // reaches a layout.
+    in property <image> outbound-qr;
+    in property <string> outbound-parts;
+    in property <length> outbound-room;
+    // §7's fifth row, which **appears** rather than greying: the re-display action exists once a
+    // transaction has been signed this session, and there is no state for it to be in before that
+    // (02-core.md §12 — one slot, overwritten, no list).
+    in property <bool> signed-available;
+
     // How much width an address has to lay itself out in, at each of the two places one is
     // drawn at full width. Handed in from `display::room` rather than read off an element's
     // own width: the address block's *height* is a function of this, and a layout whose
@@ -1984,10 +2207,10 @@ export component AppWindow inherits Window {
         : root.screen == Screen.retype ? 1
         // §5.2's two-state selector, then §5.1's confirm.
         : root.screen == Screen.load ? 3
-        // §7's four actions. The *re-display the most recently signed transaction* row is
-        // absent rather than greyed: it appears once a transaction has been signed this session,
-        // and nothing in this build can sign one, so there is no state for it to be in.
-        : root.screen == Screen.identity ? 4
+        // §7's four actions, and a fifth once a transaction has been signed. The *re-display the
+        // most recently signed transaction* row is **absent** rather than greyed: before the
+        // first signature there is no state for it to be in (02-core.md §12).
+        : root.screen == Screen.identity ? (root.signed-available ? 5 : 4)
         // §11.1's *nothing else is reachable while the camera is up*, as arithmetic: no rows
         // while it is live, and one — the way off a screen that has stopped — once it is not.
         // A refusal that leaves the camera up therefore adds no row either, which is what
@@ -2000,15 +2223,39 @@ export component AppWindow inherits Window {
         : root.screen == Screen.review ? 1
         : root.screen == Screen.address ? 1
         : root.screen == Screen.refused ? 1
+        // §11.4's two, and the asymmetry is not in the count: row 0 is a hold and row 1 is a
+        // press. §11.5's one, which is the whole of that screen's ring — there is no second exit.
+        : root.screen == Screen.gate ? 2
+        : root.screen == Screen.outbound ? 1
         : 0;
     property <int> rows: root.screen-rows + 1;
     property <int> session-row: root.rows - 1;
     property <int> selected: 0;
 
+    // §11.4's hold, as a number this frame draws and does not compute.
+    //
+    // **The clock is `gate.rs`'s, because it has to be wall clock.** Accumulating `hold-tick`
+    // here was the first version and it was wrong: a tick that repaints this bar on the software
+    // renderer does not land in 50 ms, so 3.5 s of held key reached 97% on the built ISO. Three
+    // seconds means three seconds, which means an `Instant`, which the frame does not have.
+    //
+    // **The clock runs only while a key is down.** There is exactly one `KeyPressed` and one
+    // `KeyReleased` per physical press on this backend — the linuxkms input path synthesises no
+    // repeat — so *down* is what the release ends and there is nothing else to evidence it with. A
+    // hold that completed without a release would mean a tap signed, which is the one failure this
+    // gate exists to prevent, so every exit from the screen and every other key clears it.
+    in property <float> hold-progress;
+    callback hold-begin();
+    callback hold-end();
+
     // A screen change resets the cursor. Without it a ring that just got shorter would keep
     // a selection off its end, and the first key would move from nowhere.
+    //
+    // It clears the hold too, which is what makes the clock's lifetime the gate's: an intent
+    // dispatched from a screen that has moved on is a press nobody made.
     changed screen => {
         self.selected = 0;
+        self.hold-end();
     }
 
     title: "aobs";
@@ -2063,6 +2310,9 @@ export component AppWindow inherits Window {
     // is why one extra step is no longer enough. A screen that ever greys three neighbours needs
     // another link here, and it will present as a cursor that lands on a row Enter refuses.
     function move(delta: int) {
+        // Moving off the hold row abandons the hold. A cursor that left while the clock ran would
+        // sign from a row the user is no longer on.
+        self.hold-end();
         self.selected = self.available(self.wrap(root.selected + delta))
             ? self.wrap(root.selected + delta)
             : self.available(self.wrap(root.selected + 2 * delta))
@@ -2110,6 +2360,14 @@ export component AppWindow inherits Window {
             root.intent(Intent.cancel);
         } else if (root.screen == Screen.review) {
             root.intent(Intent.review-sign);
+        } else if (root.screen == Screen.gate) {
+            // Row 0 is the hold and never reaches here — `key-pressed` takes Return on this
+            // screen before `activate` can see it. Row 1 is §11.4's single press to refuse, and it
+            // is the same intent Escape fires: the router already knows a discard returns to the
+            // hub, and a second path to it is a second path that can drift.
+            root.intent(Intent.cancel);
+        } else if (root.screen == Screen.outbound) {
+            root.intent(Intent.outbound-done);
         } else if (root.screen == Screen.address) {
             // One intent for every screen of the walk. Which address this was is `review`'s
             // state, and *whether another follows* is its answer too — a frame that counted
@@ -2121,9 +2379,13 @@ export component AppWindow inherits Window {
             // second path to it is a second path that can drift.
             root.intent(Intent.cancel);
         } else if (root.screen == Screen.identity) {
+            // Row 3 is §7's re-display when it exists, and *backup export* is the last row either
+            // way — which is why this reads the flag rather than the count: a row that appears has
+            // to shift the one below it, and the alternative is two tables of indices.
             root.intent(root.selected == 0 ? Intent.watch-only
                 : root.selected == 1 ? Intent.sign
                 : root.selected == 2 ? Intent.verify-address
+                : (root.signed-available && root.selected == 3) ? Intent.redisplay
                 : Intent.backup-export);
         }
     }
@@ -2170,6 +2432,17 @@ export component AppWindow inherits Window {
                 root.passphrase-back();
                 return EventResult.accept;
             }
+            // §11.4's gate, read before the ring's Enter because on this screen Return means
+            // *start holding* and not *activate*. Only on row 0: rows 1 and the session row are
+            // ordinary presses, and `activate` is what they go through.
+            //
+            // `hold-begin` is idempotent while a hold runs (`gate.rs`), so a key repeat — which
+            // this backend does not synthesise today, and which is exactly the kind of thing a
+            // backend starts doing — restarts nothing and extends nothing.
+            if (root.screen == Screen.gate && event.text == Key.Return && root.selected == 0) {
+                root.hold-begin();
+                return EventResult.accept;
+            }
             if (event.text == Key.UpArrow) {
                 root.move(-1);
                 return EventResult.accept;
@@ -2206,6 +2479,17 @@ export component AppWindow inherits Window {
                 return EventResult.accept;
             }
             return EventResult.reject;
+        }
+
+        // The other half of §11.4's hold, and the only reason this callback exists at all.
+        //
+        // **Releasing early is a cancel and not a signature**, which is what makes a tap safe: the
+        // clock is cleared here and the intent is dispatched only by the clock reaching the
+        // duration. Any release clears it, not only Return's — a modifier coming up mid-hold is
+        // still a hand leaving the keyboard.
+        key-released(event) => {
+            root.hold-end();
+            return EventResult.accept;
         }
 
         VerticalLayout {
@@ -2291,6 +2575,7 @@ export component AppWindow inherits Window {
                         passphrase-in-use: root.passphrase-in-use;
                         accounts: root.accounts;
                         camera: root.camera-present;
+                        signed: root.signed-available;
                         selected: root.selected;
                     }
 
@@ -2328,6 +2613,18 @@ export component AppWindow inherits Window {
                         groups: root.address-groups;
                         room: root.walk-room;
                         last: root.address-last;
+                        selected: root.selected;
+                    }
+
+                    if root.screen == Screen.gate: GateScreen {
+                        progress: root.hold-progress;
+                        selected: root.selected;
+                    }
+
+                    if root.screen == Screen.outbound: OutboundScreen {
+                        qr: root.outbound-qr;
+                        parts: root.outbound-parts;
+                        side: root.outbound-room;
                         selected: root.selected;
                     }
 

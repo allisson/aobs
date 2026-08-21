@@ -288,3 +288,41 @@ fn the_gap_count_is_one_fewer_than_the_group_count() {
 fn no_characters_is_no_width_and_no_underflow() {
     assert_eq!(address_width(0, 10.0, 4.0), 0.0);
 }
+
+/// `04-screens.md` §11.4: **the gate is byte-identical with and without the warning.**
+///
+/// Asserted as the structure that makes it so rather than as an outcome. The gate screen has
+/// exactly two inputs — where the cursor is, and how far the hold has got — so there is nothing
+/// on it for a fee, a ratio or an advisory to reach, and no arm anywhere that could lengthen the
+/// hold when one fires. A property added here would fail this test before it could fail a review.
+///
+/// It reads the frame the way `router.rs` reads the systemd unit: the claim spans two files, so
+/// the test has to as well.
+#[test]
+fn the_gate_has_no_input_but_the_cursor_and_the_clock() {
+    const FRAME: &str = include_str!("../ui/app.slint");
+
+    let body = FRAME
+        .split("component GateScreen inherits")
+        .nth(1)
+        .expect("the frame declares the gate screen");
+    let body = body
+        .split("\ncomponent ")
+        .next()
+        .expect("and something follows it");
+
+    let properties: Vec<&str> = body
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("in property"))
+        .collect();
+
+    assert_eq!(
+        properties,
+        [
+            "in property <int> selected;",
+            "in property <float> progress;"
+        ],
+        "the gate may carry nothing about the transaction"
+    );
+}

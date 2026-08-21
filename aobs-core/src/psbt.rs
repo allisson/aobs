@@ -918,8 +918,19 @@ fn classify(spk: &Script, input: &Input) -> Option<InputScript> {
     if spk.is_p2tr() {
         // BIP86 is the key path and nothing else. A merkle root or a control block means the
         // spend goes through a script we do not model, whatever the internal key says.
-        return (input.tap_merkle_root.is_none() && input.tap_scripts.is_empty())
-            .then_some(InputScript::P2tr);
+        //
+        // **And the internal key has to be declared** ([#82](https://github.com/allisson/aobs/issues/82)).
+        // BIP-371 makes `PSBT_IN_TAP_INTERNAL_KEY` the field that says *this is a key-path
+        // spend*, so an input without it has not declared the script type this arm is about —
+        // which is what `AOBS-R05` asks, and why this is that refusal rather than a new one. It
+        // is also what makes `crate::sign` total over everything this function accepts: the
+        // dependency signs a taproot key path from this field, so accepting an input that lacks
+        // it would mean accepting one we cannot sign, and a PSBT would leave the appliance
+        // looking signed and carrying nothing.
+        return (input.tap_merkle_root.is_none()
+            && input.tap_scripts.is_empty()
+            && input.tap_internal_key.is_some())
+        .then_some(InputScript::P2tr);
     }
     if spk.is_p2sh() {
         let redeem = input.redeem_script.as_ref()?;

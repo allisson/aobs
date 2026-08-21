@@ -50,8 +50,10 @@ pub mod derive;
 pub mod entropy;
 pub mod entry;
 pub mod format;
+pub mod outbound;
 pub mod psbt;
 pub mod secret;
+pub mod sign;
 pub mod ur;
 
 /// The adversarial corpus and the `AOBS-R##` registry bijection

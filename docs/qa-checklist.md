@@ -202,6 +202,37 @@ the practical way to run them, since the shipped image offers no shell.
 - [ ] Escape from the panel itself returns to the identity screen and the transaction is gone —
       pressing *sign a transaction* again starts from the camera, not from where you left off.
 
+### The gate and the outbound animation ([#82](https://github.com/allisson/aobs/issues/82))
+
+- [ ] **A tap on Enter at the gate signs nothing.** Press and release quickly, several times: the
+      bar fills a little and empties, and no signature is produced. This is the row the whole
+      asymmetry rests on, and the failure it exists for is a backend that stops delivering key
+      releases — after which a tap would sign three seconds later.
+- [ ] Holding Enter for **three seconds** produces the signature and the animation, and the bar is
+      a bar rather than a counting-down number.
+- [ ] Moving the cursor off the hold row **mid-hold** abandons it. So does Escape.
+- [ ] The gate looks **identical** on a transaction that trips the advisory warning and one that
+      does not — same rows, same copy, same hold — and the hold takes the same three seconds.
+- [ ] *Do not sign* is a **single press**, and the transaction is gone afterwards: the identity
+      screen offers no way back to it.
+- [ ] The outbound screen shows the title, the symbol and **one static sentence** naming the part
+      count — no counter, no percentage, no amounts, and **no *sign another***.
+- [ ] A **single-part** payload says nothing at all about parts. Sign a small transaction to reach
+      it; a 1-in/1-out spend is one part.
+- [ ] **The animation loops with fresh parts.** Watch a multi-part one for longer than one pass:
+      the symbols keep changing rather than cycling through the same four.
+- [ ] *Done* returns to the identity screen with **no confirmation prompt**, and the *show the last
+      signed transaction again* row is now there.
+- [ ] Re-displaying it produces the **same transaction** — hand it to the coordinator and it
+      finalizes. Sign a second transaction and the row shows **that** one instead: there is no list
+      and nothing to select.
+- [ ] **A real coordinator finalizes and broadcasts it.** Sparrow and Specter Desktop, on signet, at
+      least once per release — the row `05-testing-and-release.md` §6.3 owes, and the one that would
+      catch `03-transport.md` §6a's open interoperability question about the CBOR wrapper ([#112](https://github.com/allisson/aobs/issues/112)).
+- [ ] **A phone camera reads the symbol at arm's length**, at 800×600 where the square is 258 px
+      (`04-screens.md` §11.5). This is §6.4's owed measurement; if it fails the cap moves to v40 and
+      the fragment length is re-derived.
+
 ### Creating a wallet ([#72](https://github.com/allisson/aobs/issues/72))
 
 - [ ] At 800×600, **two columns of 12 words are all on screen at once** — 1–12 left, 13–24
