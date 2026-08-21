@@ -63,6 +63,7 @@ export enum Screen {
     retype,
     load,
     identity,
+    scan,
     unbuilt,
     ending,
 }
@@ -118,6 +119,13 @@ export global Metrics {
     out property <length> words-continue: 48px;
     out property <length> words-required: root.words-banner + root.words-gap
         + 12 * root.word-row + root.words-gap + root.words-continue;
+    // 04-screens.md §11.1's *modest size rather than full screen*, in the design canvas's own
+    // pixels. It fits the floor with room over: at 800×600 the slot leaves 458 logical px of
+    // height (the same number `words-required` is measured against), and the scanning screen
+    // spends 34 on the heading, 240 here and about 90 on the progress and the note.
+    out property <length> preview-width: 320px;
+    out property <length> preview-height: 240px;
+
     out property <length> words-chrome: root.header-height + 2 * root.rule + root.footer-height
         + 2 * root.slot-padding;
 }
@@ -131,6 +139,11 @@ export global Palette {
     out property <color> ink-dim: #66717f;
     // §0: darkened from the dark scheme's value to hold contrast against a white panel.
     out property <color> focus: #14468f;
+    // 04-screens.md §0's palette names `--crit` and says the dark-scheme values are darkened to
+    // hold contrast against a white panel; this is that value. It is the first token past
+    // `focus` to have a consumer: a refusal at the QR boundary (§11.1) is the first thing this
+    // appliance draws that is neither navigation nor a fact about the wallet.
+    out property <color> crit: #8f1d1d;
 }
 
 // One row of a ring. `note` carries the stated reason when a row is unavailable — 01-boot
@@ -872,6 +885,127 @@ component IdentityScreen inherits Rectangle {
     }
 }
 
+// 04-screens.md §11.1. One component, three configurations — and the configuration is two
+// properties, not three copies of this file: `heading` names what this screen wants and
+// `multi-part` says whether a fraction of parts exists to report. Both come from the payload
+// class, in core.
+//
+// Three things here are the spec rather than taste:
+//
+//   * **The preview is greyscale because it is the luma plane**, not because grey was chosen.
+//     It displays exactly what the decoder sees rather than a prettier version of it, and
+//     `pixelated` is part of that: a smoothing filter would show the user a cleaner picture
+//     than `rqrr` is working from, on the one screen whose whole purpose is aiming.
+//   * **The progress element does not appear for a single-part class.** Absent, not zeroed:
+//     the address and backup classes never touch the fountain decoder, so there is no
+//     fraction that could be reported truthfully.
+//   * **Nothing else is reachable while the camera is up.** This screen contributes no rows
+//     to the ring while it is live, so the only keys that do anything are Escape and the
+//     frame's own always-available row (§7) — which lands on a confirm rather than an action.
+component ScanScreen inherits Rectangle {
+    in property <string> heading;
+    in property <image> preview;
+    in property <string> progress;
+    in property <bool> multi-part;
+    in property <string> note;
+    in property <string> code;
+    in property <bool> stopped;
+    in property <int> selected;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: 16px;
+
+        Heading {
+            text: root.heading;
+        }
+
+        if !root.stopped: VerticalLayout {
+            alignment: start;
+            spacing: 12px;
+
+            Rectangle {
+                width: Metrics.preview-width;
+                height: Metrics.preview-height;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: Palette.line-soft;
+                background: Palette.ground;
+
+                Image {
+                    source: root.preview;
+                    width: parent.width - 2px;
+                    height: parent.height - 2px;
+                    image-fit: contain;
+                    image-rendering: pixelated;
+                }
+            }
+
+            // `if`, not `visible` — a layout still gives an invisible child its space, and
+            // §11.1's *simply does not appear* is about the element and not about its ink. For
+            // the one class that has parts the row is here from the first frame, saying what is
+            // true then, so the layout does not jump when the first one lands.
+            if root.multi-part: Text {
+                text: root.progress == ""
+                    ? "Waiting for the first frame of the animation."
+                    : root.progress + " frames of the animation received.";
+                color: Palette.ink-mid;
+                font-family: "DejaVu Sans Mono";
+                font-size: 15px;
+            }
+
+            Text {
+                text: "Escape cancels, from the first frame.";
+                color: Palette.ink-dim;
+                font-size: 13px;
+            }
+        }
+
+        // A refusal, or a camera that stopped answering. It is outside the block above because
+        // §11.1 keeps the screen live after a wrong-class payload: the sentence and the
+        // preview are on screen together, which is what makes it an invitation to point the
+        // camera elsewhere rather than a dead end.
+        if root.note != "": Rectangle {
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: Palette.crit;
+            background: Palette.panel;
+
+            HorizontalLayout {
+                padding: 16px;
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 6px;
+
+                    Text {
+                        text: root.note;
+                        color: Palette.ink;
+                        font-size: 17px;
+                        wrap: word-wrap;
+                    }
+
+                    // Absent rather than blank when there is no code: a camera that was
+                    // unplugged refused nothing (06-codes.md §4), and an empty line where a
+                    // code goes reads as one that failed to print.
+                    if root.code != "": Text {
+                        text: root.code;
+                        color: Palette.crit;
+                        font-family: "DejaVu Sans Mono";
+                        font-size: 13px;
+                    }
+                }
+            }
+        }
+
+        if root.stopped: Choice {
+            label: "Go back";
+            note: "The camera is off. Nothing was signed and nothing was saved.";
+            current: root.selected == 0;
+        }
+    }
+}
+
 // The honest placeholder. It exists so that choosing a real entry is not a dead press while
 // the screens behind it are still being built (#75, #81, #84, #85).
 component Unbuilt inherits Rectangle {
@@ -984,6 +1118,19 @@ export component AppWindow inherits Window {
     in property <bool> passphrase-in-use;
     in property <[Account]> accounts;
 
+    // The scanning screen (§11.1). `scan-heading` and `scan-multi-part` are the configuration
+    // and both are read off the payload class in core; `scan-note` and `scan-code` arrive
+    // already written, because a refusal's sentence is computed where the refusal is
+    // (standing rule 4). `scan-preview` is the luma plane, subsampled — never a frame this
+    // file did anything to.
+    in property <string> scan-heading;
+    in property <image> scan-preview;
+    in property <string> scan-progress;
+    in property <bool> scan-multi-part;
+    in property <string> scan-note;
+    in property <string> scan-code;
+    in property <bool> scan-stopped;
+
     callback intent(Intent);
     // The callbacks that carry a value rather than an intent, and so bypass the router
     // (standing rule 4): a die face is a byte the user typed, a letter of the retype is one
@@ -1001,6 +1148,10 @@ export component AppWindow inherits Window {
     callback network(bool);
     callback passphrase-typed(string);
     callback passphrase-back();
+    // The capture thread announcing itself from `upgrade_in_event_loop`, the same shape as
+    // `gathered`. It carries nothing: the frame is in a slot and the symbols are in a channel,
+    // and this exists only because a `Send` closure cannot hold an `Rc`.
+    callback scan-tick();
 
     // 04-screens.md §0's second breakpoint, one property for the whole appliance. Handed in
     // from `display::wide`, which already owns §0's arithmetic and can be tested; deriving it
@@ -1022,6 +1173,11 @@ export component AppWindow inherits Window {
         // absent rather than greyed: it appears once a transaction has been signed this session,
         // and nothing in this build can sign one, so there is no state for it to be in.
         : root.screen == Screen.identity ? 4
+        // §11.1's *nothing else is reachable while the camera is up*, as arithmetic: no rows
+        // while it is live, and one — the way off a screen that has stopped — once it is not.
+        // A refusal that leaves the camera up therefore adds no row either, which is what
+        // makes *the screen stays live* structural rather than remembered.
+        : root.screen == Screen.scan ? (root.scan-stopped ? 1 : 0)
         : 0;
     property <int> rows: root.screen-rows + 1;
     property <int> session-row: root.rows - 1;
@@ -1125,6 +1281,11 @@ export component AppWindow inherits Window {
             } else {
                 root.intent(Intent.load-confirm);
             }
+        } else if (root.screen == Screen.scan) {
+            // The one row a stopped scan has, and it fires the same intent Escape does: the
+            // router already knows what this screen came from, so there is nothing here to
+            // decide about where *back* is.
+            root.intent(Intent.cancel);
         } else if (root.screen == Screen.identity) {
             root.intent(root.selected == 0 ? Intent.watch-only
                 : root.selected == 1 ? Intent.sign
@@ -1296,6 +1457,17 @@ export component AppWindow inherits Window {
                         passphrase-in-use: root.passphrase-in-use;
                         accounts: root.accounts;
                         camera: root.camera-present;
+                        selected: root.selected;
+                    }
+
+                    if root.screen == Screen.scan: ScanScreen {
+                        heading: root.scan-heading;
+                        preview: root.scan-preview;
+                        progress: root.scan-progress;
+                        multi-part: root.scan-multi-part;
+                        note: root.scan-note;
+                        code: root.scan-code;
+                        stopped: root.scan-stopped;
                         selected: root.selected;
                     }
 

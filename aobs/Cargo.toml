@@ -13,7 +13,18 @@ aobs-core = { path = "../aobs-core" }
 # core, which takes them by value and drops them. `Zeroizing` is what wipes them if the user
 # walks away instead. No derive feature: nothing here is a secret *type*, only a buffer.
 zeroize = "1.9.0"
+# Raw V4L2 ioctls, default features, no `libv4l` on the image (03-transport.md §5). Not
+# `nokhwa`, which wraps `image`, `flume` and a `decoding` feature that can pull `mozjpeg` — a
+# C library built from source.
 v4l = "0.14"
+# QR decoding, fed from the frame's luma plane (03-transport.md §5). Not `bardecoder`, last
+# released 2023 with no raw-buffer entry point.
+#
+# **`default-features = false` is the whole reason this line has a comment.** The default `img`
+# feature is the `image` crate, and the plane we already hold is exactly what `image` would
+# decode down to — so the default would put a second image stack on the hostile-input path to
+# arrive back where we started.
+rqrr = { version = "0.10", default-features = false }
 
 # Slint on backend-linuxkms-noseat + renderer-software, rendering straight to the display
 # (01-boot-layer.md §2, ADR-0002, ADR-0016). No X server, no Wayland compositor, no display

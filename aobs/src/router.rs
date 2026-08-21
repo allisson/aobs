@@ -21,10 +21,13 @@ use std::rc::Rc;
 
 use slint::ComponentHandle;
 
+use aobs_core::ur::Class;
+
 use crate::confirm::Confirm;
 use crate::create::Create;
 use crate::load::Load;
 use crate::power;
+use crate::scan::Scan;
 use crate::session::Session;
 use crate::{AppWindow, Intent, Screen};
 
@@ -72,6 +75,7 @@ pub fn wire(
     create: Rc<Create>,
     confirm: Rc<Confirm>,
     load: Rc<Load>,
+    scan: Rc<Scan>,
     session: Rc<Session>,
 ) -> Rc<Cell<Option<Ending>>> {
     let ending = Rc::new(Cell::new(None));
@@ -103,8 +107,15 @@ pub fn wire(
             Intent::CreateConfirm => confirm.begin(&ui, &create),
             Intent::CreateDone => confirm.done(&ui),
 
-            // The other two start entries. Their screens arrive in later slices.
-            Intent::Import | Intent::Restore => ui.set_screen(Screen::Unbuilt),
+            // §1's second start entry. Its screen arrives in a later slice.
+            Intent::Import => ui.set_screen(Screen::Unbuilt),
+
+            // 04-screens.md §10's *scan first, then the words*: the encrypted backup's header
+            // is readable before any key derivation, so a payload that is not ours dies in
+            // seconds rather than after eight words of typing. The arm is a destination like
+            // every other — the class is which configuration of §11.1's one screen to show,
+            // and it is a parameter of the screen rather than a value to branch on.
+            Intent::Restore => scan.begin(&ui, Class::Backup),
 
             // 04-screens.md §5's confirm, and the one place a wallet comes into existence. The
             // arm is still a destination: `confirm` derives, hands the session its one wallet
@@ -112,13 +123,17 @@ pub fn wire(
             // fingerprint that comes back.
             Intent::LoadConfirm => load.confirm(&ui),
 
-            // §7's four actions. One destination for four intents, because they *have* one
+            // §7's two camera actions, which are §11.1's other two configurations. What
+            // follows a completed scan — the review panel, the address verdict — is a later
+            // slice's screen, and `Screen::Unbuilt` is what the scan dismisses to until then.
+            Intent::Sign => scan.begin(&ui, Class::Psbt),
+            Intent::VerifyAddress => scan.begin(&ui, Class::Address),
+
+            // §7's other two. One destination for two intents, because they *have* one
             // destination in this build — the frame names what the user asked for and says so
             // rather than swallowing the press (standing rule 8), and each of them becomes its
             // own arm when its screen exists.
-            Intent::WatchOnly | Intent::Sign | Intent::VerifyAddress | Intent::BackupExport => {
-                ui.set_screen(Screen::Unbuilt)
-            }
+            Intent::WatchOnly | Intent::BackupExport => ui.set_screen(Screen::Unbuilt),
 
             // §13's confirm, reached identically from the footer row and from the physical
             // button. Idempotent on purpose: a second press is not a faster path to
@@ -139,11 +154,19 @@ pub fn wire(
             // start screen* is a switch wearing a different name (ADR-0010), so Escape returns
             // to §7's hub instead. On the hub itself that is the no-op cancelling on the start
             // menu is — there is somewhere to go back to, and it is where you are.
-            Intent::Cancel => match ui.get_screen() {
-                Screen::Retype => ui.set_screen(Screen::Words),
-                _ if session.loaded() => ui.set_screen(Screen::Identity),
-                _ => ui.set_screen(Screen::Start),
-            },
+            //
+            // `leave` is teardown rather than a second decision: it takes the camera down and
+            // drops the scanner, and it is a no-op on every screen that has neither. It lives
+            // here because Escape — and the one row a stopped scan offers, which fires this
+            // same intent — is the only way off §11.1's screen that is not a completed scan.
+            Intent::Cancel => {
+                scan.leave();
+                match ui.get_screen() {
+                    Screen::Retype => ui.set_screen(Screen::Words),
+                    _ if session.loaded() => ui.set_screen(Screen::Identity),
+                    _ => ui.set_screen(Screen::Start),
+                }
+            }
 
             Intent::ShutDown => {
                 sink.set(Some(Ending::Shutdown));
