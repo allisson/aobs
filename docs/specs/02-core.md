@@ -317,7 +317,7 @@ a check are hostile until proven otherwise — discard, zeroize, no retry with t
 | Any input lacking a **`non_witness_utxo` that hashes to its outpoint's txid** — taproot excepted, where `witness_utxo` suffices | The amount is otherwise an unverified assertion the user cannot check. |
 | Sighash other than `SIGHASH_ALL` (or `SIGHASH_DEFAULT` for taproot) | No user can evaluate what signing under `SIGHASH_SINGLE` exposes them to. |
 | Sum of outputs exceeds sum of inputs | Structurally impossible; a lie by construction. |
-| An input whose script type is outside BIP44/49/84/86 single-sig — **including a taproot input that does not declare its internal key** (§8a) | We would be signing something we do not model. |
+| An input whose script type is outside BIP44/49/84/86 single-sig — **including a taproot input that does not declare its key path in full**: the internal key, *and* a `tap_key_origins` entry keyed by it carrying no leaf hashes (§8a) | We would be signing something we do not model — or, for the taproot half, declaring a key-path spend the document gives no way to sign. |
 | An input that does not re-derive to our own key material | Foreign inputs mean the displayed cost is not the user's alone. |
 | An output we cannot render as an address | The user would be approving hex. |
 | **More than six outputs**, payment and change counted together | The review panel is non-scrolling and holds six rows in the minimum canvas (`04-screens.md` §11.2). A seventh output could only be shown by scrolling, clipping or summarising it, and all three mean approving what was not seen. |
@@ -405,6 +405,15 @@ nothing else.
    confirmation screen, no suspicion attached. Both attack directions are safe: marking real change
    as foreign only causes it to be *shown*, and putting our fingerprint on the attacker's address
    fails the byte-compare and refuses.
+6. **For an input, the claim read is the one in the map the input's family is *signed* from**, and
+   nothing else counts ([#113](https://github.com/allisson/aobs/issues/113)). For BIP44/49/84 that
+   is `bip32_derivation`; for BIP86 it is the single `tap_key_origins` entry keyed by
+   `PSBT_IN_TAP_INTERNAL_KEY` with no leaf hashes. An input's claim decides whether we hand back a
+   signature, and the two signing paths read one map each — so a claim in the other map, or in
+   another taproot entry, is not a claim about *this spend*. The input is then simply **not ours**;
+   if none is, that is `AOBS-R06`. This is what makes *ours* and *signable* the same question, and
+   §8's *at least one signature* an assertion rather than a hope. An output's claim decides only a
+   *display*, so it keeps reading either map: rule 5 is why that costs nothing.
 
 ### Three copy requirements on the refusals
 
@@ -440,7 +449,8 @@ refusal model, computed here — the shell must not branch on it (standing rule 
 
 Three things this section could not have known, recorded here because a later reader would otherwise
 take the prose above literally and find something missing
-([#82](https://github.com/allisson/aobs/issues/82)).
+([#82](https://github.com/allisson/aobs/issues/82); the gap the first of them left open is closed
+below by [#113](https://github.com/allisson/aobs/issues/113)).
 
 **`sign` is total over everything `validate` accepts, and making that true changed §7.** It takes an
 `Accepted` and returns a `Psbt` — no `Result`, and no refusal code, because `06-codes.md` has none
@@ -452,7 +462,8 @@ nothing the validator accepts can fail to sign, and two gaps had to be closed fo
   declaration that the spend *is* a key path — so an input without it has not declared the script
   type §7's fifth row is about. Accepting one would mean accepting a transaction we cannot sign, and
   the PSBT would leave the appliance looking signed and carrying nothing. It is the existing code
-  because it is the existing question, not a new refusal.
+  because it is the existing question, not a new refusal. (**Half the rule**, as #113 below found:
+  the field is one end of BIP-371's declaration and the origin entry naming it is the other.)
 - **The signing key source ignores the fingerprint**, which is §7's own input rule one layer down.
   The dependency's `impl GetKey for Xpriv` answers only for a matching fingerprint, so a transaction
   accepted under §7's *"a coordinator that filled the fingerprint in wrongly should not make a
@@ -461,17 +472,48 @@ nothing the validator accepts can fail to sign, and two gaps had to be closed fo
   network, `path[-2] ∈ {0, 1}`, a normal final index — so the set of paths a private key can be
   derived at is decided by the module that owns what *ours* means and never by a PSBT.
 
-**One gap stays open, named rather than closed, and it is the reason `sign` does not assert that it
-signed anything.** A taproot input whose declared internal key is *not* the key its `scriptPubKey` is
-the tweak of passes every structural check and every derivation check above — `AOBS-R05` sees a
-declared key-path spend and `AOBS-R06` is satisfied by whichever claim byte-verifies — and is then
-unsignable, because the dependency signs the key path from `PSBT_IN_TAP_INTERNAL_KEY` and that key is
-not ours. Such an input is unfinalizable by anybody, so no honest coordinator produces one. **What to
-do about it is not answered here.** Refusing needs either a code `06-codes.md` does not define or a
-widening of the derivation check to compare the declared internal key against the one the output key
-is the tweak of; asserting would turn a hostile PSBT into a crash and a 24-word retype, which is a
-worse trade than the alternative. So the document goes back out as it came in and the coordinator
-refuses it in seconds, and **closing it properly is [#113](https://github.com/allisson/aobs/issues/113).**
+**That gap is now closed, and reading the dependency is what decided how**
+([#113](https://github.com/allisson/aobs/issues/113)). §8 could not promise it had signed anything
+while an accepted input could still be unsignable. `bitcoin` 0.32's taproot path produces a key-path
+signature **iff** `tap_key_origins` holds an entry keyed by exactly `tap_internal_key`, with empty
+leaf hashes, whose path our key source answers; the internal key's *value* is never compared against
+the key we derive — it is the map lookup and nothing more. Three consequences, and the second is why
+the ticket's own recommendation was not taken:
+
+- **The declaration has two halves, so `AOBS-R05` covers both.** An internal key no origin entry
+  names, or one whose entry carries leaf hashes (a script-path key, which BIP-371 distinguishes by
+  exactly that), is a key path the document gives no way to sign. Structural, no key material, and
+  the same argument #82 made for the field itself.
+- **Comparing the declared internal key against the key we derive would refuse transactions that
+  sign.** An internal key that is *not* the untweaked key of the `scriptPubKey` but whose entry
+  declares a path that byte-verifies signs correctly and finalizes correctly, because the dependency
+  signs with the key at the declared path and tweaks it. So the widening — and the new `AOBS-R17` it
+  would have needed — was rejected: it spends a permanent registry number to refuse a shape that
+  works.
+- **What decides instead is §7's rule 6**, which is where the real question was: an input's claim is
+  read out of the map its family is signed from. That closes the taproot case (the internal key's
+  entry is the only claim) and an instance nothing had named — **a BIP44/49/84 input whose only
+  byte-verifying claim sits in `tap_key_origins`**, accepted as ours by the old *walk both maps* rule
+  and signed by nothing, since the ECDSA path reads `bip32_derivation` alone.
+
+So `sign` now asserts what §8 always meant: **every input the validator found ours comes back
+signed**, with the set of those inputs travelling on the `Accepted` rather than recomputed. Two
+residual costs, both named rather than glossed:
+
+- **The `AOBS-R06` copy can misname the cause.** A hostile PSBT whose `scriptPubKey` is ours while
+  its key-path claim is not lands there, and R06 offers the passphrase, account 0 and the network as
+  likely causes. It is the same trade §7 already takes for R06's other variants, on a shape no
+  honest coordinator emits.
+- **The assertion is about the document going out, not about this call's delta**, and it has to be.
+  `Psbt::sign` declines a taproot key path when `tap_key_sig` is *already* set, so a PSBT arriving
+  with 64 bytes of nonsense in that field would make an *added a signature* assertion panic —
+  `AOBS-E04` on bytes an attacker chooses, which is the trade this section rejected in the first
+  place. So a signature that **arrived** satisfies the assertion, and nothing checks that it is
+  valid: such a document reaches the coordinator and is refused there, which is the pre-#113 outcome
+  for a different shape. **Open, and a ticket rather than a decision taken here** —
+  [#115](https://github.com/allisson/aobs/issues/115), where the options are a refusal for an input
+  arriving pre-signed (which needs a code `06-codes.md` does not define) or verifying a pre-existing
+  signature before counting it.
 
 **`sign_schnorr_no_aux_rand` is the deterministic arm, and which arm gets used is a feature flag
 rather than a call site.** `Psbt::sign` reaches `sign_schnorr` with fresh auxiliary randomness when

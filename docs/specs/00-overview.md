@@ -175,7 +175,7 @@ printed line, because the appliance is not what knows the answer — a signed tr
   Finalizing is a test-only step; §8 forbids the appliance the Finalizer role, and what is forbidden
   is emitting a finalized document rather than measuring one.
 
-Eight verification obligations, distinct from measurements:
+Nine verification obligations, distinct from measurements:
 
 - **The fbdev display tier on real firmware**, verified only under QEMU + `ramfb` so far: that
   `efifb`'s reported pixel format negotiates against the renderer's five accepted arms, and that
@@ -207,12 +207,14 @@ Eight verification obligations, distinct from measurements:
 
 - **Pin whether BIP-174 explicitly forbids a Signer removing fields**, rather than resting on the
   role separation alone ([#30](https://github.com/allisson/aobs/issues/30)).
-- **A taproot input whose declared internal key is not the key its `scriptPubKey` is the tweak of is
-  accepted and then unsignable** ([#82](https://github.com/allisson/aobs/issues/82),
-  `02-core.md` §8a). It is unfinalizable by anybody, so no honest coordinator produces one, and the
-  current outcome is a PSBT the coordinator refuses rather than a refusal we state. Closing it needs
-  either a new `AOBS-R##` or a widening of the derivation check, and the spec answers neither, so it is
-  [#113](https://github.com/allisson/aobs/issues/113) rather than a decision taken in code.
+- **A PSBT can arrive with a signature already in an input of ours, and nothing checks that it is
+  valid** (`02-core.md` §8a, [#113](https://github.com/allisson/aobs/issues/113)). `sign`'s assertion
+  is that the document going out carries a signature for every input the wallet owns, and it has to
+  be that rather than *this call added one*: `Psbt::sign` declines a taproot key path when
+  `tap_key_sig` is already set, so an added-a-signature assertion would be `AOBS-E04` on bytes an
+  attacker chooses. Closing it needs either a refusal for an input arriving pre-signed — which needs
+  a code `06-codes.md` does not define — or verifying a pre-existing signature before counting it, so
+  it is [#115](https://github.com/allisson/aobs/issues/115) rather than a decision taken in code.
 - **Nunchuk's `crypto-account` support is unverified**, not assumed
   ([#27](https://github.com/allisson/aobs/issues/27)).
 - **That the master fingerprint is identical on every network** is read from the BIP-32 text, not

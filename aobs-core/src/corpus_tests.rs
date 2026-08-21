@@ -607,6 +607,18 @@ pub(crate) const CASES: &[Case] = &[
         },
     },
     Case {
+        name: "a taproot input whose internal key has no origin entry of its own",
+        code: "AOBS-R05",
+        refusal: None,
+        bytes: || taproot_internal_key_orphaned().serialize(),
+    },
+    Case {
+        name: "a taproot input whose only verifying claim is not the internal key's",
+        code: "AOBS-R06",
+        refusal: None,
+        bytes: || taproot_key_path_diverted().serialize(),
+    },
+    Case {
         name: "an output we cannot render as an address",
         code: "AOBS-R07",
         refusal: None,
@@ -731,6 +743,59 @@ pub(crate) const CASES: &[Case] = &[
         },
     },
 ];
+
+/// A taproot input of ours whose internal key has **no `tap_key_origins` entry of its own**
+/// ([#113](https://github.com/allisson/aobs/issues/113)) — half of BIP-371's declaration, which is
+/// `AOBS-R05`.
+///
+/// The internal key is the fixture's real one; what changes is that the only origin entry is keyed
+/// under a *different* key of ours, declaring the path that does byte-verify. So the case is about
+/// the declaration and never about the compare. Shared with `crate::psbt::tests`, which asserts the
+/// typed variant where the corpus asserts the code.
+pub(crate) fn taproot_internal_key_orphaned() -> Psbt {
+    let wallet = wallet();
+    let spk = our_spk(&wallet, Family::Bip84);
+    let mut psbt = psbt(&[(Family::Bip86, 100_000)], &[(spk, 90_000)]);
+    psbt.inputs[0].tap_key_origins.clear();
+    declare_input(
+        &mut psbt.inputs[0],
+        Family::Bip86,
+        &our_key(&wallet, Family::Bip86, 0, 1),
+        wallet.fingerprint(),
+        our_path(&wallet, Family::Bip86, 0, 0),
+    );
+    psbt
+}
+
+/// A taproot input of ours whose **internal key's own entry points at a branch we never scan**,
+/// while a second entry declares the path that really derives it — the shape #113 was opened for,
+/// and `AOBS-R06`.
+///
+/// The `scriptPubKey` is ours and the old *walk both maps* rule called the input ours on the second
+/// entry; the entry that decides whether a signature is produced is the first, so the document
+/// would have come back carrying nothing.
+pub(crate) fn taproot_key_path_diverted() -> Psbt {
+    let wallet = wallet();
+    let spk = our_spk(&wallet, Family::Bip84);
+    let mut psbt = psbt(&[(Family::Bip86, 100_000)], &[(spk, 90_000)]);
+    let internal = psbt.inputs[0]
+        .tap_internal_key
+        .expect("the fixture declares one");
+    let unscannable = wallet
+        .account_path(Family::Bip86)
+        .extend([normal(2), normal(0)]);
+    psbt.inputs[0]
+        .tap_key_origins
+        .insert(internal, (vec![], (wallet.fingerprint(), unscannable)));
+    declare_input(
+        &mut psbt.inputs[0],
+        Family::Bip86,
+        &our_key(&wallet, Family::Bip86, 0, 1),
+        wallet.fingerprint(),
+        our_path(&wallet, Family::Bip86, 0, 0),
+    );
+    psbt
+}
 
 /// A P2WPKH input of ours declaring `raw` as its sighash type.
 fn sighash_case(raw: u32) -> Vec<u8> {

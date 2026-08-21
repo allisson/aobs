@@ -193,6 +193,29 @@ if [ "${found}" -ne 1 ] || [ "${expect}" != "ready" ]; then
     capture_panel
 fi
 
+# `AOBS_REVIEW` is the one line that lands *after* readiness, so it is waited for here —
+# **while the machine is still running.** The wait used to sit below, beside the assertions it
+# feeds, which is after this kill: its own liveness check then found a dead process and broke at
+# zero seconds, so the row passed only when the cold font load happened to beat the readiness
+# poll's two-second window and failed when it did not. That is the race the comment on those
+# assertions says a gate must not depend on, and waiting before the kill is what makes the
+# comment true. Only the *waiting* moved; what it means is asserted where it was.
+reviewed=0
+elapsed=0
+if [ "${found}" -eq 1 ] && [ "${expect}" = "ready" ]; then
+    measured="${AOBS_QEMU_MEASURE_WAIT:-120}"
+    while [ "${elapsed}" -le "${measured}" ]; do
+        if grep -q '^AOBS_REVIEW ' "${log}" 2>/dev/null; then
+            reviewed=1
+            break
+        fi
+        # A machine that went down is not going to print it. Say which of the two happened.
+        kill -0 "${qemu}" 2>/dev/null || break
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+fi
+
 kill "${qemu}" 2>/dev/null || true
 wait "${qemu}" 2>/dev/null || true
 
@@ -291,25 +314,16 @@ fi
 # the first paint, so readiness implies it is already in the log. `AOBS_REVIEW` is deliberately
 # printed from *inside* the event loop, after `AOBS_READY`, because the address half is a font
 # measurement and a `Text`'s preferred width is not a number this backend has before the font is
-# loaded (§6.2). The loop above breaks the instant it sees readiness, so checking this one
+# loaded (§6.2). The readiness loop breaks the instant it sees readiness, so checking this one
 # immediately gives the measurement **zero** time — and the face it needs is `DejaVu Sans Mono`,
 # which nothing before it has drawn in, so it is a cold font load on every boot. That raced and
 # lost on CI ([#82](https://github.com/allisson/aobs/issues/82)) while passing locally, which is
 # the worst way for a gate to behave: a gate that depends on winning a race is not a gate.
+#
+# **The wait itself is above, before the kill**, and it has to be: a wait placed here polls a
+# machine that is already dead and reports the race it was added to remove
+# ([#113](https://github.com/allisson/aobs/issues/113)).
 if [ "${expect}" = "ready" ]; then
-    measured="${AOBS_QEMU_MEASURE_WAIT:-120}"
-    reviewed=0
-    elapsed=0
-    while [ "${elapsed}" -le "${measured}" ]; do
-        if grep -q '^AOBS_REVIEW ' "${log}" 2>/dev/null; then
-            reviewed=1
-            break
-        fi
-        # A machine that went down is not going to print it. Say which of the two happened.
-        kill -0 "${qemu}" 2>/dev/null || break
-        sleep 2
-        elapsed=$((elapsed + 2))
-    done
     if [ "${reviewed}" -eq 0 ]; then
         echo "FAIL  no AOBS_REVIEW line after ${elapsed}s, so the review panel never measured itself" >&2
         exit 1

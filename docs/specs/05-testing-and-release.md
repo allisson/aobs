@@ -114,9 +114,17 @@ Three we write, one we skip, one deliberate exception.
    transport bounds**. Highest-value surface in the transport layer, and upstream ships no target for
    it.
 2. **The PSBT parser** on raw bytes — no panic, bounded allocation.
-3. **The validator**, structure-aware and seeded with our own test key material, asserting the one
-   invariant that matters: *it never accepts a transaction containing an output classified as ours
-   whose scriptPubKey we did not ourselves produce.*
+3. **The validator**, structure-aware and seeded with our own test key material, asserting the two
+   invariants that matter: *it never accepts a transaction containing an output classified as ours
+   whose scriptPubKey we did not ourselves produce*, and — added by
+   [#113](https://github.com/allisson/aobs/issues/113) — *every input it accepts as ours is one
+   `sign` produces a signature for.* Both are re-derived in the target with its own path arithmetic
+   through `Wallet::address`, never by asking the code under test whether it agrees with itself.
+   **The second is why this target signs**, at one signature per input of every accepted plan: the
+   set of inputs `sign` asserts over is `psbt.rs`'s own, so an independent re-derivation is the only
+   thing that turns a widened map read back into a finding. It is also the only target that calls a
+   *second* module of the crate, which is deliberate — the defect it exists for lives in the seam
+   between the two (`02-core.md` §8a).
 4. **Skipped: Bytewords and CBOR encode/decode** — `ur` fuzzes those three targets upstream.
    Recorded so a later reviewer does not read the gap as an oversight.
 5. **Deliberate exception: the address-verification path gets no fuzz target.** Its "parser" is a
@@ -172,6 +180,10 @@ The cases:
   shape it exists for rather than a single amount one satoshi over the supply;
 - **a testnet PSBT against a mainnet-loaded wallet** — `AOBS-R06` with the coin-type copy variant,
   the network mismatch that has no other symptom;
+- **a taproot input whose internal key has no origin entry of its own** — `AOBS-R05`, half of
+  BIP-371's declaration ([#113](https://github.com/allisson/aobs/issues/113));
+- **a taproot input whose only verifying claim is not the internal key's** — `AOBS-R06`, the shape
+  that would otherwise be accepted and come back with no signature in it (#113);
 - address-shaped entries: mixed-case bech32, truncated bech32, a valid address differing by one
   character, a valid address differing only in case, `bitcoin:` with a query string, an uppercase
   BIP-21 URI, and a correctly-formed address from the *wrong* account;

@@ -30,6 +30,14 @@
 //! never scan, `AOBS-R08` for one whose bytes disagree, and a refusal of the **entire
 //! transaction** either way rather than a quiet reclassification to *payment*.
 //!
+//! **For an input the candidate is narrower, and the reason is what happens next**
+//! ([#113](https://github.com/allisson/aobs/issues/113)). An output's claim decides a *display*,
+//! so either derivation map may carry it; an input's decides whether we hand back a signature, and
+//! the two signing paths read one map each — the ECDSA families' `bip32_derivation`, taproot's
+//! `tap_key_origins` entry keyed by the internal key. So an input is ours only when the claim in
+//! **that** map byte-verifies, which is what makes *ours* and *signable* one question and lets
+//! [`crate::sign`] assert it signed everything this wallet owns.
+//!
 //! **The duplicate-key refusal is the dependency's invariant, not ours.** `bitcoin` 0.32
 //! rejects duplicate keys in all three maps, so §7 forbids us a pre-parse scan and requires we
 //! assert it anyway: BIP-174's invalid vector 5 is in the corpus for exactly that. A duplicate
@@ -378,17 +386,29 @@ impl Refusal {
 
 /// An accepted transaction: the document, and the model of it a screen renders.
 ///
-/// **Two fields rather than two return values.** §8 signs the PSBT the review was computed from,
-/// so both have to cross the seam — and handing them back separately would let a caller pair a
-/// review with a different transaction, which is the same class of mistake as skipping the
+/// **Two public fields rather than two return values.** §8 signs the PSBT the review was computed
+/// from, so both have to cross the seam — and handing them back separately would let a caller pair
+/// a review with a different transaction, which is the same class of mistake as skipping the
 /// derivation check. Pairing them here keeps [`Review`] to exactly the contents `02-core.md` §9
 /// lists, none of which is the document.
+///
+/// The third field is crate-private and is what makes [`crate::sign`]'s assertion sayable
+/// ([#113](https://github.com/allisson/aobs/issues/113)). **What it buys is exactly one thing and
+/// no more:** nothing outside this crate can construct an `Accepted`, so *the only way to obtain
+/// one is to have run every check* is now a property of the type rather than an argument about the
+/// call graph. It is **not** a claim that a held one cannot be edited — `psbt` and `review` are
+/// public and the type is `Clone`, so a caller could still clone one and swap the document. That
+/// would trip `crate::sign`'s assertion as `AOBS-E04`, which is a crate bug rather than a hostile
+/// input, and closing it means accessors rather than fields.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Accepted {
     /// The parsed PSBT, unmodified: unknown fields included, nothing stripped (§8).
     pub psbt: Psbt,
     /// What the review panel draws.
     pub review: Review,
+    /// The indices of the inputs the byte-compare found ours, in the transaction's own order —
+    /// **exactly the inputs `crate::sign` must come back having signed** (§8a).
+    pub(crate) ours: Vec<usize>,
 }
 
 /// The typed model the review panel renders (`02-core.md` §9).
@@ -665,7 +685,8 @@ fn check(psbt: &Psbt) -> Result<Vec<Spend>, Refusal> {
 /// whichever of its outputs failed a compare — which is also what makes a testnet PSBT loaded
 /// as mainnet land here, with the coin-type sentence, instead of on `AOBS-R09`.
 fn build(wallet: &Wallet, psbt: Psbt, spends: &[Spend]) -> Result<Accepted, Refusal> {
-    if !any_input_is_ours(wallet, &psbt, spends) {
+    let ours = inputs_of_ours(wallet, &psbt, spends);
+    if ours.is_empty() {
         return Err(Refusal::NoInputOfOurs {
             network: wallet.network(),
             passphrase_in_use: wallet.passphrase_in_use(),
@@ -736,26 +757,67 @@ fn build(wallet: &Wallet, psbt: Psbt, spends: &[Spend]) -> Result<Accepted, Refu
                 .then_some(Warning::FeeAbovePayment),
         },
         psbt,
+        ours,
     })
 }
 
-/// Whether any input re-derives to our own key material — the `AOBS-R06` question.
+/// Which inputs re-derive to our own key material — the `AOBS-R06` question, and the set
+/// [`crate::sign`] is asserted to sign.
 ///
-/// **Every claimed path is tried, whatever fingerprint it carries.** The asymmetry with
-/// [`change_path`] is deliberate: for an output the fingerprint decides between two *displays*
-/// and §7 fixes that a foreign one is a payment, but for an input it would only decide whether
-/// to ask a question the byte-compare answers outright. Trying more candidates cannot accept
-/// anything wrong — what makes an input ours is that we derive its `scriptPubKey`, and a
-/// coordinator that filled the fingerprint in wrongly should not make a wallet unsignable.
-fn any_input_is_ours(wallet: &Wallet, psbt: &Psbt, spends: &[Spend]) -> bool {
-    spends.iter().zip(&psbt.inputs).any(|(spend, input)| {
-        claims(&input.bip32_derivation, &input.tap_key_origins).any(|(_, path)| {
-            matches!(
-                wallet.verify(path, &spend.script_pubkey),
-                Verdict::Ours { .. }
-            )
-        })
-    })
+/// **The fingerprint is not read at all here.** The asymmetry with [`change_path`] is deliberate:
+/// for an output the fingerprint decides between two *displays* and §7 fixes that a foreign one
+/// is a payment, but for an input it would only decide whether to ask a question the byte-compare
+/// answers outright. It cannot accept anything wrong — what makes an input ours is that we derive
+/// its `scriptPubKey`, and a coordinator that filled the fingerprint in wrongly should not make a
+/// wallet unsignable. Which *paths* are candidates is [`input_is_ours`]'s narrower question.
+fn inputs_of_ours(wallet: &Wallet, psbt: &Psbt, spends: &[Spend]) -> Vec<usize> {
+    spends
+        .iter()
+        .zip(&psbt.inputs)
+        .enumerate()
+        .filter(|(_, (spend, input))| input_is_ours(wallet, spend, input))
+        .map(|(index, _)| index)
+        .collect()
+}
+
+/// Whether this one input re-derives to ours — the byte-compare over **the claims that describe
+/// this spend** ([#113](https://github.com/allisson/aobs/issues/113)).
+///
+/// **A claim only counts in the map its family is signed from**, and the asymmetry with
+/// [`change_path`] is the reason: an output's claim decides a *display*, so reading one from
+/// either map costs nothing, while an input's decides whether we will hand back a signature. The
+/// two signing paths read one map each — the ECDSA families' from `bip32_derivation`, taproot's
+/// from the `tap_key_origins` entry keyed by the internal key — so a claim in the other map is
+/// not a claim about this spend at all, and counting it would mean calling an input ours and then
+/// returning it unsigned under a screen that says *Signed*.
+///
+/// Standing rule 1 is untouched: this narrows *which* attacker-supplied path is read, and the
+/// byte-compare is still the only thing that accepts.
+fn input_is_ours(wallet: &Wallet, spend: &Spend, input: &Input) -> bool {
+    let ours = |path: &DerivationPath| {
+        matches!(
+            wallet.verify(path, &spend.script_pubkey),
+            Verdict::Ours { .. }
+        )
+    };
+    match spend.script {
+        // `AOBS-R05` established that the entry exists; this reads the path out of it.
+        InputScript::P2tr => taproot_key_path_claim(input).is_some_and(|(_, path)| ours(path)),
+        InputScript::P2pkh | InputScript::P2shP2wpkh | InputScript::P2wpkh => {
+            input.bip32_derivation.values().any(|(_, path)| ours(path))
+        }
+    }
+}
+
+/// The `tap_key_origins` entry that declares this input's key-path spend, or `None`.
+///
+/// BIP-371's two halves of one declaration: the key is `PSBT_IN_TAP_INTERNAL_KEY`, and the entry
+/// naming it carries **no leaf hashes** — an entry with leaf hashes is a script-path key, and the
+/// dependency's taproot signing path skips it for exactly that reason. Absence is `AOBS-R05`.
+fn taproot_key_path_claim(input: &Input) -> Option<&(Fingerprint, DerivationPath)> {
+    let internal = input.tap_internal_key?;
+    let (leaf_hashes, source) = input.tap_key_origins.get(&internal)?;
+    leaf_hashes.is_empty().then_some(source)
 }
 
 /// The path an output comes back to us at, or `None` when it is a payment.
@@ -808,8 +870,14 @@ fn change_path(
 /// Every `(fingerprint, path)` a derivation map pair claims, taproot origins included.
 ///
 /// Both PSBT maps are walked because the four families straddle them: BIP44/49/84 declare their
-/// origins in `bip32_derivation` and BIP86 in `tap_key_origins`, and an input or output is
-/// entitled to carry either.
+/// origins in `bip32_derivation` and BIP86 in `tap_key_origins`, and an output is entitled to
+/// carry either.
+///
+/// **Outputs and copy only.** An input's own claim is [`input_is_ours`]'s narrower question, which
+/// reads the map the input's family is *signed* from and no other
+/// ([#113](https://github.com/allisson/aobs/issues/113)); what this is still asked about an input
+/// is [`every_input_declares_the_other_network`], where a declaration in either map is evidence
+/// about which network the coordinator built for and decides nothing but a sentence.
 fn claims<'a, K1, K2>(
     bip32: &'a BTreeMap<K1, (Fingerprint, DerivationPath)>,
     taproot: &'a BTreeMap<K2, (Vec<TapLeafHash>, (Fingerprint, DerivationPath))>,
@@ -919,17 +987,21 @@ fn classify(spk: &Script, input: &Input) -> Option<InputScript> {
         // BIP86 is the key path and nothing else. A merkle root or a control block means the
         // spend goes through a script we do not model, whatever the internal key says.
         //
-        // **And the internal key has to be declared** ([#82](https://github.com/allisson/aobs/issues/82)).
-        // BIP-371 makes `PSBT_IN_TAP_INTERNAL_KEY` the field that says *this is a key-path
-        // spend*, so an input without it has not declared the script type this arm is about —
-        // which is what `AOBS-R05` asks, and why this is that refusal rather than a new one. It
-        // is also what makes `crate::sign` total over everything this function accepts: the
-        // dependency signs a taproot key path from this field, so accepting an input that lacks
-        // it would mean accepting one we cannot sign, and a PSBT would leave the appliance
-        // looking signed and carrying nothing.
+        // **And the key path has to be declared in full**
+        // ([#82](https://github.com/allisson/aobs/issues/82),
+        // [#113](https://github.com/allisson/aobs/issues/113)). BIP-371 makes
+        // `PSBT_IN_TAP_INTERNAL_KEY` the field that says *this is a key-path spend* and an empty
+        // leaf-hash list the mark of the internal key in `tap_key_origins`, so a declaration is
+        // complete only when both are there: the field, and an origin entry keyed by it carrying
+        // no leaf hashes. An input missing either has not declared the script type this arm is
+        // about — which is what `AOBS-R05` asks, and why this is that refusal rather than a new
+        // one. It is also what makes `crate::sign` total over everything this function accepts:
+        // the dependency signs a taproot key path out of exactly that entry, so accepting an
+        // input without one would mean accepting one we cannot sign, and a PSBT would leave the
+        // appliance looking signed and carrying nothing.
         return (input.tap_merkle_root.is_none()
             && input.tap_scripts.is_empty()
-            && input.tap_internal_key.is_some())
+            && taproot_key_path_claim(input).is_some())
         .then_some(InputScript::P2tr);
     }
     if spk.is_p2sh() {

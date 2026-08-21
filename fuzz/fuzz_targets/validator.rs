@@ -6,21 +6,29 @@
 //! document that gets past the parser every time, so the mutator's budget goes on the checks
 //! rather than on the magic bytes. That is what *structure-aware* buys.
 //!
-//! **The invariant it asserts is §4's own, and it is the one that matters:**
+//! **The invariants it asserts are §4's own, and they are the two that matter:**
 //!
 //! > it never accepts a transaction containing an output classified as ours whose
-//! > `scriptPubKey` we did not ourselves produce.
+//! > `scriptPubKey` we did not ourselves produce, and every input it accepts as ours is one
+//! > `sign` produces a signature for.
 //!
-//! It is checked **independently of the code under test**. `psbt.rs` reaches its verdict through
-//! `Wallet::verify`, which reads the path, decides whether it is scannable and byte-compares;
-//! this target re-reads the path with its own arithmetic, derives through `Wallet::address` — the
-//! primitive the BIP vectors pin — and compares again. Calling `verify` here would assert that
-//! `verify` agrees with itself.
+//! Both are checked **independently of the code under test**. `psbt.rs` reaches its verdicts
+//! through `Wallet::verify`, which reads the path, decides whether it is scannable and
+//! byte-compares; this target re-reads the path with its own arithmetic, derives through
+//! `Wallet::address` — the primitive the BIP vectors pin — and compares again. Calling `verify`
+//! here would assert that `verify` agrees with itself.
 //!
-//! The plan can express the attack directly: a claim carrying our fingerprint at a legitimate
-//! change path, over an address we never derived. If `AOBS-R08` ever stops firing on it, an
-//! accepted `Review` arrives here with a `Change` row this target cannot reproduce, and the
-//! assertion is the finding.
+//! The plan can express both attacks directly. For the first: a claim carrying our fingerprint at
+//! a legitimate change path, over an address we never derived — if `AOBS-R08` ever stops firing on
+//! it, an accepted `Review` arrives here with a `Change` row this target cannot reproduce. For the
+//! second ([#113](https://github.com/allisson/aobs/issues/113)): a taproot input whose key-path
+//! claim the signing path would never reach, which is [`KeyPath`]'s axis — if §7's rule 6 ever
+//! widens back to *walk both maps*, such an input is accepted as ours and comes back unsigned.
+//!
+//! **The second invariant is why this target signs**, which costs one signature per input of every
+//! accepted plan. It is the only way the assertion reaches a mutator: the set of inputs `sign`
+//! checks is `crate::psbt`'s own, so a target that did not re-derive independently would be
+//! watching two functions agree.
 
 #![no_main]
 
@@ -32,8 +40,9 @@ use libfuzzer_sys::fuzz_target;
 use bitcoin::absolute::LockTime;
 use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint};
 use bitcoin::hashes::Hash as _;
-use bitcoin::psbt::Psbt;
+use bitcoin::psbt::{Input, Psbt};
 use bitcoin::secp256k1::{PublicKey, Secp256k1, XOnlyPublicKey};
+use bitcoin::taproot::TapLeafHash;
 use bitcoin::transaction::Version;
 use bitcoin::{
     Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, WPubkeyHash, Witness,
@@ -42,6 +51,7 @@ use bitcoin::{
 use aobs_core::bip39::Mnemonic;
 use aobs_core::derive::{Branch, Family, Network, Wallet};
 use aobs_core::psbt::{validate, Accepted, OutputKind};
+use aobs_core::sign::sign;
 use aobs_core::secret::{Entropy, Passphrase};
 
 /// Our own key material, derived once. `Wallet::load` is PBKDF2 over 2 048 HMAC rounds plus four
@@ -59,18 +69,27 @@ fn wallet() -> &'static Wallet {
     })
 }
 
-/// A valid public key nobody controls — secp256k1's generator point.
+/// Two valid public keys nobody controls — secp256k1's generator point and its double.
 ///
-/// The derivation maps are **keyed** by a public key and our code reads only the values, so a
-/// constant is not a shortcut: a target that had to derive the right key per entry would be
-/// asserting that we ignore the key, which we can state instead.
-fn placeholder_keys() -> &'static (PublicKey, XOnlyPublicKey) {
-    static KEYS: OnceLock<(PublicKey, XOnlyPublicKey)> = OnceLock::new();
+/// The `bip32_derivation` map is **keyed** by a public key and our code reads only the values, so
+/// a constant is not a shortcut there: a target that had to derive the right key per entry would
+/// be asserting that we ignore the key, which we can state instead.
+///
+/// **`tap_key_origins` is the exception, and it is why there is a second x-only key**
+/// ([#113](https://github.com/allisson/aobs/issues/113)). For a taproot input the entry *keyed by
+/// `tap_internal_key`* is the key-path declaration, so which key an entry is under is a fact the
+/// policy reads — and a second key is what lets [`KeyPath`] put the honest origin somewhere the
+/// internal key does not name.
+fn placeholder_keys() -> &'static (PublicKey, XOnlyPublicKey, XOnlyPublicKey) {
+    static KEYS: OnceLock<(PublicKey, XOnlyPublicKey, XOnlyPublicKey)> = OnceLock::new();
     KEYS.get_or_init(|| {
         let key: PublicKey = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
             .parse()
             .expect("a valid compressed key");
-        (key, XOnlyPublicKey::from(key))
+        let other: PublicKey = "02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5"
+            .parse()
+            .expect("a valid compressed key");
+        (key, XOnlyPublicKey::from(key), XOnlyPublicKey::from(other))
     })
 }
 
@@ -91,6 +110,8 @@ struct InputPlan {
     /// on `AOBS-R16`, which `psbt_tests.rs` pins at its boundary anyway.
     value: u32,
     claim: InputClaim,
+    /// How a taproot input declares its key path. Ignored by the other three families.
+    key_path: KeyPath,
 }
 
 /// What an input says about itself.
@@ -109,6 +130,50 @@ enum InputClaim {
     Absent,
     /// Whatever the fuzzer says.
     Declared(Claim),
+}
+
+/// How a taproot input declares its key-path spend
+/// ([#113](https://github.com/allisson/aobs/issues/113)).
+///
+/// BIP-371 puts the declaration in two places at once — `PSBT_IN_TAP_INTERNAL_KEY`, and the
+/// `tap_key_origins` entry keyed by that key with no leaf hashes — and the dependency's signing
+/// path reads the second. So a declaration can be broken in ways [`InputClaim`] cannot express,
+/// and every one of them is a shape that used to be accepted and then come back with no signature
+/// in it.
+///
+/// **Two variants rather than five, for [`InputClaim`]'s own reason.** Every broken form refuses
+/// the taproot input, so a flat five-way enum would refuse four taproot plans in five and starve
+/// the output checks this target exists for. Nesting them puts [`KeyPath::Declared`] back at half.
+///
+/// **What these variants reach is the second invariant**, and the module header says how: a plan
+/// whose taproot declaration is broken must not be accepted as ours, and if one is, it comes back
+/// unsigned and [`assert_every_input_of_ours_came_back_signed`] is the finding. Which *code* each
+/// broken form earns is the corpus's assertion rather than this target's — a fuzz target names no
+/// `AOBS-R##`.
+#[derive(Arbitrary, Debug)]
+enum KeyPath {
+    /// The internal key names its own origin entry: what `AOBS-R05` asks for, and the only form
+    /// that can be ours.
+    Declared,
+    /// One of the ways the declaration can be incomplete.
+    Broken(BrokenKeyPath),
+}
+
+/// The four incomplete taproot declarations, all of which the policy must refuse.
+#[derive(Arbitrary, Debug)]
+enum BrokenKeyPath {
+    /// No internal key at all, which is `AOBS-R05` — the field #82 made mandatory.
+    Absent,
+    /// An internal key no entry names, which is `AOBS-R05` for the same reason.
+    Orphaned,
+    /// The entry naming it carries a leaf hash, so it is a script-path key and the key path is
+    /// undeclared — also `AOBS-R05`.
+    LeafHashed,
+    /// The internal key's entry declares a path of the fuzzer's choosing while the honest origin
+    /// moves to an entry the internal key does not name. **The shape #113 was opened for**: the
+    /// `scriptPubKey` can be ours and the signing path still reach nothing, so the input must not
+    /// be ours either — `AOBS-R06` when it is the only input.
+    Diverted(Claim),
 }
 
 #[derive(Arbitrary, Debug)]
@@ -291,7 +356,7 @@ fn build(wallet: &Wallet, plan: &Plan) -> Option<Vec<u8>> {
     };
 
     let mut psbt = Psbt::from_unsigned_tx(unsigned).ok()?;
-    let (key, x_only) = placeholder_keys();
+    let (key, x_only, other) = placeholder_keys();
 
     for (index, (slot, plan)) in psbt.inputs.iter_mut().zip(&plan.inputs).enumerate() {
         let previous = &previous[index];
@@ -301,13 +366,6 @@ fn build(wallet: &Wallet, plan: &Plan) -> Option<Vec<u8>> {
             // BIP49 is indistinguishable from any other P2SH without it, so an honest plan
             // hands it over and `AOBS-R05` is what refuses the plans that do not.
             slot.redeem_script = Some(redeem_script().clone());
-        }
-        if plan.family.family() == Family::Bip86 {
-            // BIP-371's declaration that this is a key-path spend, which `AOBS-R05` also
-            // requires ([#82](https://github.com/allisson/aobs/issues/82)). Without it every
-            // taproot plan is refused on the script type and never reaches the output checks
-            // this target exists for.
-            slot.tap_internal_key = Some(*x_only);
         }
         let declared = match &plan.claim {
             InputClaim::Honest => Some((
@@ -320,6 +378,35 @@ fn build(wallet: &Wallet, plan: &Plan) -> Option<Vec<u8>> {
         if let Some(source) = declared {
             slot.bip32_derivation.insert(*key, source.clone());
             slot.tap_key_origins.insert(*x_only, (vec![], source));
+        }
+        if plan.family.family() == Family::Bip86 {
+            // BIP-371's declaration that this is a key-path spend, which `AOBS-R05` requires
+            // ([#82](https://github.com/allisson/aobs/issues/82),
+            // [#113](https://github.com/allisson/aobs/issues/113)). `Declared` is what keeps a
+            // taproot plan reaching the output checks this target exists for; the other four
+            // variants are the ways the declaration can be broken.
+            slot.tap_internal_key = Some(*x_only);
+            match &plan.key_path {
+                KeyPath::Declared => {}
+                KeyPath::Broken(BrokenKeyPath::Absent) => slot.tap_internal_key = None,
+                KeyPath::Broken(BrokenKeyPath::Orphaned) => {
+                    slot.tap_internal_key = Some(*other);
+                }
+                KeyPath::Broken(BrokenKeyPath::LeafHashed) => {
+                    if let Some((leaves, _)) = slot.tap_key_origins.get_mut(x_only) {
+                        leaves.push(TapLeafHash::from_byte_array([0x44; 32]));
+                    }
+                }
+                KeyPath::Broken(BrokenKeyPath::Diverted(claim)) => {
+                    if let Some(entry) = slot.tap_key_origins.remove(x_only) {
+                        slot.tap_key_origins.insert(*other, entry);
+                    }
+                    slot.tap_key_origins.insert(
+                        *x_only,
+                        (vec![], (claim.fingerprint(wallet), claim.path(wallet))),
+                    );
+                }
+            }
         }
     }
 
@@ -372,7 +459,63 @@ fn honest_path(wallet: &Wallet, family: Family) -> DerivationPath {
     ])
 }
 
-/// §4's invariant, checked without going through the code that produced the verdict.
+/// Read a claimed path with this file's own arithmetic and derive what it points at, or `None`
+/// for a path no wallet of ours would ever scan.
+///
+/// **`Wallet::verify`'s scanning rule restated here rather than called**: five children on one of
+/// our four accounts, an unhardened branch of 0 or 1, an unhardened index. Calling `verify` would
+/// assert that `verify` agrees with itself, and `Wallet::address` — the primitive the BIP vectors
+/// pin — is the second opinion both assertions below rest on.
+fn ours_at(wallet: &Wallet, path: &DerivationPath) -> Option<ScriptBuf> {
+    let children: &[ChildNumber] = path.as_ref();
+    let [purpose, coin, account, branch, leaf] = children else {
+        return None;
+    };
+    let family = Family::ALL.into_iter().find(|family| {
+        let account_path = wallet.account_path(*family);
+        let ours: &[ChildNumber] = account_path.as_ref();
+        ours == [*purpose, *coin, *account]
+    })?;
+    let branch = match branch {
+        ChildNumber::Normal { index: 0 } => Branch::Receive,
+        ChildNumber::Normal { index: 1 } => Branch::Change,
+        _ => return None,
+    };
+    let ChildNumber::Normal { index: leaf } = leaf else {
+        return None;
+    };
+    Some(
+        wallet
+            .address(family, branch, *leaf)
+            .expect("a normal index")
+            .script_pubkey(),
+    )
+}
+
+/// The `scriptPubKey` an input spends, the way `crate::psbt` establishes it: **the previous
+/// transaction wins** where both utxo fields are present (`AOBS-R02`), so an inflated
+/// `witness_utxo` buys nothing here either.
+fn spent_script_pubkey(psbt: &Psbt, index: usize) -> Option<ScriptBuf> {
+    let input = &psbt.inputs[index];
+    let vout = usize::try_from(psbt.unsigned_tx.input[index].previous_output.vout).ok()?;
+    if let Some(previous) = &input.non_witness_utxo {
+        return previous.output.get(vout).map(|out| out.script_pubkey.clone());
+    }
+    input
+        .witness_utxo
+        .as_ref()
+        .map(|out| out.script_pubkey.clone())
+}
+
+/// The one path a taproot input claims for its key-path spend — §7 rule 6's taproot half, restated
+/// here for the same reason [`ours_at`] is.
+fn key_path_claim(input: &Input) -> Option<&DerivationPath> {
+    let internal = input.tap_internal_key?;
+    let (leaf_hashes, (_, path)) = input.tap_key_origins.get(&internal)?;
+    leaf_hashes.is_empty().then_some(path)
+}
+
+/// §4's first invariant, checked without going through the code that produced the verdict.
 fn assert_no_output_is_ours_that_we_did_not_produce(wallet: &Wallet, accepted: &Accepted) {
     // One row per output, in the transaction's own order — the premise everything below indexes
     // on.
@@ -387,41 +530,55 @@ fn assert_no_output_is_ours_that_we_did_not_produce(wallet: &Wallet, accepted: &
             continue;
         };
 
-        // Read the path with this file's own arithmetic. Anything but five children on one of
-        // our four accounts, an unhardened branch of 0 or 1 and an unhardened index, is a path
-        // no wallet of ours scans — and `AOBS-R09` should have refused before we got here.
-        let children: &[ChildNumber] = path.as_ref();
-        let [purpose, coin, account, branch, leaf] = children else {
-            panic!("accepted change at a path of {} children", children.len());
-        };
-        let family = Family::ALL
-            .into_iter()
-            .find(|family| {
-                let account_path = wallet.account_path(*family);
-                let ours: &[ChildNumber] = account_path.as_ref();
-                ours == [*purpose, *coin, *account]
-            })
-            .expect("accepted change outside our four accounts");
-        let branch = match branch {
-            ChildNumber::Normal { index: 0 } => Branch::Receive,
-            ChildNumber::Normal { index: 1 } => Branch::Change,
-            other => panic!("accepted change on branch {other}"),
-        };
-        let ChildNumber::Normal { index: leaf } = leaf else {
-            panic!("accepted change at a hardened index {leaf}");
-        };
-
-        // And derive it again. `Wallet::address` is the primitive the BIP vectors pin, so this
-        // is a second opinion rather than the same one.
-        let ours = wallet
-            .address(family, branch, *leaf)
-            .expect("a normal index")
-            .script_pubkey();
+        // A path this file cannot re-derive is one `AOBS-R09` should have refused before we got
+        // here, so failing to read it is the finding rather than a case to skip.
+        let ours = ours_at(wallet, path)
+            .unwrap_or_else(|| panic!("accepted change at a path no wallet of ours scans: {path}"));
         assert_eq!(
             accepted.psbt.unsigned_tx.output[index].script_pubkey, ours,
             "output {index} was classified as ours and we did not produce its scriptPubKey"
         );
         assert_eq!(row.address.script_pubkey(), ours, "output {index}");
+    }
+}
+
+/// §4's second invariant ([#113](https://github.com/allisson/aobs/issues/113)): **every input this
+/// wallet owns comes back signed.**
+///
+/// `crate::sign` asserts this itself, and this is not that assertion twice over: the set of inputs
+/// it checks is the one `crate::psbt` computed, where this reads the claim out of the map the
+/// input's family is signed from and re-derives with [`ours_at`]. So a rule 6 that drifted — a map
+/// read that widened again, a taproot entry counted that the signing path never reaches — arrives
+/// here as a signature that is missing rather than as two functions agreeing with each other.
+fn assert_every_input_of_ours_came_back_signed(
+    wallet: &Wallet,
+    accepted: &Accepted,
+    signed: &Psbt,
+) {
+    for (index, input) in accepted.psbt.inputs.iter().enumerate() {
+        let Some(spk) = spent_script_pubkey(&accepted.psbt, index) else {
+            continue;
+        };
+
+        // §7 rule 6: the map the family is *signed* from, and no other. For taproot that is the
+        // single entry keyed by the internal key; for the other three, `bip32_derivation`.
+        let ours = if spk.is_p2tr() {
+            key_path_claim(input).is_some_and(|path| ours_at(wallet, path).as_ref() == Some(&spk))
+        } else {
+            input
+                .bip32_derivation
+                .values()
+                .any(|(_, path)| ours_at(wallet, path).as_ref() == Some(&spk))
+        };
+        if !ours {
+            continue;
+        }
+
+        let signed = &signed.inputs[index];
+        assert!(
+            !signed.partial_sigs.is_empty() || signed.tap_key_sig.is_some(),
+            "input {index} re-derives to ours and came back unsigned"
+        );
     }
 }
 
@@ -433,6 +590,7 @@ fuzz_target!(|plan: Plan| {
 
     if let Ok(accepted) = validate(wallet, &bytes) {
         assert_no_output_is_ours_that_we_did_not_produce(wallet, &accepted);
+        assert_every_input_of_ours_came_back_signed(wallet, &accepted, &sign(wallet, &accepted));
         let review = &accepted.review;
 
         // The money adds up, in both directions the model computes it from.
