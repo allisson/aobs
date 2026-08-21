@@ -510,9 +510,10 @@ residual costs, both named rather than glossed:
   `AOBS-E04` on bytes an attacker chooses, which is the trade this section rejected in the first
   place. So a signature that **arrived** satisfies the assertion, and nothing checks that it is
   valid: such a document reaches the coordinator and is refused there, which is the pre-#113 outcome
-  for a different shape. **Open, and a ticket rather than a decision taken here** — the options are a
-  refusal for an input arriving pre-signed (which needs a code `06-codes.md` does not define) or
-  verifying a pre-existing signature before counting it.
+  for a different shape. **Open, and a ticket rather than a decision taken here** —
+  [#115](https://github.com/allisson/aobs/issues/115), where the options are a refusal for an input
+  arriving pre-signed (which needs a code `06-codes.md` does not define) or verifying a pre-existing
+  signature before counting it.
 
 **`sign_schnorr_no_aux_rand` is the deterministic arm, and which arm gets used is a feature flag
 rather than a call site.** `Psbt::sign` reaches `sign_schnorr` with fresh auxiliary randomness when

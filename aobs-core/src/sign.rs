@@ -89,8 +89,8 @@ pub fn sign(wallet: &Wallet, accepted: &Accepted) -> Psbt {
     // assertion panic — `AOBS-E04`, a crash and a 24-word retype, on bytes an attacker chooses,
     // which is the trade §8a rejected. The screen's claim is that the document carries a signature
     // for every input the wallet owns, and that is exactly what this reads. Whether a signature
-    // that arrived is a *valid* one is a different question, and it is named as the residual in
-    // §8a rather than answered here.
+    // that arrived is a *valid* one is a different question, and it is
+    // [#115](https://github.com/allisson/aobs/issues/115) rather than answered here.
     for &index in &accepted.ours {
         let input = &psbt.inputs[index];
         assert!(

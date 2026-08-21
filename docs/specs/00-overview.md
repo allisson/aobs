@@ -213,7 +213,8 @@ Nine verification obligations, distinct from measurements:
   be that rather than *this call added one*: `Psbt::sign` declines a taproot key path when
   `tap_key_sig` is already set, so an added-a-signature assertion would be `AOBS-E04` on bytes an
   attacker chooses. Closing it needs either a refusal for an input arriving pre-signed — which needs
-  a code `06-codes.md` does not define — or verifying a pre-existing signature before counting it.
+  a code `06-codes.md` does not define — or verifying a pre-existing signature before counting it, so
+  it is [#115](https://github.com/allisson/aobs/issues/115) rather than a decision taken in code.
 - **Nunchuk's `crypto-account` support is unverified**, not assumed
   ([#27](https://github.com/allisson/aobs/issues/27)).
 - **That the master fingerprint is identical on every network** is read from the BIP-32 text, not
