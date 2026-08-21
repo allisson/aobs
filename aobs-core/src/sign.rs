@@ -25,16 +25,17 @@
 //! [`Accepted`] — the only way to hold one is to have run every check — and every precondition
 //! `Psbt::sign` has was established there: an input's spent output exists and its `vout` is in
 //! range (`AOBS-R02`), its script type is one of four we model and a taproot input declares its
-//! internal key (`AOBS-R05`), and its sighash commits to everything (`AOBS-R03`). So there is no
-//! failure arm for a caller to handle and no refusal code for one to carry.
+//! key path in full (`AOBS-R05`), and its sighash commits to everything (`AOBS-R03`). So there is
+//! no failure arm for a caller to handle and no refusal code for one to carry.
 //!
-//! **What it deliberately does not promise is that it signed something** (`02-core.md` §8a). A
-//! taproot input whose declared internal key is not the key its `scriptPubKey` is the tweak of
-//! passes every structural check and every derivation check and is then unsignable, and
-//! `06-codes.md` defines no code for it. Refusing would mean inventing one; crashing would cost a
-//! 24-word retype; so the document goes out as it came back and the coordinator refuses it in
-//! seconds. **Closing that gap is [#113](https://github.com/allisson/aobs/issues/113)** — it needs
-//! either a new refusal or a widening of the derivation check, and the spec answers neither.
+//! **And it promises that it signed what the wallet owns**
+//! ([#113](https://github.com/allisson/aobs/issues/113), `02-core.md` §8a). *At least one
+//! signature* was the claim §8 could not make while an accepted input could still be unsignable —
+//! the shape being a taproot input whose key-path claim the signing path would never reach. That is
+//! now `crate::psbt`'s business: an input's claim is read out of the map its family is signed from,
+//! so *ours* and *signable* are one question, and the set of inputs the byte-compare found ours
+//! travels on the [`Accepted`] for this function to assert against. A document that came back with
+//! nothing in it under a screen reading *Signed* is the failure this closes.
 
 use core::convert::Infallible;
 
@@ -54,10 +55,10 @@ use crate::psbt::Accepted;
 ///
 /// # Panics
 ///
-/// If `Psbt::sign` reports an error, which means a precondition `crate::psbt::validate` is
-/// supposed to have established did not hold — `06-codes.md` §5's `AOBS-E04` and not a refusal,
-/// because there is no refusal code for it and there is nothing here that can fail without the
-/// crate being internally inconsistent. See the module documentation for what is *not* asserted.
+/// If `Psbt::sign` reports an error, or if any input `crate::psbt::validate` found ours comes
+/// back unsigned. Both mean a precondition that function is supposed to have established did not
+/// hold — `06-codes.md` §5's `AOBS-E04` and not a refusal, because there is no refusal code for
+/// it and there is nothing here that can fail without the crate being internally inconsistent.
 #[must_use]
 pub fn sign(wallet: &Wallet, accepted: &Accepted) -> Psbt {
     let mut psbt = accepted.psbt.clone();
@@ -72,15 +73,31 @@ pub fn sign(wallet: &Wallet, accepted: &Accepted) -> Psbt {
     // The per-input `SignError` map it would format is program state, which 01-boot-layer.md §9
     // forbids *printing* — and nothing prints it: `main` silences the panic hook for exactly this
     // reason and `fail::halt` writes the diagnostic instead.
-    //
-    // **What is *not* asserted here, and why, is `02-core.md` §8a.** *At least one signature was
-    // produced* is not a claim this function may make: a taproot input whose declared internal key
-    // is not the key its `scriptPubKey` is the tweak of passes every check in `crate::psbt` and is
-    // then unsignable, and there is no `AOBS-R##` for it. Asserting would turn that into a crash
-    // and a 24-word retype; returning the document turns it into a PSBT the coordinator refuses in
-    // seconds. The second is the lesser harm, and closing the gap properly is
-    // [#113](https://github.com/allisson/aobs/issues/113) rather than a code invented here.
     let _ = signed.expect("a validated transaction has every precondition signing needs");
+
+    // **And the claim §8a could not make** ([#113](https://github.com/allisson/aobs/issues/113)):
+    // *every input this wallet owns comes back signed.* `Psbt::sign` reports an error only for a
+    // precondition it could not evaluate; an input it silently declined is an `Ok` with nothing in
+    // it, which is the shape that would put a document with no signature in it under a screen
+    // reading *Signed*. What makes this sayable is that `crate::psbt` now reads an input's claim
+    // out of the map its family is signed from, so *ours* and *signable* are the same question
+    // asked once.
+    //
+    // **It is a claim about the document going out, not about this call's delta**, and that is
+    // deliberate. `Psbt::sign` declines a taproot key path when `tap_key_sig` is *already* set, so
+    // a PSBT arriving with 64 bytes of nonsense in that field would make an added-a-signature
+    // assertion panic — `AOBS-E04`, a crash and a 24-word retype, on bytes an attacker chooses,
+    // which is the trade §8a rejected. The screen's claim is that the document carries a signature
+    // for every input the wallet owns, and that is exactly what this reads. Whether a signature
+    // that arrived is a *valid* one is a different question, and it is named as the residual in
+    // §8a rather than answered here.
+    for &index in &accepted.ours {
+        let input = &psbt.inputs[index];
+        assert!(
+            !input.partial_sigs.is_empty() || input.tap_key_sig.is_some(),
+            "an input the validator found ours came back unsigned: {index}"
+        );
+    }
 
     psbt
 }

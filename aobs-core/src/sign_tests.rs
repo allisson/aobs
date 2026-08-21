@@ -362,6 +362,57 @@ fn the_schnorr_signature_verifies_against_the_tweaked_output_key() {
     .expect("the key path signature must verify");
 }
 
+/// [#113](https://github.com/allisson/aobs/issues/113)'s resolution, from the accepting side:
+/// **what signs a taproot input is the internal key's own origin entry, not the internal key's
+/// value.**
+///
+/// The declared internal key here is a real key of ours at the wrong index — *not* the key this
+/// `scriptPubKey` is the tweak of — and the entry it is keyed under declares the path that does
+/// derive the output. The dependency uses the internal key only to select that entry, so the
+/// signature it produces is over the tweak of the key at the declared path, which is the output
+/// key. Refusing this shape (the ticket's option 1) would have refused a transaction that signs
+/// and finalizes; what §7 refuses instead is a key-path claim we cannot sign at all.
+#[test]
+fn a_taproot_input_signs_from_the_internal_keys_own_origin_entry() {
+    let secp = Secp256k1::new();
+    let wallet = wallet();
+    let mut psbt = spend(Family::Bip86);
+
+    let bogus = our_key(&wallet, Family::Bip86, 0, 1).to_x_only_pub();
+    psbt.inputs[0].tap_internal_key = Some(bogus);
+    psbt.inputs[0].tap_key_origins.clear();
+    psbt.inputs[0].tap_key_origins.insert(
+        bogus,
+        (
+            vec![],
+            (wallet.fingerprint(), our_path(&wallet, Family::Bip86, 0, 0)),
+        ),
+    );
+
+    let accepted = accept(&wallet, &psbt);
+    let signed = sign(&wallet, &accepted);
+    let signature = signed.inputs[0].tap_key_sig.expect("a key-path signature");
+
+    let mut cache = SighashCache::new(&signed.unsigned_tx);
+    let utxos: Vec<TxOut> = signed
+        .inputs
+        .iter()
+        .map(|input| input.witness_utxo.clone().expect("R02 required one"))
+        .collect();
+    let sighash = cache
+        .taproot_key_spend_signature_hash(0, &Prevouts::All(&utxos), TapSighashType::Default)
+        .expect("the prevouts are all present");
+    let spk = our_spk(&wallet, Family::Bip86);
+    let output_key = XOnlyPublicKey::from_slice(&spk.as_bytes()[2..]).expect("a p2tr output key");
+
+    secp.verify_schnorr(
+        &signature.signature,
+        &Message::from_digest(sighash.to_byte_array()),
+        &output_key,
+    )
+    .expect("the signature must verify against the key the output pays");
+}
+
 /// §8: **a re-sign is byte-identical**, which is what makes `04-screens.md` §11.5's one
 /// re-display slot a safety net rather than a promise.
 ///

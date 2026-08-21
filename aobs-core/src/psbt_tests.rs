@@ -18,7 +18,7 @@ use super::*;
 use crate::corpus::declare_input;
 use crate::corpus::{
     declare_output, from_hex, normal, one_in_one_out, our_key, our_path, our_spk, psbt, psbt_for,
-    wallet, wallet_on,
+    taproot_internal_key_orphaned, taproot_key_path_diverted, wallet, wallet_on,
 };
 use crate::derive::{Branch, Family};
 use crate::secret::{Entropy, Passphrase};
@@ -101,6 +101,96 @@ fn a_taproot_input_without_its_internal_key_is_an_unsupported_script_type() {
         refusal(&wallet(), &psbt),
         Refusal::UnsupportedInputScript { input: 0 }
     );
+}
+
+/// `AOBS-R05`, tightened again by [#113](https://github.com/allisson/aobs/issues/113): **the
+/// declared internal key must have an origin entry of its own.**
+///
+/// `PSBT_IN_TAP_INTERNAL_KEY` on its own is half a declaration. The taproot signing path reads
+/// the key-path spend out of the `tap_key_origins` entry **keyed by that key**, so an internal key
+/// no entry names is a key-path spend the document gives no way to sign — which is the same
+/// BIP-371 argument [#82](https://github.com/allisson/aobs/issues/82) made for requiring the field
+/// at all, carried to the end of the sentence.
+#[test]
+fn a_taproot_internal_key_with_no_origin_entry_is_an_unsupported_script_type() {
+    // The fixture is the corpus's, which asserts the code; this asserts the typed variant.
+    assert_eq!(
+        refusal(&wallet(), &taproot_internal_key_orphaned()),
+        Refusal::UnsupportedInputScript { input: 0 }
+    );
+}
+
+/// The other half of the same structural rule: **the entry must carry no leaf hashes.**
+///
+/// BIP-371 uses an empty leaf-hash list as the mark of the internal key, and the dependency reads
+/// it that way — an entry carrying leaf hashes is a script-path key, and the key path is not
+/// declared. `tap_scripts` and `tap_merkle_root` are both absent here, so the leaf hashes are the
+/// only thing the refusal can be about.
+#[test]
+fn a_taproot_internal_key_carrying_leaf_hashes_is_an_unsupported_script_type() {
+    let wallet = wallet();
+    let spk = our_spk(&wallet, Family::Bip84);
+    let mut psbt = psbt(&[(Family::Bip86, 100_000)], &[(spk, 90_000)]);
+
+    let internal = psbt.inputs[0]
+        .tap_internal_key
+        .expect("the fixture declares one");
+    psbt.inputs[0]
+        .tap_key_origins
+        .get_mut(&internal)
+        .expect("the fixture declares its origin")
+        .0
+        .push(TapLeafHash::from_byte_array([0x44; 32]));
+
+    assert_eq!(
+        refusal(&wallet, &psbt),
+        Refusal::UnsupportedInputScript { input: 0 }
+    );
+}
+
+/// And the derivation half ([#113](https://github.com/allisson/aobs/issues/113)): **for a taproot
+/// input the internal key's entry is the only claim the byte-compare reads.**
+///
+/// The input's `scriptPubKey` really is ours, and a second entry declares the path that derives
+/// it — but the internal key's own entry points at a branch we never scan, which is the entry the
+/// signing path would use. A claim in any other entry is not a claim about *this* spend, so the
+/// input is not ours and the transaction is `AOBS-R06` rather than a document that comes back
+/// carrying nothing.
+#[test]
+fn a_taproot_claim_that_is_not_the_internal_keys_does_not_make_the_input_ours() {
+    assert!(matches!(
+        refusal(&wallet(), &taproot_key_path_diverted()),
+        Refusal::NoInputOfOurs { .. }
+    ));
+}
+
+/// The same rule facing the other way, which is the instance #113 did not name: **a BIP44/49/84
+/// input claims in `bip32_derivation`, and a claim in the taproot map is not one.**
+///
+/// `Psbt::sign`'s ECDSA path iterates `bip32_derivation` and nothing else, so an input whose only
+/// byte-verifying claim sits in `tap_key_origins` would have been accepted as ours and signed
+/// nothing — the taproot defect with no taproot in it.
+#[test]
+fn a_non_taproot_claim_in_the_taproot_map_does_not_make_the_input_ours() {
+    let wallet = wallet();
+    let spk = our_spk(&wallet, Family::Bip84);
+    let mut psbt = psbt(&[(Family::Bip84, 100_000)], &[(spk, 90_000)]);
+
+    // The same key, the same path, the same fingerprint — moved to the map its family does not
+    // declare in. `Family::Bip86` here selects the *map*, not the script type.
+    psbt.inputs[0].bip32_derivation.clear();
+    declare_input(
+        &mut psbt.inputs[0],
+        Family::Bip86,
+        &our_key(&wallet, Family::Bip84, 0, 0),
+        wallet.fingerprint(),
+        our_path(&wallet, Family::Bip84, 0, 0),
+    );
+
+    assert!(matches!(
+        refusal(&wallet, &psbt),
+        Refusal::NoInputOfOurs { .. }
+    ));
 }
 
 #[test]

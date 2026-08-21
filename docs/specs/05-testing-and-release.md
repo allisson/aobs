@@ -172,6 +172,10 @@ The cases:
   shape it exists for rather than a single amount one satoshi over the supply;
 - **a testnet PSBT against a mainnet-loaded wallet** — `AOBS-R06` with the coin-type copy variant,
   the network mismatch that has no other symptom;
+- **a taproot input whose internal key has no origin entry of its own** — `AOBS-R05`, half of
+  BIP-371's declaration ([#113](https://github.com/allisson/aobs/issues/113));
+- **a taproot input whose only verifying claim is not the internal key's** — `AOBS-R06`, the shape
+  that would otherwise be accepted and come back with no signature in it (#113);
 - address-shaped entries: mixed-case bech32, truncated bech32, a valid address differing by one
   character, a valid address differing only in case, `bitcoin:` with a query string, an uppercase
   BIP-21 URI, and a correctly-formed address from the *wrong* account;

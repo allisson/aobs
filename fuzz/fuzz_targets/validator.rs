@@ -34,6 +34,7 @@ use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint};
 use bitcoin::hashes::Hash as _;
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::{PublicKey, Secp256k1, XOnlyPublicKey};
+use bitcoin::taproot::TapLeafHash;
 use bitcoin::transaction::Version;
 use bitcoin::{
     Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, WPubkeyHash, Witness,
@@ -59,18 +60,27 @@ fn wallet() -> &'static Wallet {
     })
 }
 
-/// A valid public key nobody controls — secp256k1's generator point.
+/// Two valid public keys nobody controls — secp256k1's generator point and its double.
 ///
-/// The derivation maps are **keyed** by a public key and our code reads only the values, so a
-/// constant is not a shortcut: a target that had to derive the right key per entry would be
-/// asserting that we ignore the key, which we can state instead.
-fn placeholder_keys() -> &'static (PublicKey, XOnlyPublicKey) {
-    static KEYS: OnceLock<(PublicKey, XOnlyPublicKey)> = OnceLock::new();
+/// The `bip32_derivation` map is **keyed** by a public key and our code reads only the values, so
+/// a constant is not a shortcut there: a target that had to derive the right key per entry would
+/// be asserting that we ignore the key, which we can state instead.
+///
+/// **`tap_key_origins` is the exception, and it is why there is a second x-only key**
+/// ([#113](https://github.com/allisson/aobs/issues/113)). For a taproot input the entry *keyed by
+/// `tap_internal_key`* is the key-path declaration, so which key an entry is under is a fact the
+/// policy reads — and a second key is what lets [`KeyPath`] put the honest origin somewhere the
+/// internal key does not name.
+fn placeholder_keys() -> &'static (PublicKey, XOnlyPublicKey, XOnlyPublicKey) {
+    static KEYS: OnceLock<(PublicKey, XOnlyPublicKey, XOnlyPublicKey)> = OnceLock::new();
     KEYS.get_or_init(|| {
         let key: PublicKey = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
             .parse()
             .expect("a valid compressed key");
-        (key, XOnlyPublicKey::from(key))
+        let other: PublicKey = "02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5"
+            .parse()
+            .expect("a valid compressed key");
+        (key, XOnlyPublicKey::from(key), XOnlyPublicKey::from(other))
     })
 }
 
@@ -91,6 +101,8 @@ struct InputPlan {
     /// on `AOBS-R16`, which `psbt_tests.rs` pins at its boundary anyway.
     value: u32,
     claim: InputClaim,
+    /// How a taproot input declares its key path. Ignored by the other three families.
+    key_path: KeyPath,
 }
 
 /// What an input says about itself.
@@ -109,6 +121,51 @@ enum InputClaim {
     Absent,
     /// Whatever the fuzzer says.
     Declared(Claim),
+}
+
+/// How a taproot input declares its key-path spend
+/// ([#113](https://github.com/allisson/aobs/issues/113)).
+///
+/// BIP-371 puts the declaration in two places at once — `PSBT_IN_TAP_INTERNAL_KEY`, and the
+/// `tap_key_origins` entry keyed by that key with no leaf hashes — and the dependency's signing
+/// path reads the second. So a declaration can be broken in ways [`InputClaim`] cannot express,
+/// and every one of them is a shape that used to be accepted and then come back with no signature
+/// in it.
+///
+/// **Two variants rather than five, for [`InputClaim`]'s own reason.** Every broken form refuses
+/// the taproot input, so a flat five-way enum would refuse four taproot plans in five and starve
+/// the output checks this target exists for. Nesting them puts [`KeyPath::Declared`] back at half.
+///
+/// **What these variants assert is nothing, and that is worth saying.** The oracle for them is the
+/// corpus and the unit tests, which name each refusal and its code; here they widen the *states*
+/// the validator is driven through — no panic, no unbounded allocation, and the invariant this
+/// target does assert still holding on whatever gets past them. Asserting #113's own invariant
+/// would mean calling `crate::sign` from here, which is a change to `05-testing-and-release.md`
+/// §4's description of this target rather than a decision to take in the file.
+#[derive(Arbitrary, Debug)]
+enum KeyPath {
+    /// The internal key names its own origin entry: what `AOBS-R05` asks for, and the only form
+    /// that can be ours.
+    Declared,
+    /// One of the ways the declaration can be incomplete.
+    Broken(BrokenKeyPath),
+}
+
+/// The four incomplete taproot declarations, all of which the policy must refuse.
+#[derive(Arbitrary, Debug)]
+enum BrokenKeyPath {
+    /// No internal key at all, which is `AOBS-R05` — the field #82 made mandatory.
+    Absent,
+    /// An internal key no entry names, which is `AOBS-R05` for the same reason.
+    Orphaned,
+    /// The entry naming it carries a leaf hash, so it is a script-path key and the key path is
+    /// undeclared — also `AOBS-R05`.
+    LeafHashed,
+    /// The internal key's entry declares a path of the fuzzer's choosing while the honest origin
+    /// moves to an entry the internal key does not name. **The shape #113 was opened for**: the
+    /// `scriptPubKey` can be ours and the signing path still reach nothing, so the input must not
+    /// be ours either — `AOBS-R06` when it is the only input.
+    Diverted(Claim),
 }
 
 #[derive(Arbitrary, Debug)]
@@ -291,7 +348,7 @@ fn build(wallet: &Wallet, plan: &Plan) -> Option<Vec<u8>> {
     };
 
     let mut psbt = Psbt::from_unsigned_tx(unsigned).ok()?;
-    let (key, x_only) = placeholder_keys();
+    let (key, x_only, other) = placeholder_keys();
 
     for (index, (slot, plan)) in psbt.inputs.iter_mut().zip(&plan.inputs).enumerate() {
         let previous = &previous[index];
@@ -301,13 +358,6 @@ fn build(wallet: &Wallet, plan: &Plan) -> Option<Vec<u8>> {
             // BIP49 is indistinguishable from any other P2SH without it, so an honest plan
             // hands it over and `AOBS-R05` is what refuses the plans that do not.
             slot.redeem_script = Some(redeem_script().clone());
-        }
-        if plan.family.family() == Family::Bip86 {
-            // BIP-371's declaration that this is a key-path spend, which `AOBS-R05` also
-            // requires ([#82](https://github.com/allisson/aobs/issues/82)). Without it every
-            // taproot plan is refused on the script type and never reaches the output checks
-            // this target exists for.
-            slot.tap_internal_key = Some(*x_only);
         }
         let declared = match &plan.claim {
             InputClaim::Honest => Some((
@@ -320,6 +370,35 @@ fn build(wallet: &Wallet, plan: &Plan) -> Option<Vec<u8>> {
         if let Some(source) = declared {
             slot.bip32_derivation.insert(*key, source.clone());
             slot.tap_key_origins.insert(*x_only, (vec![], source));
+        }
+        if plan.family.family() == Family::Bip86 {
+            // BIP-371's declaration that this is a key-path spend, which `AOBS-R05` requires
+            // ([#82](https://github.com/allisson/aobs/issues/82),
+            // [#113](https://github.com/allisson/aobs/issues/113)). `Declared` is what keeps a
+            // taproot plan reaching the output checks this target exists for; the other four
+            // variants are the ways the declaration can be broken.
+            slot.tap_internal_key = Some(*x_only);
+            match &plan.key_path {
+                KeyPath::Declared => {}
+                KeyPath::Broken(BrokenKeyPath::Absent) => slot.tap_internal_key = None,
+                KeyPath::Broken(BrokenKeyPath::Orphaned) => {
+                    slot.tap_internal_key = Some(*other);
+                }
+                KeyPath::Broken(BrokenKeyPath::LeafHashed) => {
+                    if let Some((leaves, _)) = slot.tap_key_origins.get_mut(x_only) {
+                        leaves.push(TapLeafHash::from_byte_array([0x44; 32]));
+                    }
+                }
+                KeyPath::Broken(BrokenKeyPath::Diverted(claim)) => {
+                    if let Some(entry) = slot.tap_key_origins.remove(x_only) {
+                        slot.tap_key_origins.insert(*other, entry);
+                    }
+                    slot.tap_key_origins.insert(
+                        *x_only,
+                        (vec![], (claim.fingerprint(wallet), claim.path(wallet))),
+                    );
+                }
+            }
         }
     }
 

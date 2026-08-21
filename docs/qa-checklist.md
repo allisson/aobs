@@ -233,6 +233,22 @@ the practical way to run them, since the shipped image offers no shell.
       (`04-screens.md` §11.5). This is §6.4's owed measurement; if it fails the cap moves to v40 and
       the fragment length is re-derived.
 
+### The taproot key-path declaration ([#113](https://github.com/allisson/aobs/issues/113))
+
+Two crafted PSBTs, the same way the seven-output row is fed one. Both existed before and reached the
+review panel, the gate and *Signed. Show this to your wallet.* over a document with nothing added to
+it — which is what makes these rows about honesty rather than about money.
+
+- [ ] A taproot PSBT whose `PSBT_IN_TAP_INTERNAL_KEY` **no `tap_key_origins` entry names** is
+      refused with `AOBS-R05` before any review screen is drawn, on a discard-only screen.
+- [ ] A taproot PSBT whose internal key's own entry declares a path we never scan, while a second
+      entry declares the path that really derives the input, is refused with `AOBS-R06` — the
+      *no input is ours* screen, naming the passphrase, account 0 and the network. **The copy
+      misnames the cause here and that is the accepted cost** (`02-core.md` §8a): what the row
+      checks is that the transaction never reaches the panel.
+- [ ] And the honest side is unchanged: an ordinary taproot spend from a real coordinator still
+      reaches the panel, signs, and finalizes.
+
 ### Creating a wallet ([#72](https://github.com/allisson/aobs/issues/72))
 
 - [ ] At 800×600, **two columns of 12 words are all on screen at once** — 1–12 left, 13–24
