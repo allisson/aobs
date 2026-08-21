@@ -172,6 +172,63 @@ named here instead of invented there.
   [#72](https://github.com/allisson/aobs/issues/72), which is what puts `v4l` — and, through
   `v4l2-sys-mit`'s bindgen, `libclang-dev` — in the build environment already.
 
+## 5a. What building §5 settled
+
+**The tree carries §5** as of [#78](https://github.com/allisson/aobs/issues/78): `aobs/src/camera.rs`
+is the device and the loop, `aobs/src/qr.rs` is `rqrr` on a luma plane, and `aobs/src/scan.rs` is
+`04-screens.md` §11.1's one screen. Seven things the prose above did not answer are recorded here
+rather than left in the code for a later reader to rediscover.
+
+**`V4L2_CAP_IO_MC` is not a flag `v4l` names**, so the bit is written out at our call site. What
+`v4l` does get right is the field: its `Capabilities::capabilities` is built from `device_caps`, not
+from the driver-wide `capabilities`, and `device_caps` is the per-node answer `01-boot-layer.md` §7's
+distinction is about. A reader checking the struct member name alone would conclude the opposite.
+
+**The drop policy is the buffer count, and nothing else.** §5 asks for *always decode the newest
+frame; drop any that arrived while we were busy*, and with **two** mmap buffers there is exactly one
+frame in flight while we decode — so a frame arriving behind it has nowhere to be queued and the
+driver discards it. The dropping is the kernel's, by construction, rather than a policy we implement
+and could get wrong. **Raising the count to smooth things out reintroduces the queue §5 forbids**, and
+it will present as a preview that lags rather than as an error.
+
+**`FrameSizeEnum::to_discrete` is unusable for this, and that is worth a sentence in a section about
+not allocating on somebody else's numbers.** For a stepwise or continuous device it materialises the
+whole cross product — step 1 over 1920×1080 is two million structs and about 16 MB, sized entirely by
+the device's answer. §5's *largest resolution up to 1280×720* is therefore arithmetic on the stepwise
+grid, and only the discrete arm is enumerated at all.
+
+**The declared height is a claim; the buffer length is the fact.** A driver whose format says 720 rows
+and whose buffer carries fewer must cost the rows it did not deliver, not a panic on a slice index —
+and a panic on the scanning screen is `AOBS-E04` and the end of the session, with the wallet in it. So
+the plane extractor returns the rows it wrote and the decoder and the preview are told *that*.
+
+**The preview is published before the decode, not after, and this is §5's own trap read one level
+down.** Capture and decode share one thread, which is what makes *no queue* structural rather than
+enforced. But it also means a 200 ms decode would hold the preview 200 ms behind the sensor if the
+publish came second — and *the user then aims at where the code was* is exactly the failure §5 names.
+So the frame goes to the screen first, with its own wake-up, and the decode runs after it.
+
+**§5's *returns to the previous screen* is delivered by a press.** A sentence the user never reads is
+not *states so plainly*, so the screen states the loss, takes the camera down, and offers one row off
+it; Escape does the same thing. Nothing on this appliance advances on its own, so this is the
+established shape rather than a new one — but it is a reading of §5 rather than something §5 says, and
+it is named here instead of only in the code.
+
+**Two capture threads must not race for the node, and the event loop cannot join one.** Leaving the
+screen runs on the event loop while the capture thread is blocked in `VIDIOC_DQBUF`, so an Escape
+immediately followed by another entry would have the new thread call `STREAMON` while the old one
+still owns the device — and the `EBUSY` would be reported as *the camera stopped answering*, which is
+a guess rather than a fact. A capture thread therefore holds a mutex for its whole run and the next
+one waits, which costs at most the one frame the outgoing thread is already waiting for. **Named
+cost:** a driver that never delivers again never releases it, so the next scan waits instead of
+reporting a loss — the better silence of the two, and the same wedged-driver case §5's own entropy
+frame already accepts.
+
+**`rqrr`'s default feature is the `image` crate.** Taken with `default-features = false`, because the
+plane we already hold is exactly what `image` would decode down to: the default would put a second
+image stack on the hostile-input path to arrive back where we started. That is the same reason §5
+rejects `nokhwa`, applied to the crate §5 chose.
+
 ## 6. Outbound: the signed PSBT
 
 **ECC L, capped at version 27, maximum UR fragment length 960 bytes, 4 fps, looping indefinitely

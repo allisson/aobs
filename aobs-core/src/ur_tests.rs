@@ -840,3 +840,74 @@ fn cbor_truncated_at_any_header_field_is_dropped() {
         );
     }
 }
+
+// --- what the scanning screen reads off a scan (04-screens.md §11.1) ---------------------
+
+#[test]
+fn every_class_names_what_it_wants() {
+    // The heading and the wrong-class refusal are the same phrase, so this asserts the phrase
+    // once and both readers of it are covered.
+    assert_eq!(Class::Psbt.wanted(), "a transaction to sign");
+    assert_eq!(Class::Address.wanted(), "a receive address");
+    assert_eq!(Class::Backup.wanted(), "an encrypted backup");
+    for class in [Class::Psbt, Class::Address, Class::Backup] {
+        assert!(
+            Refusal::WrongClass {
+                expected: class,
+                announced: Announced::PlainText,
+            }
+            .reason()
+            .contains(class.wanted()),
+            "{class:?}"
+        );
+    }
+}
+
+#[test]
+fn only_the_signing_class_can_run_to_more_than_one_part() {
+    // §2's multi-part column, and the progress element's whole presence rule: the two classes
+    // that never touch the fountain decoder have no fraction to report.
+    assert!(Class::Psbt.multi_part());
+    assert!(!Class::Address.multi_part());
+    assert!(!Class::Backup.multi_part());
+}
+
+#[test]
+fn a_fresh_scan_is_not_spent() {
+    assert!(!Scanner::new(Class::Psbt).spent());
+}
+
+#[test]
+fn a_wrong_class_refusal_leaves_the_scan_live_and_the_budget_does_not() {
+    // The one distinction the screen turns on, and it is answered here rather than by the shell
+    // reading the variant: §11.1's *the screen stays live afterwards* against §11.1's *no escape
+    // hatch*.
+    let mut live = Scanner::new(Class::Psbt);
+    assert!(matches!(
+        live.receive("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"),
+        Outcome::Refused(Refusal::WrongClass { .. })
+    ));
+    assert!(!live.spent());
+    // And it really is still live: the next symbol is taken rather than discarded as spent.
+    assert_eq!(
+        live.receive(&part(1, 2, 30, 7, &[0xab; 20])),
+        Outcome::Received { parts: 1, of: 2 }
+    );
+
+    let mut budget = Scanner::new(Class::Psbt);
+    for index in 0..=PART_BUDGET {
+        budget.receive(&part(index % 2 + 1, 2, 30, 7, &[0xab; 20]));
+    }
+    assert!(budget.spent());
+}
+
+#[test]
+fn a_completed_scan_is_spent() {
+    let payload = message(300);
+    let mut scanner = Scanner::new(Class::Psbt);
+    assert!(matches!(
+        scanner.receive(&single("crypto-psbt", &payload)),
+        Outcome::Complete(_)
+    ));
+    assert!(scanner.spent());
+}

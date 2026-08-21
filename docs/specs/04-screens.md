@@ -437,6 +437,20 @@ wants, and the progress element simply does not appear for a single-part class.
   the confirmation, so a *scanned OK, continue?* is a dead press between the user and the thing they
   asked for.
 
+**The tree carries this screen** as of [#78](https://github.com/allisson/aobs/issues/78) —
+`aobs/src/scan.rs` and `ScanScreen` in `aobs/ui/app.slint`. Two things it had to settle:
+
+- **Whether the camera stays up is read off the scanner, not off the refusal.** A wrong-class payload
+  leaves the scan live and a spent part budget ends it, and both are already facts inside
+  `aobs_core::ur::Scanner` — so the screen asks it (`spent()`) rather than telling the two `Refusal`
+  variants apart itself. That keeps standing rule 4 true of the one branch on this screen that
+  matters, and it is why the wrong-class sentence and the live preview appear together.
+- **The two ways this screen stops — a spent budget, a camera that went away — each carry one row
+  off it**, and Escape does the same thing. See `03-transport.md` §5a on why the return is a press
+  rather than automatic. While the camera is up the screen contributes **no** rows at all, which is
+  how *nothing else is reachable* is structural: the ring holds only §7's always-available row, and
+  that one lands on a confirm rather than on an action.
+
 ### 11.2 The review panel
 
 **A single non-scrolling panel carrying the whole transaction.** This is where aobs spends the

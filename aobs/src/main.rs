@@ -11,7 +11,9 @@
 //! and [#73](https://github.com/allisson/aobs/issues/73) closes it with `confirm`, the retype.
 //! [#74](https://github.com/allisson/aobs/issues/74) is `load`, `session` and `identity`: the
 //! passphrase, the network, ADR-0010's `OnceLock`, and the hub the first journey ends on.
-//! No QR yet, and no scanning screen.
+//! [#78](https://github.com/allisson/aobs/issues/78) is the QR boundary's near side: `camera`
+//! grew the capture loop, `qr` is `rqrr` on a luma plane, and `scan` is §11.1's one screen in
+//! its three configurations.
 
 mod buildinfo;
 mod camera;
@@ -25,7 +27,9 @@ mod identity;
 mod load;
 mod notify;
 mod power;
+mod qr;
 mod router;
+mod scan;
 mod session;
 
 use std::rc::Rc;
@@ -149,9 +153,14 @@ fn run() -> Result<Ending, Failure> {
     // existence and both are what that needs.
     let load = load::wire(&ui, create.clone(), session.clone());
 
+    // §11.1's one scanning screen, in whichever of its three configurations the router asks
+    // for. It holds no wallet and no payload: the camera thread and core's `Scanner` are the
+    // whole of its state.
+    let scan = scan::wire(&ui);
+
     // Everything the user can ask for goes through here, and nothing else. The cell is where
     // §13's answer lands, because the event loop is what ends and it carries nothing back.
-    let ending = router::wire(&ui, create.clone(), confirm, load, session);
+    let ending = router::wire(&ui, create.clone(), confirm, load, scan, session);
 
     // The readiness line, printed from inside the running event loop rather than before
     // it. That placement is the point: the line asserts the loop came up, which is what

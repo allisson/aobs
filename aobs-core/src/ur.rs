@@ -112,12 +112,33 @@ pub enum Class {
 }
 
 impl Class {
-    /// What this screen asked for, for the wrong-class copy.
-    fn wanted(self) -> &'static str {
+    /// What this screen asked for, for the wrong-class copy — and for the screen's own heading.
+    ///
+    /// **Public because those are the same phrase.** `04-screens.md` §11.1 puts one component in
+    /// three configurations where *the copy names what this screen wants*, and §11.1's
+    /// wrong-class refusal names the same want; two spellings of it would be two places for the
+    /// heading and the refusal to drift into naming different things.
+    #[must_use]
+    pub fn wanted(self) -> &'static str {
         match self {
             Self::Psbt => "a transaction to sign",
             Self::Address => "a receive address",
             Self::Backup => "an encrypted backup",
+        }
+    }
+
+    /// Whether a stream of this class can run to more than one part — §2's table, as an answer.
+    ///
+    /// The scanning screen's progress element is **absent for a single-part class**
+    /// (`04-screens.md` §11.1), and *which classes are single-part* is §2's own column rather
+    /// than a reading the shell is allowed to take of it (standing rule 4). Two of the three
+    /// classes never touch the fountain decoder at all, so for them there is no fraction of
+    /// parts that could be reported truthfully.
+    #[must_use]
+    pub fn multi_part(self) -> bool {
+        match self {
+            Self::Psbt => true,
+            Self::Address | Self::Backup => false,
         }
     }
 }
@@ -319,6 +340,19 @@ impl Scanner {
             parts: 0,
             done: false,
         }
+    }
+
+    /// Whether this scan is over, in a completion or in a refusal that ended it.
+    ///
+    /// **The shell asks rather than decides.** `04-screens.md` §11.1 keeps the screen live after
+    /// a wrong-class refusal — the rejected payload stays unusable, so it is an invitation to
+    /// point the camera elsewhere — and stops it when the part budget is spent. Both are facts
+    /// about this scanner, not a distinction the shell is allowed to draw between two
+    /// [`Refusal`] variants (standing rule 4), and every further symbol from here is
+    /// [`Discard::Spent`].
+    #[must_use]
+    pub fn spent(&self) -> bool {
+        self.done
     }
 
     /// Take in one decoded QR symbol.

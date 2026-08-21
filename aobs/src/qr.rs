@@ -1,0 +1,280 @@
+//! Luma in, symbols out — the whole of the shell's side of the QR boundary.
+//!
+//! `rqrr` via [`PreparedImage::prepare_from_greyscale`] fed from the frame's luma plane
+//! (03-transport.md §5). Not `nokhwa`, which wraps `image` and a `decoding` feature that can
+//! pull `mozjpeg`; not `bardecoder`, last released 2023 with no raw-buffer entry point. `rqrr`
+//! is taken with **`default-features = false`**, because its default `img` feature is the
+//! `image` crate and the plane we already hold is exactly what it would decode down to.
+//!
+//! **Nothing here decides anything either.** A string that came off a symbol is hostile input
+//! on its way to `aobs_core::ur::Scanner`, and this module neither reads it nor bounds it —
+//! standing rule 4, and 03-transport.md §3's bounds are all at core's call site.
+
+use rqrr::PreparedImage;
+
+/// Every QR symbol this frame carries, decoded, in the order `rqrr` found them.
+///
+/// **All of them, not the first.** A printed page or a screen can hold more than one symbol,
+/// and which of them the scan wanted is a question only `aobs_core::ur::Scanner` may answer —
+/// picking one here would be the shell choosing between two payloads.
+///
+/// A frame with nothing in it returns nothing, which is the commonest outcome by far and the
+/// one that must stay silent (06-codes.md §4).
+pub fn symbols(luma: &[u8], width: usize, height: usize) -> Vec<String> {
+    // `prepare_from_greyscale` indexes every pixel of `width * height` through the closure, so
+    // a plane shorter than its own geometry would panic inside the dependency. `camera::pack`
+    // reports the rows it actually wrote for this reason; the check is here as well because
+    // this function is reachable from a corpus file too, and a fixture is a byte count someone
+    // typed.
+    if width == 0 || height == 0 || luma.len() < width * height {
+        return Vec::new();
+    }
+    let mut image =
+        PreparedImage::prepare_from_greyscale(width, height, |x, y| luma[y * width + x]);
+    image
+        .detect_grids()
+        .iter()
+        .filter_map(|grid| grid.decode().ok())
+        .map(|(_, text)| text)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use aobs_core::ur::{Class, Outcome, Payload, Scanner};
+
+    use super::symbols;
+    use crate::camera::{pack, GREY, YUYV};
+
+    /// The two parts of one `ur:crypto-psbt` animation over a 120-byte message, as
+    /// `aobs-core`'s own encoder emits them. The frames below carry exactly these strings, so a
+    /// decode that lost or gained a character fails rather than being noticed by nobody.
+    const PART_1: &str = "ur:crypto-psbt/1-2/lpadaocskscycnfehyjthdfnaeadaoaxaaahamatayasbkbdbnbtbabsbebybgbwbbbzcmchcscfcycwcecackctcxclcpcndkdadsdidedtdrdndwdpdmdldyeheyeoeeecenemetesftfrdehffxpl";
+    const PART_2: &str = "ur:crypto-psbt/2-2/lpaoaocskscycnfehyjthdfnfnfsfmfhfzfpfwfxfyfefgflfdgagegrgsgtglgwgdgygmgughgohfhghdhkhthphhhlhyhehnhsidiaieihiyioisinimjejzjnjtjljojsjpjkjykpkokthfckzcos";
+    /// The message those two parts reassemble to: `00 01 02 … 77`.
+    fn message() -> Vec<u8> {
+        (0..120u8).collect()
+    }
+
+    /// A plain-text receive address, which is the address class's whole payload (§2).
+    const ADDRESS: &str = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+    /// The two symbols the two-in-one-frame fixture carries, left to right.
+    const SHORT_A: &str = "ur:bytes/aeadaoaxaahdcxlkahsp";
+    const SHORT_B: &str = "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx";
+
+    /// One recorded frame: the file, the format it was captured in, and its row geometry.
+    ///
+    /// **The geometry is not in the file.** A V4L2 buffer is bytes and nothing else — the
+    /// width, the height and the stride arrive from `VIDIOC_S_FMT`, not from the frame — so a
+    /// fixture that carried a header would be testing a shape the appliance never sees.
+    struct Recorded {
+        name: &'static str,
+        fourcc: [u8; 4],
+        width: usize,
+        height: usize,
+        stride: usize,
+    }
+
+    impl Recorded {
+        /// The frame, packed and decoded, exactly as `camera::stream` would hand it over.
+        fn read(&self) -> Vec<String> {
+            let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("frames")
+                .join(self.name);
+            let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let mut plane = Vec::new();
+            let rows = pack(
+                self.fourcc,
+                &bytes,
+                self.width,
+                self.height,
+                self.stride,
+                &mut plane,
+            );
+            assert_eq!(rows, self.height, "{} lost rows", self.name);
+            symbols(&plane, self.width, rows)
+        }
+    }
+
+    /// The recorded-frame corpus (05-testing-and-release.md §6.3).
+    ///
+    /// **Replayed from files, because only the capture itself needs hands.** The seam is what
+    /// makes this enough: core receives decoded strings, so camera→frame is entirely shell and
+    /// frame→string is a pure function of these bytes. A real UVC camera stays on §6.3's
+    /// by-hand list; QEMU has no synthetic one to offer CI.
+    ///
+    /// **These frames are synthesised rather than photographed**, and that is a real gap rather
+    /// than a technicality: they carry no lens blur, no rolling-shutter shear, no uneven
+    /// illumination and no sensor noise, so they exercise the geometry and the plane arithmetic
+    /// and say nothing about the detector's tolerance. What they *do* cover is every way this
+    /// crate can hand `rqrr` the wrong bytes, which is the failure mode that belongs to us.
+    /// A photographed corpus is [#78](https://github.com/allisson/aobs/issues/78)'s owed
+    /// measurement, alongside the real camera.
+    ///
+    /// Provenance, so a reader can regenerate any of them: each is a `segno.make(text,
+    /// error='l')` matrix at 3 px/module (4 for the address) with a 4-module quiet zone, dark
+    /// modules at 0 and paper at 255, centred in the frame and written out row-major — then
+    /// re-laid at the stride, interleaved with a neutral `0x80` chroma, or rotated by
+    /// nearest-neighbour, according to the row.
+    const CORPUS: &[(Recorded, &[&str])] = &[
+        // The plain case: `GREY`, stride equal to width, one symbol.
+        (
+            Recorded {
+                name: "ur-part-1-grey.raw",
+                fourcc: GREY,
+                width: 256,
+                height: 192,
+                stride: 256,
+            },
+            &[PART_1],
+        ),
+        // The second part of the same animation, so the two can be replayed as a stream.
+        (
+            Recorded {
+                name: "ur-part-2-grey.raw",
+                fourcc: GREY,
+                width: 256,
+                height: 192,
+                stride: 256,
+            },
+            &[PART_2],
+        ),
+        // `YUYV`: the same picture with a chroma byte between every pair of luma ones. This is
+        // the format most USB webcams actually offer, and reading it as `GREY` would halve the
+        // width and shear every row — which decodes as nothing at all rather than as something
+        // wrong, but only because a QR has a finder pattern.
+        (
+            Recorded {
+                name: "ur-part-1-yuyv.raw",
+                fourcc: YUYV,
+                width: 256,
+                height: 192,
+                stride: 512,
+            },
+            &[PART_1],
+        ),
+        // A stride wider than the row, which is what a driver does when it aligns rows. The
+        // padding here is `0x80`, so a read that took `stride` pixels per row instead of
+        // `width` would walk a grey column through the middle of the symbol.
+        (
+            Recorded {
+                name: "ur-part-1-grey-padded.raw",
+                fourcc: GREY,
+                width: 256,
+                height: 192,
+                stride: 288,
+            },
+            &[PART_1],
+        ),
+        // Eleven degrees off square, which is how a hand holds a phone. Nothing in this crate
+        // corrects for it; the assertion is that nothing in this crate needs to.
+        (
+            Recorded {
+                name: "ur-part-1-grey-rotated.raw",
+                fourcc: GREY,
+                width: 256,
+                height: 192,
+                stride: 256,
+            },
+            &[PART_1],
+        ),
+        // The address class's payload: plain text, no `ur:` prefix, and the one class that is
+        // one symbol by rule (§2).
+        (
+            Recorded {
+                name: "address-grey.raw",
+                fourcc: GREY,
+                width: 192,
+                height: 192,
+                stride: 192,
+            },
+            &[ADDRESS],
+        ),
+        // Two symbols in one frame. Both are handed over, in the order `rqrr` found them:
+        // choosing between them is core's, and this is the fixture that fails if a later edit
+        // reaches for `.first()`.
+        (
+            Recorded {
+                name: "two-symbols-grey.raw",
+                fourcc: GREY,
+                width: 222,
+                height: 111,
+                stride: 222,
+            },
+            &[SHORT_A, SHORT_B],
+        ),
+        // A frame with no symbol in it, which is what every frame is until the user has aimed.
+        // Silence is the whole assertion.
+        (
+            Recorded {
+                name: "no-symbol-grey.raw",
+                fourcc: GREY,
+                width: 256,
+                height: 192,
+                stride: 256,
+            },
+            &[],
+        ),
+    ];
+
+    #[test]
+    fn every_recorded_frame_decodes_to_what_was_recorded_in_it() {
+        for (frame, expected) in CORPUS {
+            let mut found = frame.read();
+            // Order is the detector's and is not a promise; the set is.
+            found.sort();
+            let mut want: Vec<String> = expected.iter().map(|s| (*s).to_owned()).collect();
+            want.sort();
+            assert_eq!(found, want, "{}", frame.name);
+        }
+    }
+
+    #[test]
+    fn the_two_recorded_frames_replay_as_one_stream_into_a_payload() {
+        // The end-to-end assertion, and the reason the corpus holds a real animation rather
+        // than two unrelated strings: two frames off a camera, through `pack`, through `rqrr`,
+        // through core's four bounds, into the bytes the encoder started with. Every seam
+        // between the sensor and `psbt::validate` is in this one test.
+        let mut scanner = Scanner::new(Class::Psbt);
+        let first = CORPUS[0].0.read();
+        let second = CORPUS[1].0.read();
+
+        assert_eq!(
+            scanner.receive(&first[0]),
+            Outcome::Received { parts: 1, of: 2 }
+        );
+        assert!(!scanner.spent(), "one part of two is not a finished scan");
+        assert_eq!(
+            scanner.receive(&second[0]),
+            Outcome::Complete(Payload::Transaction(message()))
+        );
+        assert!(scanner.spent());
+    }
+
+    #[test]
+    fn a_recorded_address_at_the_signing_prompt_is_the_wrong_class() {
+        // The same frame, replayed at the prompt that did not ask for it: 04-screens.md §11.1's
+        // refusal, reached from a file rather than from a hand-written string. The screen stays
+        // live afterwards, which is what `spent` reports.
+        let mut scanner = Scanner::new(Class::Psbt);
+        let address = CORPUS[5].0.read();
+        let outcome = scanner.receive(&address[0]);
+        let Outcome::Refused(refusal) = outcome else {
+            panic!("a receive address is not a transaction: {outcome:?}");
+        };
+        assert_eq!(refusal.code(), "AOBS-R10");
+        assert!(!scanner.spent());
+    }
+
+    #[test]
+    fn a_plane_shorter_than_its_geometry_decodes_to_nothing() {
+        // The guard that keeps `prepare_from_greyscale`'s per-pixel closure from indexing off
+        // the end of a plane. `camera::pack` makes this unreachable from a live camera; a
+        // corpus file is a byte count someone typed, so it is reachable from here.
+        assert!(symbols(&[0u8; 10], 8, 8).is_empty());
+        assert!(symbols(&[], 0, 0).is_empty());
+        assert!(symbols(&[0u8; 64], 8, 0).is_empty());
+    }
+}

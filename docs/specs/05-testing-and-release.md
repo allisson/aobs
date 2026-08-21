@@ -253,6 +253,20 @@ The camera being untestable in CI costs less than it appears, because of where t
 receives *decoded strings*, so camera→frame is entirely shell, and the decode path is covered by a
 **recorded-frame corpus replayed from files**. Only the capture itself needs hands.
 
+**That corpus is `aobs/frames/` and the table in `aobs/src/qr.rs`** as of
+[#78](https://github.com/allisson/aobs/issues/78): eight frames as raw V4L2 buffers, with their
+format, width, height and stride in the table rather than in the file — a buffer is bytes and nothing
+else, so a fixture carrying a header would be testing a shape the appliance never sees. It covers
+`GREY`, `YUYV`, a padded stride, eleven degrees of rotation, a plain-text address, two symbols in one
+frame, and a frame with nothing in it; two of them replay as one animation through core's four bounds
+into the bytes the encoder started with.
+
+**They are synthesised rather than photographed, and that is a gap rather than a technicality.** They
+carry no lens blur, no rolling-shutter shear, no uneven illumination and no sensor noise, so they
+exercise every way this crate can hand `rqrr` the wrong bytes — which is the failure mode that belongs
+to us — and say nothing about the detector's tolerance, which is what the real UVC camera on the list
+above is for. It is that same obligation rather than a new one.
+
 **A tested-hardware list is published with each release**, naming exactly what was verified rather
 than implying broader support.
 

@@ -21,7 +21,7 @@
 //!
 //! | Seam | Shape |
 //! |---|---|
-//! | Camera | The shell hands us decoded strings, one at a time, into a [`ur::Scanner`]. We never see a frame. |
+//! | Camera | The shell hands us decoded strings, one at a time, into a [`ur::Scanner`]. We never see a frame. The shell's side of that seam landed with [#78](https://github.com/allisson/aobs/issues/78) and this crate needed three accessors for it, none of which is a decision: [`ur::Class::wanted`], [`ur::Class::multi_part`] and [`ur::Scanner::spent`] are all facts the scanning screen would otherwise have had to infer. |
 //! | CSPRNG | Seed generation takes `csprng_32: [u8; 32]` as a parameter. |
 //! | Screen | We produce a review *model*; the shell renders it. |
 //! | Clock | We take none. |
