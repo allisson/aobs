@@ -11,21 +11,28 @@
 //! wrong-class refusal leaves the camera up, a spent part budget does not — is read off
 //! [`Scanner::spent`] rather than by inspecting which refusal arrived (standing rule 4).
 //!
+//! A completed scan is matched on its [`Payload`] variant, and that is the one place this could
+//! be misread. **It is a branch on which door was already open, not a judgement about bytes:**
+//! the class was fixed when the [`Scanner`] was built, so the variant is the [`Class`] the router
+//! asked for and nothing about what arrived. What a transaction *is* — refusable, reviewable, or
+//! not a PSBT at all — is [`crate::review`]'s question, and it asks core.
+//!
 //! **Two threads' worth of discipline in one thread.** Capture and decode run on the same
 //! thread, so a decode that cannot keep up cannot queue behind itself; the preview is published
 //! *before* the decode starts, so a slow decoder costs capture probability and never aiming
 //! feedback. 03-transport.md §5 names the alternative as the trap: with a queue the user aims
 //! at where the code was.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
-use aobs_core::ur::{Class, Outcome, Scanner};
+use aobs_core::ur::{Class, Outcome, Payload, Scanner};
 use slint::{ComponentHandle, Image, Rgb8Pixel, SharedPixelBuffer};
 
+use crate::review::{Landed, Review};
 use crate::{camera, qr, AppWindow, Screen};
 
 /// The preview's ceiling, in the design canvas's own pixels (04-screens.md §0).
@@ -82,6 +89,14 @@ pub struct Scan {
     /// possibility — a [`Scanner`] has no reset and no `Clone` — so this is where the new one
     /// is built, and dropping it is what makes leaving the screen final.
     scanner: RefCell<Option<Scanner>>,
+    /// Which of §11.1's three configurations is up. Remembered rather than re-derived, because
+    /// a stream that spent its one life on bytes that were not a PSBT gets a fresh decoder for
+    /// **the same class** — and asking the old decoder what it was built for would be asking
+    /// the thing being replaced.
+    class: Cell<Class>,
+    /// Where a completed transaction goes (04-screens.md §11.2). Held rather than routed: a
+    /// payload is a value, and no value crosses the router (standing rule 4).
+    review: Rc<Review>,
     /// Held by a capture thread for the whole of its run, so **two of them can never hold the
     /// device at once.**
     ///
@@ -103,7 +118,7 @@ pub struct Scan {
 /// `scan-tick` carries nothing at all: the frame and the symbols are already in the slot and
 /// the channel, and the callback exists only because a `Send` closure cannot hold an `Rc`
 /// (the same shape as `create`'s `gathered`).
-pub fn wire(ui: &AppWindow) -> Rc<Scan> {
+pub fn wire(ui: &AppWindow, review: Rc<Review>) -> Rc<Scan> {
     let (outbox, inbox) = mpsc::channel();
     let scan = Rc::new(Scan {
         generation: Arc::new(AtomicUsize::new(0)),
@@ -111,6 +126,8 @@ pub fn wire(ui: &AppWindow) -> Rc<Scan> {
         inbox,
         outbox,
         scanner: RefCell::new(None),
+        class: Cell::new(Class::Psbt),
+        review,
         device: Arc::new(Mutex::new(())),
     });
 
@@ -134,6 +151,7 @@ impl Scan {
         while self.inbox.try_recv().is_ok() {}
         let _ = self.preview.lock().map(|mut slot| slot.take());
         self.scanner.replace(Some(Scanner::new(class)));
+        self.class.set(class);
 
         ui.set_scan_heading(format!("Scan {}", class.wanted()).into());
         ui.set_scan_multi_part(class.multi_part());
@@ -265,15 +283,41 @@ impl Scan {
             // itself the confirmation, so a *scanned OK, continue?* would be a dead press
             // between the user and the thing they asked for.
             //
-            // The payload is dropped here, and that is this slice's edge rather than a
-            // decision: the review panel, the address verdict and the restore words are all
-            // screens later tickets bring, and `Screen::Unbuilt` says so instead of swallowing
-            // the press (standing rule 8).
-            Outcome::Complete(_) => {
-                self.leave();
-                ui.set_screen(Screen::Unbuilt);
-                return true;
-            }
+            // The payload goes where its own variant says, and that is the whole of the
+            // dispatch: a transaction to `review`, which validates it in core; the address
+            // verdict and the restore words to the screens later tickets bring. **This is a
+            // branch on a payload class, never on a validation outcome** — the class was fixed
+            // when the [`Scanner`] was built, so the arm below is which door was already open
+            // and not a judgement about the bytes (standing rule 4).
+            Outcome::Complete(payload) => match payload {
+                Payload::Transaction(bytes) => match self.review.arrived(ui, bytes) {
+                    // Core made a document of it, or refused it by name. Either way a screen is
+                    // up and the camera has no further use.
+                    Landed::Shown => {
+                        self.leave();
+                        return true;
+                    }
+                    // **Failing to decode is not the same as rejecting** (02-core.md §7): the
+                    // bytes never became a PSBT, which is overwhelmingly a bad scan, so this is
+                    // the same shape as a wrong-class refusal — the sentence goes up, no code
+                    // goes with it, and the camera stays live so the user can aim again. The
+                    // decoder is replaced because §4 allows a stream exactly one life.
+                    Landed::Scanning(note) => {
+                        self.scanner.replace(Some(Scanner::new(self.class.get())));
+                        ui.set_scan_progress(String::new().into());
+                        ui.set_scan_note(note.into());
+                        ui.set_scan_code(String::new().into());
+                    }
+                },
+                // The address verdict (§12) and the restore words (§10) are each a later
+                // ticket, and `Screen::Unbuilt` says so instead of swallowing the press
+                // (standing rule 8).
+                Payload::Address(_) | Payload::Backup(_) => {
+                    self.leave();
+                    ui.set_screen(Screen::Unbuilt);
+                    return true;
+                }
+            },
         }
 
         let spent = self.scanner.borrow().as_ref().is_some_and(Scanner::spent);

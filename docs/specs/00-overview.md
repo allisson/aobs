@@ -136,18 +136,30 @@ None of these blocks implementation. All of them block the release gate
 | Argon2id wall clock on low-end amd64 (derived: ~1.2–2.5 s at 64 MiB). | [#6](https://github.com/allisson/aobs/issues/6) |
 | Address-search time across 4 accounts × 2 branches × 1000 indices (8,000 derivations). | [#21](https://github.com/allisson/aobs/issues/21), [#27](https://github.com/allisson/aobs/issues/27) |
 | That the four-descriptor `crypto-account` payload fits one QR at ECC H (estimated ~460 B CBOR → ~1,000 UR chars). | [#27](https://github.com/allisson/aobs/issues/27) |
-| That a 62-character P2TR payment address, 4-character grouped with `04-screens.md` §0's sub-cell gaps, holds **one line** in the minimum canvas (derived: 62 cells + 15 gaps ≈ 698 px against ~768 px usable). The in-tree prototype only ever rendered 42-character P2WPKH, so nothing in-tree has been measured against it. | [#55](https://github.com/allisson/aobs/issues/55), [#58](https://github.com/allisson/aobs/issues/58) |
-| That **six output rows** fit the minimum canvas non-scrolling, below the stacked money facts (derived: ~320 px of rows at ~57 px each). The six-output cap rests on it, and the number can only move before the first signed ISO. | [#58](https://github.com/allisson/aobs/issues/58) |
 | That a phone camera reads our v27 output at arm's length (v40 is the documented fallback — and the maximum UR fragment length is re-derived from the new cap, `03-transport.md` §9). | [#30](https://github.com/allisson/aobs/issues/30) |
 | The capture-resolution floor for reading an inbound v40 symbol. | [#31](https://github.com/allisson/aobs/issues/31) |
 | That the predicted signed-transaction vsize the fee rate divides by matches a real signed transaction across all four script types (derived: a weight-unit sum charging each ECDSA input a 71-byte signature element, so it errs high by a fraction of a percent — `04-screens.md` §11.2.1). | [#100](https://github.com/allisson/aobs/issues/100) |
 
-**Discharged.** *That two columns of 12 words fit the 800×600 minimum canvas at the settled type
-size* was the seventh row of this table and is now a number: **440 logical px required against 458
-available**, printed as `AOBS_WORDS` before the first paint and asserted by `ci/qemu-boot.sh` on
-every boot, in the geometry CI already boots by default ([#72](https://github.com/allisson/aobs/issues/72),
-`04-screens.md` §3). It is the only one of these that could become a standing assertion rather than a
-one-off reading, because the appliance is the thing that knows the answer.
+**Discharged.** Three rows have left this table, and all three left it as *standing* assertions rather
+than one-off readings — printed by the appliance and checked by `ci/qemu-boot.sh` on every boot that
+draws, in the geometry CI already boots by default. They are the only ones that could: the appliance is
+the thing that knows the answer, and every other row on this table asks about hardware or a person.
+
+- *That two columns of 12 words fit the 800×600 minimum canvas at the settled type size*: **440
+  logical px required against 458 available**, as `AOBS_WORDS`
+  ([#72](https://github.com/allisson/aobs/issues/72), `04-screens.md` §3).
+- *That six output rows fit the minimum canvas non-scrolling, below the stacked money facts*: **447
+  against 458**, as the first half of `AOBS_REVIEW`
+  ([#81](https://github.com/allisson/aobs/issues/81), `04-screens.md` §11.2). **The six-output cap
+  therefore stands, and is now fixed rather than provisional.**
+- *That a 62-character P2TR payment address, 4-character grouped with §0's sub-cell gaps, holds one
+  line in the minimum canvas*: **699 px required against 752 available**, as the second half of the
+  same line ([#81](https://github.com/allisson/aobs/issues/81)). §0's derived 698 was right to within a pixel — and the
+  width of a 4-character group is now **measured from the font on the shipped image** rather than
+  computed from a font table, which is what makes this an assertion about the ISO instead of a
+  re-run of our own arithmetic. The prototype's *nothing in-tree has been measured against the widest
+  address class we ship* no longer holds: the panel renders 62 characters at the floor on every boot
+  CI takes.
 
 Eight verification obligations, distinct from measurements:
 

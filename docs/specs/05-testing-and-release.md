@@ -217,6 +217,17 @@ from rather than computed a second time beside them. `ci/qemu-boot.sh` fails a b
 default `ramfb` row runs at the 800×600 floor, the only geometry where it can fail
 ([#72](https://github.com/allisson/aobs/issues/72)).
 
+**A fourth line carries the review panel's two**, on the same terms:
+`AOBS_REVIEW rows-required=… rows-available=… rows-fit=yes|no address-required=… address-available=…
+address-one-line=yes|no|unknown` ([#81](https://github.com/allisson/aobs/issues/81),
+`04-screens.md` §11.2). The row half is arithmetic over the panel's own heights, exactly as
+`AOBS_WORDS` is. **The address half is a font measurement**, and that is why this one line is printed
+from inside the event loop rather than before the first paint: a `Text`'s preferred width is not a
+number this backend has before the font is loaded, and a line printed earlier would print a zero and
+call it a pass. `address-one-line=unknown` is what the appliance says when the measurement came back at
+or below zero, and `ci/qemu-boot.sh` fails that too — a green on a measurement that never happened is
+worse than a red (standing rule 8).
+
 | Row | Proves |
 |---|---|
 | **Entropy provenance** — trace the `getrandom` syscall during a seed generation and assert the wallet's entropy bytes are **byte-identical** to what the traced syscall returned; assert `crng init done` in `dmesg`; assert **zero opens of `/dev/urandom`**. | The linkage, not the intention. |
@@ -227,7 +238,7 @@ default `ramfb` row runs at the 800×600 floor, the only geometry where it can f
 | RAM at and below the floor | The low-memory GRUB entry degrades rather than bricks. |
 | No camera | The degraded-but-useful path. |
 | No keyboard | The "no input" screen appears. |
-| **The minimum canvas** — the `ramfb` machine at OVMF's default 800×600 GOP, asserting the review panel draws **stacked** with every character of a 62-character P2TR address present and no scroll region anywhere. | That the floor in `04-screens.md` §0 is a floor we actually meet, in the geometry CI already boots by default. **This row waits for the review panel**; until it exists, the default `ramfb` row asserts that 800×600 draws, reports `scale=1.00`, and that the 24 words fit it (`AOBS_WORDS … fits=yes`, [#72](https://github.com/allisson/aobs/issues/72)). |
+| **The minimum canvas** — the `ramfb` machine at OVMF's default 800×600 GOP, asserting the review panel draws **stacked** with every character of a 62-character P2TR address present and no scroll region anywhere. | That the floor in `04-screens.md` §0 is a floor we actually meet, in the geometry CI already boots by default. **The row stands as of [#81](https://github.com/allisson/aobs/issues/81)**, as `AOBS_REVIEW … rows-fit=yes address-one-line=yes` beside `AOBS_WORDS … fits=yes` — asserted as the panel's own numbers rather than as a screenshot, because §6.2 diffs no screenshots. *Every character present* and *no scroll region anywhere* are structural rather than asserted here: the panel holds no `Flickable`, no `ScrollView` and no clip or elide on an address, so an address that did not fit would overflow and the line would report it. |
 | **Below the floor** — the virtio-gpu machine at `xres=640,yres=480`, asserting `AOBS-E06` on a live console, **no readiness line at all**, and — after holding the machine past the old 90-second start timeout — that the appliance **started exactly once**, which is what keeps `TimeoutStartSec=infinity` (`01-boot-layer.md` §2) honest. | That the floor refuses rather than degrades. `SLINT_DRM_MODE` was specified here and is not what runs: it is a mode-*list index*, so QEMU and the kernel are free to change what it selects, and injecting an environment variable into `aobs.service` needs a boot path that is no longer GRUB-on-the-ISO. QEMU's own `xres`/`yres` name the geometry and set the connector's preferred mode, which is what Slint picks ([#68](https://github.com/allisson/aobs/issues/68)). **Asserted on the DRM tier only** — nothing in CI can hand `efifb` a sub-floor mode, since that tier's mode is OVMF's GOP. |
 | **A large mode** — the virtio-gpu machine at `xres=1920,yres=1080`, asserting `scale=1.35` and a `logical=1422x800` canvas on the panel line. | That the scale-factor policy runs, rather than the layout growing and the type staying put. Its sibling is the plain virtio-gpu row above: QEMU's default is 1280×800, the design canvas itself, so that row pins `scale=1.00` where no scaling is meant to happen. |
 
@@ -283,9 +294,9 @@ become measured. None of them blocks implementation.
 | Argon2id wall clock on low-end amd64 (derived ~1.2–2.5 s) | None; the wait screen is already indeterminate. |
 | 8,000-derivation address search | Narrow the index window, and say what was searched. |
 | The four-descriptor `crypto-account` payload fits one QR at ECC H | **Narrow what we export. Never animate it.** |
-| Two columns of 12 words in the 800×600 **minimum canvas** (the binding geometry since `04-screens.md` §0 fixed the floor; 1280×800 is no longer the tight case) | Type size, not layout. |
-| A 62-character P2TR payment address, 4-character grouped with §0's sub-cell gaps, on **one line** in the minimum canvas (derived: 62 cells + 15 gaps ≈ 698 px against ~768 px usable) | Wrap it, and drop the output bound to what still fits. Never truncate. |
-| **Six output rows fit the minimum canvas**, non-scrolling, with the stacked money facts above them (derived: ~320 px of rows at ~57 px each) | Lower the bound before the first ISO ships — after that it is fixed. |
+| ~~Two columns of 12 words in the 800×600 **minimum canvas**~~ — **measured** ([#72](https://github.com/allisson/aobs/issues/72)): 440 px required against 458, as `AOBS_WORDS`. | Type size, not layout. |
+| ~~A 62-character P2TR payment address, 4-character grouped with §0's sub-cell gaps, on **one line** in the minimum canvas~~ — **measured** ([#81](https://github.com/allisson/aobs/issues/81)): 699 px required against 752, from the shipped font rather than from §0's arithmetic, as `AOBS_REVIEW`. | Wrap it, and drop the output bound to what still fits. Never truncate. |
+| ~~**Six output rows fit the minimum canvas**, non-scrolling, with the stacked money facts above them~~ — **measured** ([#81](https://github.com/allisson/aobs/issues/81)): 447 px required against 458, as `AOBS_REVIEW`. The bound stands at six and is now fixed. | Lower the bound before the first ISO ships — after that it is fixed. |
 | A phone camera reads our v27 output at arm's length | **v40 is the documented fallback** — and the maximum UR fragment length is re-derived from the new cap, never kept (`03-transport.md` §9). |
 | The inbound capture-resolution floor | The resolution fallback chain already handles it. |
 

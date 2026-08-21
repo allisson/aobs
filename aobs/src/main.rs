@@ -13,7 +13,8 @@
 //! passphrase, the network, ADR-0010's `OnceLock`, and the hub the first journey ends on.
 //! [#78](https://github.com/allisson/aobs/issues/78) is the QR boundary's near side: `camera`
 //! grew the capture loop, `qr` is `rqrr` on a luma plane, and `scan` is §11.1's one screen in
-//! its three configurations.
+//! its three configurations. [#81](https://github.com/allisson/aobs/issues/81) is `review`:
+//! §11.2's panel, §11.3's per-address walk, and the screen 02-core.md §7's refusal ends on.
 
 mod buildinfo;
 mod camera;
@@ -28,6 +29,7 @@ mod load;
 mod notify;
 mod power;
 mod qr;
+mod review;
 mod router;
 mod scan;
 mod session;
@@ -110,28 +112,47 @@ fn run() -> Result<Ending, Failure> {
     // (05-testing-and-release.md §6.2), which is the only geometry where it can fail: at or
     // above the design size the logical canvas is never smaller than 1280×800.
     let metrics = ui.global::<Metrics>();
+    let slot_height = logical_height as f32 - metrics.get_slot_chrome();
     let words_required = metrics.get_words_required();
-    let words_available = logical_height as f32 - metrics.get_words_chrome();
     console::emit(&format!(
-        "AOBS_WORDS required={words_required:.0} available={words_available:.0} fits={}",
-        if words_required <= words_available {
+        "AOBS_WORDS required={words_required:.0} available={slot_height:.0} fits={}",
+        if words_required <= slot_height {
             "yes"
         } else {
             "no"
         },
     ));
 
+    // §0's second breakpoint, decided once for the whole appliance and read by every screen
+    // that has two states. The mode cannot change under a running appliance — the DRM tier
+    // took the connector's preferred mode and the fbdev tier took the firmware's — so this is
+    // an input like the mode itself, not something the layout recomputes.
+    let wide = display::wide(mode.width, mode.height);
+    ui.set_wide(wide);
+
+    // How much width an address gets, at the two places one is drawn at full width. Handed in
+    // rather than derived inside the layout, because an address block's height is a function of
+    // it (04-screens.md §11.2, `display::rooms`).
+    let padding = if wide {
+        metrics.get_slot_padding_wide()
+    } else {
+        metrics.get_slot_padding()
+    };
+    let (review_room, walk_room) = display::rooms(
+        logical_width,
+        wide,
+        padding,
+        metrics.get_rail_width(),
+        metrics.get_rail_gap(),
+    );
+    ui.set_review_room(review_room);
+    ui.set_walk_room(walk_room);
+
     // 04-screens.md §1: with no camera the third start entry is visibly unavailable with its
     // reason stated, not hidden. Probed here because this is where the start menu is about
     // to be drawn — 01-boot-layer.md §7 enumerates V4L2 devices at the point of use, so a
     // camera plugged in later is not something a startup decision can have ruled out.
     ui.set_camera_present(camera::present());
-
-    // §0's second breakpoint, decided once for the whole appliance and read by every screen
-    // that has two states. The mode cannot change under a running appliance — the DRM tier
-    // took the connector's preferred mode and the fbdev tier took the firmware's — so this is
-    // an input like the mode itself, not something the layout recomputes.
-    ui.set_wide(display::wide(mode.width, mode.height));
 
     // The create path's own state, and the two callbacks that carry a value rather than an
     // intent (04-screens.md §2). Wired before the router, which holds it to reach §2 and §3.
@@ -153,14 +174,20 @@ fn run() -> Result<Ending, Failure> {
     // existence and both are what that needs.
     let load = load::wire(&ui, create.clone(), session.clone());
 
+    // §11.2's panel and §11.3's walk. It holds the session because validating a transaction is
+    // the one thing on this path that needs the wallet, and it is built before `scan` because a
+    // completed transaction scan hands its payload straight to it (standing rule 4: a payload is
+    // a value and does not cross the router).
+    let review = review::wire(session.clone());
+
     // §11.1's one scanning screen, in whichever of its three configurations the router asks
     // for. It holds no wallet and no payload: the camera thread and core's `Scanner` are the
     // whole of its state.
-    let scan = scan::wire(&ui);
+    let scan = scan::wire(&ui, review.clone());
 
     // Everything the user can ask for goes through here, and nothing else. The cell is where
     // §13's answer lands, because the event loop is what ends and it carries nothing back.
-    let ending = router::wire(&ui, create.clone(), confirm, load, scan, session);
+    let ending = router::wire(&ui, create.clone(), confirm, load, scan, review, session);
 
     // The readiness line, printed from inside the running event loop rather than before
     // it. That placement is the point: the line asserts the loop came up, which is what
@@ -169,13 +196,29 @@ fn run() -> Result<Ending, Failure> {
     //
     // It carries the tier that won (01-boot-layer.md §2), without which a green display
     // row would prove only that *something* drew.
-    slint::Timer::single_shot(std::time::Duration::ZERO, || {
+    let handle = ui.as_weak();
+    slint::Timer::single_shot(std::time::Duration::ZERO, move || {
         console::emit(&format!(
             "AOBS_READY version={} build={} display={}",
             buildinfo::VERSION,
             buildinfo::build_date(),
             display::tier(),
         ));
+
+        // 04-screens.md §11.2's two owed measurements, both taken against the canvas the
+        // appliance learned and the font it actually has (00-overview.md,
+        // 05-testing-and-release.md §6.2). **From inside the loop rather than beside
+        // `AOBS_WORDS`**: the address half is a text measurement, and a Text's preferred width
+        // is not a number this backend has before the font is loaded — printing it earlier
+        // would print a zero and call it a pass.
+        //
+        // The row half is arithmetic over the panel's own heights, the same way the words
+        // screen's is. The address half divides the measured width of one 4-character group by
+        // four, so both halves are numbers the layout is built from rather than numbers
+        // computed a second time beside it.
+        if let Some(ui) = handle.upgrade() {
+            console::emit(&measurement(&ui, slot_height, review_room));
+        }
     });
 
     // Readiness for `Type=notify` (01-boot-layer.md §2), and it must land **after** the
@@ -213,4 +256,46 @@ fn run() -> Result<Ending, Failure> {
     // Nothing but §13 ends the loop, so a loop that ended with no ending in the cell ended
     // for a reason nobody asked for — which is exactly what `AOBS-E03` is (06-codes.md §5).
     ending.get().ok_or(Failure::EventLoopExited)
+}
+
+/// The review panel's two owed measurements as one console line
+/// (`05-testing-and-release.md` §6.2).
+///
+/// ```text
+/// AOBS_REVIEW rows-required=… rows-available=… rows-fit=yes|no \
+///             address-required=… address-available=… address-one-line=yes|no|unknown
+/// ```
+///
+/// **`unknown` rather than a guess** when the group measurement came back at or below zero
+/// (standing rule 8). A zero would make `address-required` zero and every canvas a pass, which
+/// is the one way this line could report a green that means nothing — so it says it does not
+/// know, and `ci/qemu-boot.sh` fails a boot that says so.
+///
+/// Both halves are read off the layout, not recomputed: `review-required` is the sum
+/// `Metrics.review-required` builds the panel from, and the address cell is the width
+/// `AddressBlock`'s own ruler measured in the face and size it draws in.
+fn measurement(ui: &AppWindow, slot_height: f32, room: f32) -> String {
+    let rows_required = ui.global::<Metrics>().get_review_required();
+    let cell = ui.get_address_cell();
+    let gap = ui.get_address_gap();
+    let required = review::address_width(review::WIDEST_ADDRESS_CHARS, cell, gap);
+
+    let one_line = if cell <= 0.0 {
+        "unknown"
+    } else if required <= room {
+        "yes"
+    } else {
+        "no"
+    };
+
+    format!(
+        "AOBS_REVIEW rows-required={rows_required:.0} rows-available={slot_height:.0} \
+         rows-fit={} address-required={required:.0} address-available={room:.0} \
+         address-one-line={one_line}",
+        if rows_required <= slot_height {
+            "yes"
+        } else {
+            "no"
+        },
+    )
 }

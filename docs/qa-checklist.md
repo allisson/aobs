@@ -164,16 +164,43 @@ the practical way to run them, since the shipped image offers no shell.
 - [ ] On a panel larger than the design size, type is **larger**, not the layout roomier —
       1920×1080 and 3840×2160 should both look like a 1422×800 canvas scaled up.
 - [ ] At 800×600 the review panel draws **stacked**, non-scrolling, with a 62-character P2TR
-      address complete on screen.
+      address complete on screen. The appliance prints
+      `AOBS_REVIEW … address-required=… address-available=… address-one-line=yes` on every boot
+      and CI asserts it ([#81](https://github.com/allisson/aobs/issues/81)), so what is left for
+      a person here is whether it is **legible** at arm's length on a real panel — the numbers
+      say it fits, not that it reads.
+- [ ] Above the design width the money facts sit **beside** the outputs, and below it **above**
+      them, with nothing dropped in either state. **QEMU cannot show this**: `screendump` on the
+      DRM tier captures the console plane, not ours, so the rail's drawn form has only ever been
+      seen in a forced-wide build at the floor.
 - [ ] A mode below 800×600 halts on `AOBS-E06` with the diagnostic on a live console, rather
       than drawing something cramped.
 
 ### The output bound ([#58](https://github.com/allisson/aobs/issues/58))
 
 - [ ] Six outputs fit the review panel at 800×600 with nothing clipped and no scroll region.
-      **This is the measurement the bound rests on** — if it comes back tighter, the number
-      drops before the first ISO ships, and never after.
-- [ ] A seven-output PSBT is refused with `AOBS-R15` before any review screen is drawn.
+      **The measurement is discharged** ([#81](https://github.com/allisson/aobs/issues/81)): 447
+      logical px against 458, as `AOBS_REVIEW … rows-fit=yes` on every boot, so the bound is
+      fixed at six. What a person still checks is that six rows at that density are *readable*
+      rather than merely present.
+- [ ] A seven-output PSBT is refused with `AOBS-R15` before any review screen is drawn, on a
+      screen whose only action is **discard** — no *proceed anyway* anywhere on it, and no way
+      to reach the panel from it.
+
+### The review panel and the walk ([#81](https://github.com/allisson/aobs/issues/81))
+
+- [ ] Every character of every **payment** address is on screen, in 4-character groups separated
+      by a gap narrower than a monospace cell — compare it against the coordinator's own screen
+      character by character, which is the thing this whole appliance is for.
+- [ ] Change says it was **re-derived from the seed at its path and matched byte for byte**, and
+      the path is written the way the identity screen writes paths (`h`, never `'`).
+- [ ] The advisory warning, when it fires, is a full sentence **on the fee row** — no icon, no
+      banner, no screen of its own, and no key to press to make it go away.
+- [ ] Pressing *sign* shows **one screen per payment address** and no screen for change, with the
+      fee statement absent from all of them; Escape from any of them returns to the panel with
+      the transaction intact.
+- [ ] Escape from the panel itself returns to the identity screen and the transaction is gone —
+      pressing *sign a transaction* again starts from the camera, not from where you left off.
 
 ### Creating a wallet ([#72](https://github.com/allisson/aobs/issues/72))
 

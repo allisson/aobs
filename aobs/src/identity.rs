@@ -12,6 +12,7 @@
 //! when the network was mainnet would make *"no line"* mean *"mainnet"*, which is a fact
 //! carried by the absence of a fact.
 
+use aobs_core::bitcoin::bip32::DerivationPath;
 use aobs_core::derive::{Family, Network, Wallet};
 use slint::{ModelRc, VecModel};
 
@@ -67,14 +68,24 @@ fn script_type(family: Family) -> &'static str {
     }
 }
 
-/// The account path, in the notation this product writes paths in: `h` for hardened, not `'`.
+/// The account path, in the notation this product writes paths in.
+fn path(wallet: &Wallet, family: Family) -> String {
+    notation(&wallet.account_path(family))
+}
+
+/// Any derivation path, in the notation this product writes paths in: `h` for hardened, not
+/// `'`.
 ///
 /// That is what `04-screens.md` §8's own descriptor example uses — `[9c1f4e02/84h/0h/0h]` — and
 /// an apostrophe is the character a monospace line of hex and digits loses most easily. The
 /// dependency prints `'`, so the substitution happens here rather than being a fact about
 /// `bitcoin`'s `Display` that a version bump could change under us.
-fn path(wallet: &Wallet, family: Family) -> String {
-    wallet.account_path(family).to_string().replace('\'', "h")
+///
+/// **One function rather than one per screen.** §11.2's change label states the path a change
+/// output was re-derived at, and a panel writing `84'/0'/0'/1/7` beside a hub writing
+/// `84h/0h/0h` would be two answers to a question the user is trying to match up.
+pub fn notation(path: &DerivationPath) -> String {
+    path.to_string().replace('\'', "h")
 }
 
 #[cfg(test)]
