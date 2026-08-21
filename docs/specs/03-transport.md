@@ -269,6 +269,33 @@ with fresh fountain parts.**
 any percentage would describe our animation rather than their reception. The screen states the size
 once and the QR's own flicker carries liveness. Nothing at all in the single-part case.
 
+## 6a. What building §6 settled
+
+Two things this section leaves implicit and one it gets slightly wrong about the dependency
+([#82](https://github.com/allisson/aobs/issues/82)).
+
+**The UR message is the PSBT's serialised bytes, with no CBOR wrapper charged.** §9.1's arithmetic
+already assumes it — `messageLen` there is the PSBT's own length — and it is the convention the
+inbound half of the crate accepts, since `ur` 0.5.2 does no CBOR unwrapping and `Scanner` hands a
+completed message straight to `psbt::validate`. Stated here because the two halves have to agree and
+nothing else says so. **It is also the interoperability question this ticket did not settle**:
+BCR-2020-006 defines `crypto-psbt`'s payload as a CBOR byte string wrapping the PSBT, so a
+coordinator implementing the registry to the letter expects three more bytes at the front than we
+emit and than we accept. §6.3's by-hand round trip against a real Sparrow and a real Specter is
+where that gets found; **fixing it is [#112](https://github.com/allisson/aobs/issues/112), and it moves both directions at once or
+neither.**
+
+**§6's *"same screen, same code path"* costs one branch, in core, on the fragment count.**
+`ur::Encoder` emits `ur:crypto-psbt/{seq}-{seqLen}/…` unconditionally, so a one-fragment message
+comes out of it as `1-1` — which is a multi-part stream of length one and a different thing on the
+wire from a UR that is simply not fragmented. §6 requires the second, so `Animation` reads
+`fragment_count()` once at construction and takes `ur::ur::encode` for the single-part case. The
+branch is on a count and never on anything about the bytes, and it is the only one in the module.
+
+**`encode_segments_advanced` returns `Result`, not `Option`**, which is what lets §9's *unreachable
+by arithmetic* be an `expect` with the reason written next to it rather than an error type the shell
+would have to be given a branch for (§8 forbids it one).
+
 ## 7. Outbound: the two static QRs
 
 Both are **single-part, always**, at **ECC H**, and both are rendered from a **typed model** rather

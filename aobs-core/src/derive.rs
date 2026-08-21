@@ -353,6 +353,25 @@ impl Wallet {
         }
     }
 
+    /// Whether this path is one this wallet would ever look at — [`Wallet::scannable`]'s
+    /// question without the answer.
+    ///
+    /// It exists for [`crate::sign`], which needs the *bound* rather than the location: what it
+    /// derives is a private key, so the set of paths it will derive at has to be a set this
+    /// module decides and not a set a PSBT does.
+    pub(crate) fn scannable_path(&self, path: &DerivationPath) -> bool {
+        self.scannable(path).is_some()
+    }
+
+    /// The session's one secp256k1 context, for the signing path.
+    ///
+    /// `pub(crate)` rather than public: it is not a fact about a wallet, it is the context
+    /// [`Wallet::load`] already built. A second one in [`crate::sign`] would be a second
+    /// allocation of the precomputation tables for the same session.
+    pub(crate) fn secp(&self) -> &Secp256k1<All> {
+        &self.secp
+    }
+
     /// Where in our four accounts this path points, or `None` if nowhere we would ever look.
     ///
     /// The rule is §7's, in one place: five children, the first three equal to one of our four

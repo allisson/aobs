@@ -62,7 +62,7 @@ the shell or is deleted.
 | **BIP-39 English, all five lengths, passphrase `"TREZOR"`** | Mnemonic ↔ entropy, checksum, seed derivation. |
 | **BIP-39 Japanese, passphrase `㍍ガバヴァぱばぐゞちぢ十人十色`** ([bip32JP](https://github.com/bip32JP/bip32JP.github.io/blob/master/test_JP_BIP39.json)) | **Mandatory, not optional.** `㍍` (U+334D) is a *compatibility* character that decomposes under NFKD and is left untouched by NFD. These are the only vectors in the suite that distinguish NFKD from NFD — an implementation reaching for the wrong form passes everything else. |
 | **BIP-174**, including **invalid vector 5** | The PSBT parser, and the duplicate-key refusal we now inherit from the dependency. |
-| **BIP-340 / BIP-341** | Taproot key-path signing and sighash. |
+| **BIP-340 / BIP-341** | Taproot key-path signing and sighash. The files are committed verbatim rather than transcribed, and **the suite is BIP-341's seven key-path cases rather than BIP-340's rows**: only index 0 of `bip-0340/test-vectors.csv` has all-zero auxiliary randomness, where **all seven of BIP-341's key-path signatures do** — which is exactly `sign_schnorr_no_aux_rand`, established against an independent implementation rather than read ([#82](https://github.com/allisson/aobs/issues/82), `02-core.md` §8a). Three of the seven carry a non-trivial merkle root, which is what makes the *tweak* asserted: a wrong tweak still produces a valid BIP-340 signature, under a key that does not spend the output. |
 | **BIP-380** | The four exported descriptors' checksums. |
 | **BCR-2020-015** | The `crypto-account` CBOR, against the spec's own example encodings. |
 | **RFC 9106** | Argon2id known-answer vectors, plus differential testing against the PHC reference — this is the unaudited half of the crypto. |
@@ -97,7 +97,13 @@ the shell or is deleted.
   `03-transport.md` §9 settles, no emitted part exceeds v27-L's 2 132-character budget — charging the
   sequence number its full `u32` width rather than the one it happens to be emitted at. This is the
   assertion that catches a fragment length raised without redoing §9.1's arithmetic, and it is why the
-  length is a parameter rather than a constant the test cannot vary.
+  length is a parameter rather than a constant the test cannot vary. **It stands as of
+  [#82](https://github.com/allisson/aobs/issues/82)**, in two halves: §9.1's closed form is asserted
+  character for character against what `ur` 0.5.2 emits — which is what earns the right to charge
+  every field its `u32` maximum instead of sweeping what the encoder happens to produce — and the
+  ceiling is then swept over every message length inside the 64 KiB transport bound and over
+  fragment lengths either side of 960, where the sweep's own boundary is that **1 019 is the largest
+  value that clears the budget at all.**
 
 ## 4. Fuzz targets
 
@@ -256,6 +262,17 @@ can silently re-resolve. That is what leaves the harness exactly one site to tra
 - **The power button on real firmware.** #89 measured it under QEMU's ACPI implementation only, and
   the device name and key code came from that kernel and that firmware — the same limit
   `01-boot-layer.md` §7 records for the fbdev tier.
+- **A real coordinator finalizing and broadcasting what we emit**, on signet: Sparrow and Specter
+  Desktop at least, since §7's `crypto-account` decision already rests on Specter's scanner and §1's
+  type-string decision rests on both. Nothing in CI can do this — our own decoder reads our own
+  encoder, which asserts symmetry and not interoperability — and it is the only row that would catch
+  §6a's open question about whether `crypto-psbt`'s payload is the PSBT's bytes or a CBOR byte string
+  wrapping them ([#112](https://github.com/allisson/aobs/issues/112)). **A signature nobody can
+  broadcast is the failure the whole outbound path exists to avoid**, so this is a release-gate row
+  and not a nice-to-have.
+- **A phone or coordinator camera reading the symbol at the 800×600 floor**, where the square is
+  258 px against the ~700 the v27 cap was priced on (`04-screens.md` §11.5). It is §6.4's owed
+  measurement, sharpened: the floor is the hard case, not the design canvas.
 - Physical keyboards through libinput — including **one non-US board**, to confirm that the pinned
   `us` keymap (`01-boot-layer.md` §2) still reaches all 95 printable ASCII characters on it, since
   that reachability is the whole argument for offering no layout choice (`04-screens.md` §5.1).
@@ -297,7 +314,8 @@ become measured. None of them blocks implementation.
 | ~~Two columns of 12 words in the 800×600 **minimum canvas**~~ — **measured** ([#72](https://github.com/allisson/aobs/issues/72)): 440 px required against 458, as `AOBS_WORDS`. | Type size, not layout. |
 | ~~A 62-character P2TR payment address, 4-character grouped with §0's sub-cell gaps, on **one line** in the minimum canvas~~ — **measured** ([#81](https://github.com/allisson/aobs/issues/81)): 699 px required against 752, from the shipped font rather than from §0's arithmetic, as `AOBS_REVIEW`. | Wrap it, and drop the output bound to what still fits. Never truncate. |
 | ~~**Six output rows fit the minimum canvas**, non-scrolling, with the stacked money facts above them~~ — **measured** ([#81](https://github.com/allisson/aobs/issues/81)): 447 px required against 458, as `AOBS_REVIEW`. The bound stands at six and is now fixed. | Lower the bound before the first ISO ships — after that it is fixed. |
-| A phone camera reads our v27 output at arm's length | **v40 is the documented fallback** — and the maximum UR fragment length is re-derived from the new cap, never kept (`03-transport.md` §9). |
+| ~~The predicted signed-transaction vsize against a real signed transaction, in all four script types~~ — **measured** ([#82](https://github.com/allisson/aobs/issues/82)): predicted never above real, and never more than one vbyte per ECDSA input below it. P2WPKH 141/141, P2TR 154/154, P2PKH 225/226 — the published 226 charging the 72-byte DER element we do not. | None needed; the error runs in the safe direction by construction. |
+| A phone camera reads our v27 output at arm's length. **04-screens.md §11.5 sharpens what it is being asked**: the outbound square is 258 px at the 800×600 floor, against the ~700 px §6's cap was priced on. | **v40 is the documented fallback** — and the maximum UR fragment length is re-derived from the new cap, never kept (`03-transport.md` §9). |
 | The inbound capture-resolution floor | The resolution fallback chain already handles it. |
 
 ## 7. Release

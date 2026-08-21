@@ -33,10 +33,12 @@ use aobs_core::psbt::{
     self, Accepted, OutputKind, OutputRow, Rederivation, Refusal, Rejection, Review as Model,
     Warning,
 };
+use aobs_core::sign;
 use slint::{ModelRc, SharedString, VecModel};
 use zeroize::Zeroizing;
 
 use crate::identity;
+use crate::outbound::Outbound;
 use crate::session::Session;
 use crate::{AppWindow, Output, Screen};
 
@@ -72,6 +74,9 @@ pub enum Landed {
 /// The signing flow's state: one accepted transaction, and where the walk is in it.
 pub struct Review {
     session: Rc<Session>,
+    /// Where a signature goes once it exists (04-screens.md §11.5). Held rather than routed,
+    /// because signed bytes are a value and no value crosses the router (standing rule 4).
+    outbound: Rc<Outbound>,
     /// The transaction the panel is about, kept because §11.3's walk and §11.4's gate are both
     /// about the same one — and because [`Accepted`] pairs the document with the model, so
     /// keeping it is what stops a later screen pairing this review with different bytes.
@@ -87,9 +92,10 @@ pub struct Review {
 
 /// Build the flow's state. It wires no callback: every press on these three screens is an
 /// intent, and the router is where intents land.
-pub fn wire(session: Rc<Session>) -> Rc<Review> {
+pub fn wire(session: Rc<Session>, outbound: Rc<Outbound>) -> Rc<Review> {
     Rc::new(Review {
         session,
+        outbound,
         accepted: RefCell::new(None),
         walk: Cell::new(0),
     })
@@ -147,6 +153,34 @@ impl Review {
             self.panel(ui, &accepted.review);
             self.accepted.replace(Some(accepted));
         }
+    }
+
+    /// §11.4's hold completed. **This is where a signature comes into existence**, and it is the
+    /// only place in the appliance that one does.
+    ///
+    /// Core does the whole of it: `psbt::validate` established every precondition and `sign::sign`
+    /// adds partial signatures to the document it was handed. Nothing here reads the transaction,
+    /// asks whether it should be signed, or touches the bytes on the way past — what crosses is a
+    /// serialisation, and it goes to the one slot that holds it (02-core.md §12).
+    ///
+    /// The `Accepted` stays in hand until the screen is left, because §8's *a re-sign is
+    /// byte-identical* is only free while the document that produced it is still here — and
+    /// because holding it is what makes the transaction the panel showed and the transaction that
+    /// got signed the same one.
+    pub fn confirm(&self, ui: &AppWindow) {
+        // The borrow ends before any property is set, which is this crate's standing discipline
+        // around `RefCell` and Slint.
+        let signed = {
+            let accepted = self.accepted.borrow();
+            let (Some(accepted), Some(wallet)) = (accepted.as_ref(), self.session.wallet()) else {
+                // Unreachable by navigation: the gate is only ever reached from a walk over a
+                // transaction in hand, and the hub does not exist until a wallet does (ADR-0010).
+                return;
+            };
+            sign::sign(wallet, accepted).serialize()
+        };
+
+        self.outbound.arrived(ui, signed);
     }
 
     /// Discard: drop the transaction. §7's one action, and also what Escape off the panel does.
@@ -207,10 +241,9 @@ impl Review {
                 ui.set_screen(Screen::Address);
             }
             // Every payment address has been confirmed, so §11.4's gate is next. **No signature
-            // is produced here** — the gate, the signing and the outbound animation are
-            // [#82](https://github.com/allisson/aobs/issues/82), and `Screen::Unbuilt` says so
-            // rather than swallowing the press (standing rule 8).
-            Some(None) => ui.set_screen(Screen::Unbuilt),
+            // is produced here**: the gate is a screen, and the hold on it is what produces one
+            // ([`Review::confirm`]).
+            Some(None) => ui.set_screen(Screen::Gate),
             // No transaction: unreachable by navigation, since these screens are only ever
             // shown with one in hand. Nothing drawn is the honest answer to nothing held.
             None => {}

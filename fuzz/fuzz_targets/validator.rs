@@ -302,6 +302,13 @@ fn build(wallet: &Wallet, plan: &Plan) -> Option<Vec<u8>> {
             // hands it over and `AOBS-R05` is what refuses the plans that do not.
             slot.redeem_script = Some(redeem_script().clone());
         }
+        if plan.family.family() == Family::Bip86 {
+            // BIP-371's declaration that this is a key-path spend, which `AOBS-R05` also
+            // requires ([#82](https://github.com/allisson/aobs/issues/82)). Without it every
+            // taproot plan is refused on the script type and never reaches the output checks
+            // this target exists for.
+            slot.tap_internal_key = Some(*x_only);
+        }
         let declared = match &plan.claim {
             InputClaim::Honest => Some((
                 wallet.fingerprint(),

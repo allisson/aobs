@@ -79,6 +79,22 @@ pub fn rooms(logical_width: u32, wide: bool, padding: f32, rail: f32, gap: f32) 
     (review, content)
 }
 
+/// The side of the largest square the outbound animation's symbol can be drawn in
+/// (`04-screens.md` §11.5).
+///
+/// **A square, so it is the tighter of the two axes** — the content width, and what the screen's
+/// three text rows leave of the slot's height. Handed to the layout rather than derived inside it,
+/// for the reason [`rooms`] is: a square whose side is *whatever is left over* is a constraint
+/// derived from the space it consumes, which is the shape Slint reports as a binding loop.
+///
+/// It is not a bound anything refuses on. `03-transport.md` §6 caps the QR *version* to bound
+/// module pitch on a ~700 px usable square, and at the 800×600 floor there is less than that —
+/// which is a consequence of the floor rather than a decision here, and it is why §6.4's owed
+/// measurement is a phone camera at arm's length rather than an assertion we could write.
+pub fn qr_side(content_width: f32, slot_height: f32, chrome: f32) -> f32 {
+    content_width.min((slot_height - chrome).max(0.0))
+}
+
 /// Whether this mode is below the floor, in physical pixels.
 pub fn below_floor(width: u32, height: u32) -> bool {
     width < FLOOR_WIDTH || height < FLOOR_HEIGHT
@@ -142,7 +158,7 @@ pub fn window_failure() -> Failure {
 
 #[cfg(test)]
 mod tests {
-    use super::{below_floor, logical, rooms, scale, wide};
+    use super::{below_floor, logical, qr_side, rooms, scale, wide};
 
     #[test]
     fn the_design_canvas_and_everything_under_it_scales_by_one() {
@@ -199,6 +215,23 @@ mod tests {
     fn a_rail_wider_than_the_canvas_leaves_no_room_rather_than_negative_room() {
         assert_eq!(rooms(200, true, 24.0, 300.0, 24.0), (0.0, 152.0));
         assert_eq!(rooms(20, false, 24.0, 300.0, 24.0), (0.0, 0.0));
+    }
+
+    /// §11.5's symbol is a square, so the shorter axis decides — which at the floor is the
+    /// height, and at the design canvas is still the height.
+    #[test]
+    fn the_outbound_square_takes_the_tighter_of_the_two_axes() {
+        // The floor: 752 of content width against 458 of slot height less 200 of text rows.
+        assert_eq!(qr_side(752.0, 458.0, 200.0), 258.0);
+        // The design canvas: much wider, and the height is still what binds.
+        assert_eq!(qr_side(1192.0, 706.0, 200.0), 506.0);
+    }
+
+    /// A screen whose text rows are taller than the slot leaves no square rather than a negative
+    /// one — the same arithmetic discipline [`rooms`] carries.
+    #[test]
+    fn a_screen_too_short_for_its_own_text_leaves_no_square() {
+        assert_eq!(qr_side(752.0, 100.0, 200.0), 0.0);
     }
 
     #[test]

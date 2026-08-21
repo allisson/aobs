@@ -629,6 +629,26 @@ irreversible action costs more than the safe one, and refusal is always reachabl
 fires would convert an advisory into a soft block, punish the user who is legitimately paying a high
 fee, and teach that hold duration carries meaning.
 
+**The hold is three seconds, and the gate screen has exactly two inputs**
+([#82](https://github.com/allisson/aobs/issues/82)). Three seconds is the prototype's own number,
+which §0 calls a starting point rather than a mandate, and 50 ms is the tick the progress bar moves
+by — four ticks per frame at §11.5's 4 fps. *Byte-identical with and without the warning* is
+**structural rather than remembered**: the screen carries a cursor position and a hold progress and
+no third property, so there is nothing on it for a fee, a ratio or an advisory to reach and a
+property added would fail a test before it could fail a review.
+
+**The hold is evidenced by the release, because that is the only evidence there is.** Slint's
+linuxkms input path delivers exactly one `KeyPressed` and one `KeyReleased` per physical press and
+synthesises no repeat, so *still held* is a state the release ends and nothing else. The clock runs
+only while that state holds; releasing early, moving the cursor, or leaving the screen clears it, and
+the intent is dispatched by the clock reaching three seconds. **A tap therefore cannot sign** — which
+is the direction that matters, and the failure mode if a backend ever stopped delivering the release
+is a gate that will not open rather than one that opens by itself.
+
+**Refusing is the same discard every other exit from this path is.** The single press and Escape fire
+one intent, and the router already knows a discard drops the transaction and returns to the hub —
+02-core.md §7's *discard, and nothing else*. There is no second path to it to drift.
+
 ### 11.5 The outbound QR
 
 Nothing on screen but the title, the QR and the part count. **No repeat of the amounts** — the review
@@ -651,6 +671,23 @@ moment the user should be holding the device still.
 The word *most recently* is load-bearing and the net is narrower than it looks: signing again
 replaces what this slot holds, so a user who signs A, fails to hand it over, then signs B pays a
 re-scan, re-review and re-sign for A. `02-core.md` §12 carries the reasoning and the cost.
+
+**Two things building it settled** ([#82](https://github.com/allisson/aobs/issues/82)).
+
+*No repeat of the amounts* is structural on the same terms §11.4's gate is: the screen's inputs are
+the symbol, the static count, the room to draw in and the cursor — there is no property a money fact
+could arrive through, and a test reads the frame to say so.
+
+**The symbol is a square and takes the tighter of the two axes, which at the floor is the height.**
+At 800×600 the chrome and the screen's three text rows leave a **258 px** square; at the design
+canvas it is 506. §6's version cap is priced against a *~700 px usable square* — v27's 133 modules at
+≈5.3 px/module — so the floor is below that premise and a v27 payload lands at ≈1.8 px/module there.
+That is a consequence of supporting the floor rather than a decision taken here, and it is one more
+reason `05-testing-and-release.md` §6.4's owed measurement is *a phone camera at arm's length* rather
+than an assertion we could write: **if it fails, the cap moves to v40 and the fragment length is
+re-derived** (`03-transport.md` §9.4), which is the lever that already exists. **The re-display row
+appears rather than greying**, because before the first signature there is no state for it to be in
+and a greyed row states a reason — which here would be *you have not signed anything*.
 
 ## 12. Verify a receive address
 
