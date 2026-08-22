@@ -35,7 +35,7 @@ use crate::corpus::{
     psbt_for, wallet, wallet_on,
 };
 use crate::derive::{Family, Network, Wallet};
-use crate::psbt::{validate, Accepted};
+use crate::psbt::{validate, Accepted, InputScript, OurInput};
 
 const BIP340_VECTORS: &str = include_str!("vectors/bip340-test-vectors.csv");
 const BIP341_VECTORS: &str = include_str!("vectors/bip341-wallet-test-vectors.json");
@@ -513,6 +513,31 @@ fn an_accepted_input_that_arrived_signed_is_a_crate_bug() {
     let wallet = wallet();
     let mut accepted = accept(&wallet, &spend(Family::Bip86));
     accepted.psbt.inputs[0].tap_key_sig = Some(nonsense_schnorr_signature());
+
+    let _ = sign(&wallet, &accepted);
+}
+
+/// **And the comes-back-signed half has teeth too**
+/// ([#117](https://github.com/allisson/aobs/issues/117)): a taproot input of ours whose only
+/// signature is a `partial_sigs` entry.
+///
+/// **That shape is unreachable from outside this crate, and the unreachability is the point.**
+/// `Psbt::sign` dispatches on the `scriptPubKey`, so it never reaches `bip32_sign_ecdsa` for a
+/// P2TR input; `AOBS-R17` refuses one that arrives already carrying `partial_sigs`. Those two
+/// facts are what the disjunctive assertion this replaced rested on without stating either, so a
+/// test cannot pretend to reach it honestly — it constructs the `Accepted` from inside, the way
+/// [`an_accepted_input_that_arrived_signed_is_a_crate_bug`] does, and plants the family rather
+/// than the signature: an honest BIP84 spend signs into `partial_sigs`, the family travelling
+/// beside it says taproot, and the per-family assertion is the one thing that notices.
+#[test]
+#[should_panic(expected = "the field its family is signed from")]
+fn a_signature_in_another_familys_field_is_a_crate_bug() {
+    let wallet = wallet();
+    let mut accepted = accept(&wallet, &spend(Family::Bip84));
+    accepted.ours = vec![OurInput {
+        index: 0,
+        script: InputScript::P2tr,
+    }];
 
     let _ = sign(&wallet, &accepted);
 }

@@ -553,8 +553,24 @@ residual costs, both named rather than glossed:
   input can then hold one, `sign` asserts the **delta**: every input the validator found ours
   arrived unsigned and comes back signed, which is what the screen claims. The two halves are not the
   same predicate and that is deliberate — *arrived unsigned* is R17's own five-field test, while
-  *comes back signed* is the narrow pair `Psbt::sign` writes, `partial_sigs` and `tap_key_sig`, so a
-  `tap_script_sigs` entry cannot stand in for the signature the input's family is signed from.
+  *comes back signed* names **one** field, the one the input's family is signed from:
+  `partial_sigs` for BIP44/49/84, `tap_key_sig` for BIP86. None of the other four can stand in for
+  it — not a `tap_script_sigs` entry, and not a `partial_sigs` entry on a taproot input.
+- **That per-family form is rule 6 one layer down, and it was a disjunction until
+  [#117](https://github.com/allisson/aobs/issues/117).** The assertion #115 left asked for a
+  signature in *either* field, for every input regardless of family, and it was not wrong — it was
+  not wrong because of two facts stated nowhere near it. `Psbt::sign` dispatches on
+  `output_type(i)`, so a P2TR `scriptPubKey` reaches the Schnorr arm and `bip32_sign_ecdsa` is never
+  called for a taproot input; and `AOBS-R17` refuses an input that arrives carrying `partial_sigs`,
+  so one cannot have been there already. Remove either and a taproot input of ours comes back with
+  an ECDSA signature, no key-path signature, and a passing assertion. The first is the dependency's
+  dispatch table, which is exactly the kind of thing #113 and #115 both found had to be *read*
+  rather than assumed; the second is a refusal one ticket old. **What makes the rule sayable is that
+  the family travels**: the structural walk classified every input, so the `Accepted`'s set of ours
+  carries the family beside the index rather than a second reader deciding *which family is this* in
+  a crate whose whole argument is that the check is the authority. The shape the disjunction missed
+  is unreachable from outside the crate — which is what those two facts mean — so the test that
+  covers it constructs the `Accepted` from inside and plants the family, and says so.
 
 **`sign_schnorr_no_aux_rand` is the deterministic arm, and which arm gets used is a feature flag
 rather than a call site.** `Psbt::sign` reaches `sign_schnorr` with fresh auxiliary randomness when

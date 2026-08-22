@@ -645,6 +645,11 @@ fn assert_no_output_is_ours_that_we_did_not_produce(wallet: &Wallet, accepted: &
 /// input's family is signed from and re-derives with [`ours_at`]. So a rule 6 that drifted — a map
 /// read that widened again, a taproot entry counted that the signing path never reaches — arrives
 /// here as a signature that is missing rather than as two functions agreeing with each other.
+///
+/// **And *signed* is one field per family, not either of two**
+/// ([#117](https://github.com/allisson/aobs/issues/117)). This is the one place where restating the
+/// rule independently is the point: `crate::sign` reads the family off the `Accepted` the check
+/// built, where this file decides it from the `scriptPubKey` it already had to read to re-derive.
 fn assert_every_input_of_ours_came_back_signed(
     wallet: &Wallet,
     accepted: &Accepted,
@@ -654,10 +659,11 @@ fn assert_every_input_of_ours_came_back_signed(
         let Some(spk) = spent_script_pubkey(&accepted.psbt, index) else {
             continue;
         };
+        let taproot = spk.is_p2tr();
 
         // §7 rule 6: the map the family is *signed* from, and no other. For taproot that is the
         // single entry keyed by the internal key; for the other three, `bip32_derivation`.
-        let ours = if spk.is_p2tr() {
+        let ours = if taproot {
             key_path_claim(input).is_some_and(|path| ours_at(wallet, path).as_ref() == Some(&spk))
         } else {
             input
@@ -669,10 +675,19 @@ fn assert_every_input_of_ours_came_back_signed(
             continue;
         }
 
+        // The same asymmetry one layer down: a taproot key-path signature is `tap_key_sig`, and
+        // every other family's is a `partial_sigs` entry. An input carrying only the other
+        // family's field is the finding, where the disjunction this replaced called it a pass.
         let signed = &signed.inputs[index];
+        let where_it_belongs = if taproot {
+            signed.tap_key_sig.is_some()
+        } else {
+            !signed.partial_sigs.is_empty()
+        };
         assert!(
-            !signed.partial_sigs.is_empty() || signed.tap_key_sig.is_some(),
-            "input {index} re-derives to ours and came back unsigned"
+            where_it_belongs,
+            "input {index} re-derives to ours and came back with no signature in the field its \
+             family is signed from"
         );
     }
 }

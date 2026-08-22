@@ -439,9 +439,25 @@ pub struct Accepted {
     pub psbt: Psbt,
     /// What the review panel draws.
     pub review: Review,
-    /// The indices of the inputs the byte-compare found ours, in the transaction's own order —
+    /// The inputs the byte-compare found ours, in the transaction's own order —
     /// **exactly the inputs `crate::sign` must come back having signed** (§8a).
-    pub(crate) ours: Vec<usize>,
+    pub(crate) ours: Vec<OurInput>,
+}
+
+/// One input the byte-compare found ours, and the family the structural walk classified it as.
+///
+/// **The family travels rather than being recomputed**
+/// ([#117](https://github.com/allisson/aobs/issues/117)). `crate::sign` asserts that a signature
+/// came back in *the field this input's family is signed from* — §7 rule 6 one layer down — and
+/// that question cannot be asked of a bare index. [`check`] already classified every input, so a
+/// second reader deciding *which family is this* would be a second implementation of it in a crate
+/// whose whole argument is that the check is the authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct OurInput {
+    /// Which input of the transaction, in its own order.
+    pub(crate) index: usize,
+    /// Which of the four script types, as the structural walk identified it.
+    pub(crate) script: InputScript,
 }
 
 /// The typed model the review panel renders (`02-core.md` §9).
@@ -569,8 +585,11 @@ struct Spend {
 ///
 /// Not *ours* — that is the derivation check's word (`R06`, `R08`). This says only that the
 /// input is a shape BIP44/49/84/86 single-sig describes, which is what `AOBS-R05` asks.
+///
+/// Crate-visible because it travels on the [`Accepted`] inside an [`OurInput`], which is
+/// [#117](https://github.com/allisson/aobs/issues/117)'s decision and its whole cost.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum InputScript {
+pub(crate) enum InputScript {
     /// BIP44.
     P2pkh,
     /// BIP49, whose redeem script has been checked to hash to the `scriptPubKey`.
@@ -811,13 +830,16 @@ fn build(wallet: &Wallet, psbt: Psbt, spends: &[Spend]) -> Result<Accepted, Refu
 /// answers outright. It cannot accept anything wrong — what makes an input ours is that we derive
 /// its `scriptPubKey`, and a coordinator that filled the fingerprint in wrongly should not make a
 /// wallet unsignable. Which *paths* are candidates is [`input_is_ours`]'s narrower question.
-fn inputs_of_ours(wallet: &Wallet, psbt: &Psbt, spends: &[Spend]) -> Vec<usize> {
+fn inputs_of_ours(wallet: &Wallet, psbt: &Psbt, spends: &[Spend]) -> Vec<OurInput> {
     spends
         .iter()
         .zip(&psbt.inputs)
         .enumerate()
         .filter(|(_, (spend, input))| input_is_ours(wallet, spend, input))
-        .map(|(index, _)| index)
+        .map(|(index, (spend, _))| OurInput {
+            index,
+            script: spend.script,
+        })
         .collect()
 }
 

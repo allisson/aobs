@@ -45,6 +45,14 @@
 //! that shape from the accepted set — an input arriving with a signature in any of five fields is
 //! refused before any key material — so this function can assert both halves: every input the
 //! wallet owns **arrived unsigned and comes back signed.**
+//!
+//! **And *signed* names one field per family, not either of two**
+//! ([#117](https://github.com/allisson/aobs/issues/117)). `partial_sigs` for BIP44/49/84,
+//! `tap_key_sig` for BIP86 — `02-core.md` §7 rule 6 one layer down, and the same asymmetry
+//! `crate::psbt` already respects when it reads an input's *claim*. The disjunction that stood here
+//! before held only because `Psbt::sign` dispatches on the `scriptPubKey` and `AOBS-R17` refuses a
+//! `partial_sigs` entry that arrived, neither of which it said; the family the check computed now
+//! travels on the [`Accepted`] so the assertion can state the rule instead of resting on them.
 
 use core::convert::Infallible;
 
@@ -54,7 +62,7 @@ use bitcoin::secp256k1::{Secp256k1, Signing};
 use bitcoin::PrivateKey;
 
 use crate::derive::Wallet;
-use crate::psbt::Accepted;
+use crate::psbt::{Accepted, InputScript, OurInput};
 
 /// Sign every input of the accepted transaction that is ours, and change nothing else.
 ///
@@ -65,11 +73,12 @@ use crate::psbt::Accepted;
 /// # Panics
 ///
 /// If `Psbt::sign` reports an error, or if any input `crate::psbt::validate` found ours arrived
-/// already signed or comes back unsigned. All three mean a precondition that function is supposed
-/// to have established did not hold — `06-codes.md` §5's `AOBS-E04` and not a refusal, because
-/// there is no refusal code for it and there is nothing here that can fail without the crate being
-/// internally inconsistent. The arrived-signed half is `AOBS-R17`'s job, which is why a hostile
-/// PSBT reaches that refusal rather than this panic.
+/// already signed or comes back with no signature in the field its family is signed from. All
+/// three mean a precondition that function is supposed to have established did not hold —
+/// `06-codes.md` §5's `AOBS-E04` and not a refusal, because there is no refusal code for it and
+/// there is nothing here that can fail without the crate being internally inconsistent. The
+/// arrived-signed half is `AOBS-R17`'s job, which is why a hostile PSBT reaches that refusal rather
+/// than this panic.
 #[must_use]
 pub fn sign(wallet: &Wallet, accepted: &Accepted) -> Psbt {
     let mut psbt = accepted.psbt.clone();
@@ -103,9 +112,19 @@ pub fn sign(wallet: &Wallet, accepted: &Accepted) -> Psbt {
     //
     // **The two halves are deliberately different predicates.** *Arrived unsigned* is `AOBS-R17`'s
     // own five-field test, shared with the check that refuses it rather than restated. *Comes back
-    // signed* is the narrow pair this call writes — `partial_sigs` and `tap_key_sig` — because a
-    // `tap_script_sigs` entry is not the signature the input's family is signed from, and reusing
-    // the wide predicate here would let one stand in for the missing key-path signature.
+    // signed* is **one** field — the one this input's family is signed from — so none of the other
+    // four can stand in for it: not a `tap_script_sigs` entry, and not (which is what
+    // [#117](https://github.com/allisson/aobs/issues/117) found) a `partial_sigs` entry on a
+    // taproot input.
+    //
+    // **That asymmetry is §7 rule 6 one layer down, and it has to be said here.** The disjunction
+    // this replaced — a signature in *either* field, for every input — was not wrong, and it was
+    // only not wrong because of two facts stated nowhere near it: `Psbt::sign` dispatches on the
+    // `scriptPubKey`, so it never reaches `bip32_sign_ecdsa` for a taproot input, and `AOBS-R17`
+    // refuses one that arrives already carrying `partial_sigs`. Remove either and a taproot input
+    // of ours comes back with an ECDSA signature, no key-path signature, and a passing assertion.
+    // The family is not recomputed here for the reason it is not recomputed anywhere else in this
+    // crate: `crate::psbt`'s structural walk classified it and it travels on the [`Accepted`].
     //
     // **And both are scoped to the inputs this call signs, where `AOBS-R17` is about every input.**
     // That is not the assertion falling short of the refusal: what this function promises is its own
@@ -113,15 +132,22 @@ pub fn sign(wallet: &Wallet, accepted: &Accepted) -> Psbt {
     // there is not a fact about anything said here. The wider rule is the validator's, asserted
     // where it lives — `psbt_tests.rs` on the input that is not ours, and §4's third fuzz invariant
     // on every plan.
-    for &index in &accepted.ours {
+    for &OurInput { index, script } in &accepted.ours {
         assert!(
             !crate::psbt::arrived_signed(&accepted.psbt.inputs[index]),
             "an input the validator accepted arrived already signed: {index}"
         );
         let input = &psbt.inputs[index];
+        let signature_is_where_it_belongs = match script {
+            InputScript::P2tr => input.tap_key_sig.is_some(),
+            InputScript::P2pkh | InputScript::P2shP2wpkh | InputScript::P2wpkh => {
+                !input.partial_sigs.is_empty()
+            }
+        };
         assert!(
-            !input.partial_sigs.is_empty() || input.tap_key_sig.is_some(),
-            "an input the validator found ours came back unsigned: {index}"
+            signature_is_where_it_belongs,
+            "an input the validator found ours came back with no signature in the field its \
+             family is signed from: {index}"
         );
     }
 
