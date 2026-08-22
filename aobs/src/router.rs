@@ -25,6 +25,7 @@ use aobs_core::ur::Class;
 
 use crate::confirm::Confirm;
 use crate::create::Create;
+use crate::import::Import;
 use crate::load::Load;
 use crate::outbound::Outbound;
 use crate::power;
@@ -77,6 +78,7 @@ impl Ending {
 pub struct Screens {
     pub create: Rc<Create>,
     pub confirm: Rc<Confirm>,
+    pub import: Rc<Import>,
     pub load: Rc<Load>,
     pub scan: Rc<Scan>,
     pub review: Rc<Review>,
@@ -95,6 +97,7 @@ pub fn wire(ui: &AppWindow, screens: Screens) -> Rc<Cell<Option<Ending>>> {
     let Screens {
         create,
         confirm,
+        import,
         load,
         scan,
         review,
@@ -127,11 +130,15 @@ pub fn wire(ui: &AppWindow, screens: Screens) -> Rc<Cell<Option<Ending>>> {
             // 04-screens.md §4's retype, from either side of it: the first visit and the
             // return from a marked position are the same destination, because the entry state
             // is kept and *nothing is destroyed*. `done` is `⏎`, which core answers.
-            Intent::CreateConfirm => confirm.begin(&ui, &create),
+            Intent::CreateConfirm => confirm.begin(&ui),
             Intent::CreateDone => confirm.done(&ui),
 
-            // §1's second start entry. Its screen arrives in a later slice.
-            Intent::Import => ui.set_screen(Screen::Unbuilt),
+            // 04-screens.md §6's twenty-four slots, from either side: the first visit and the
+            // return from an Escape are the same destination, because the words already typed
+            // are kept. `done` is `⏎`, and what it means is core's — the checksum covers the
+            // phrase as a whole and is evaluated there, so nothing here reads a word.
+            Intent::Import => import.begin(&ui),
+            Intent::ImportDone => import.done(&ui),
 
             // 04-screens.md §10's *scan first, then the words*: the encrypted backup's header
             // is readable before any key derivation, so a payload that is not ours dies in

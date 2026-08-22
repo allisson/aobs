@@ -32,8 +32,8 @@ use aobs_core::secret::Passphrase;
 use slint::ComponentHandle;
 use zeroize::Zeroizing;
 
-use crate::create::Create;
 use crate::identity;
+use crate::phrase::Phrase;
 use crate::session::Session;
 use crate::AppWindow;
 
@@ -166,7 +166,7 @@ pub struct Load {
     /// because signing needs coins and a rehearser has none there.
     network: Cell<Network>,
     /// Where the phrase is, behind a closure that never hands it out.
-    create: Rc<Create>,
+    phrase: Rc<Phrase>,
     /// Where the wallet goes, once.
     session: Rc<Session>,
 }
@@ -176,11 +176,11 @@ pub struct Load {
 /// They bypass the router for the reason a die face and a letter of the retype do (standing rule
 /// 4): a character of the passphrase and a network selection are values, and the router's whole
 /// claim is that no arm of it inspects one.
-pub fn wire(ui: &AppWindow, create: Rc<Create>, session: Rc<Session>) -> Rc<Load> {
+pub fn wire(ui: &AppWindow, phrase: Rc<Phrase>, session: Rc<Session>) -> Rc<Load> {
     let load = Rc::new(Load {
         typed: RefCell::new(Typed::new()),
         network: Cell::new(Network::Mainnet),
-        create,
+        phrase,
         session,
     });
 
@@ -265,8 +265,8 @@ impl Load {
             // can take.
             let passphrase = Passphrase::new(typed.as_str())
                 .expect("128 printable ASCII bytes are their own NFKD form");
-            self.create
-                .with_phrase(|phrase| Wallet::load(phrase, &passphrase, network))
+            self.phrase
+                .with(|phrase| Wallet::load(phrase, &passphrase, network))
         };
         let Some(wallet) = wallet else {
             return;

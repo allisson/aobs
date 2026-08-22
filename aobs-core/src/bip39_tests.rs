@@ -11,6 +11,7 @@ use proptest::prelude::*;
 use unicode_normalization::UnicodeNormalization;
 
 use super::*;
+use crate::entry::Action;
 
 /// The digest BIP-39 itself publishes for `english.txt`, over the 2048 words each followed by
 /// a newline. A word mangled by an edit to `english.rs` fails here rather than deriving
@@ -175,6 +176,85 @@ fn two_swapped_words_fail_the_checksum() {
         Mnemonic::from_indices(&indices).err(),
         Some(Error::Checksum)
     );
+}
+
+// --- The import screen's phrase (`04-screens.md` §6) -----------------------------
+
+/// Type `sentence` into an import entry, one word and one space at a time.
+fn type_in(sentence: &str) -> Entry {
+    let mut entry = import();
+    for word in sentence.split_whitespace() {
+        for letter in word.chars() {
+            entry.apply(Action::Char(letter));
+        }
+        entry.apply(Action::Commit);
+    }
+    entry
+}
+
+#[test]
+fn a_phrase_typed_in_is_the_phrase_it_encodes() {
+    // Both ends of the accepted range, from the published table, through the reducer the
+    // screen drives rather than through indices assembled by a test.
+    for (entropy, sentence, _) in [ENGLISH[0], ENGLISH[8]] {
+        let entry = type_in(sentence);
+        let mnemonic = Mnemonic::from_entry(&entry).expect("a published vector");
+        assert_eq!(mnemonic.word_count(), sentence.split_whitespace().count());
+        assert_eq!(mnemonic.entropy().as_bytes(), unhex(entropy));
+    }
+}
+
+#[test]
+fn the_checksum_is_the_last_thing_evaluated_and_only_at_the_end() {
+    // Eleven words of a valid twelve-word phrase carry no verdict at all: there is nothing
+    // for a checksum to cover, and `can_finish` is what says so.
+    let entry = type_in(
+        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon",
+    );
+    assert!(!entry.can_finish());
+    assert_eq!(
+        Mnemonic::from_entry(&entry).err(),
+        Some(Error::WordCount(11))
+    );
+}
+
+#[test]
+fn real_words_in_the_wrong_place_fail_the_checksum_and_the_words_stay() {
+    // An off-list word is unrepresentable — the reducer refuses the keystroke — so this is
+    // the *only* thing a failed checksum can mean: real words in the wrong order. The
+    // rejection cannot name one, and the error carries no position to name it with.
+    let entry = type_in("about abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon");
+    assert!(entry.can_finish());
+    assert_eq!(Mnemonic::from_entry(&entry).err(), Some(Error::Checksum));
+
+    // `04-screens.md` §6: the words stay. They are the user's only instrument for finding
+    // their own mistake, and nothing above could have cleared one.
+    assert_eq!(entry.word(0), Some("about"));
+    assert_eq!(entry.word(11), Some("abandon"));
+    assert_eq!(entry.settled(), 12);
+}
+
+#[test]
+fn a_run_with_a_hole_in_it_is_no_word_count_at_all() {
+    let mut entry = import();
+    entry.apply(Action::Goto(5));
+    for letter in "abandon".chars() {
+        entry.apply(Action::Char(letter));
+    }
+    entry.apply(Action::Commit);
+    assert_eq!(
+        Mnemonic::from_entry(&entry).err(),
+        Some(Error::WordCount(1))
+    );
+}
+
+#[test]
+fn the_import_entry_is_the_english_list_at_the_five_lengths() {
+    let entry = import();
+    assert_eq!(entry.slots(), MAX_WORDS);
+    // Twenty-four slots and Done at twelve is the whole of *inferred, not declared*.
+    assert!(!type_in("abandon abandon abandon").can_finish());
+    assert!(type_in(ENGLISH[0].1).can_finish());
 }
 
 #[test]

@@ -334,3 +334,25 @@ On **signet**, with a wallet loaded from a mnemonic both sides know:
       not as a re-selected slot: the next backspace deletes a letter of it.
 - [ ] The ghosted completion after the caret is legible but plainly dimmer than the letters
       typed, at the settled type size on a real panel.
+
+### Seed import ([#75](https://github.com/allisson/aobs/issues/75))
+
+- [ ] At 800×600 the import screen draws the same **24 slots in two columns of 12**, the banner
+      above and the Done row below, with nothing clipped. It is built from the same heights the
+      retype is, so `AOBS_WORDS` covers the sum — what this row catches is the banner's live
+      second line wrapping to a third, and the Done row's longer note doing the same.
+- [ ] **Before a key is pressed, the screen names English and the US keyboard.** This is the
+      only warning a person gets, and the failure it warns about is silent from the other side:
+      a French or Spanish mnemonic simply will not type.
+- [ ] **Try to type a non-English word.** `café` stops at `caf` and every keystroke after it is
+      named as ignored — the wall, on a real keyboard, with the legends the machine actually has.
+- [ ] **Type twelve words.** Done unlocks; the twelve slots below stay empty and visibly so. Type
+      a thirteenth and Done locks again, stating the five lengths.
+- [ ] **Type a real phrase with two words swapped.** The screen says the check covers the phrase
+      as a whole and cannot say which word is wrong, **every word stays on screen**, and the
+      cursor is where it was left. Correcting the two words and pressing Enter reaches the load
+      screen.
+- [ ] **Walk to slot 20 with eleven words typed and settle one there.** Done stays locked at
+      twelve settled slots — the hole is refused, and the word at slot 20 is still there.
+- [ ] *Restart or shut down* is reachable from the import screen at every moment, and it is the
+      only thing on the appliance that clears the words.

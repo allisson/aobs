@@ -7,7 +7,9 @@
 //! of [`format`] ([#71](https://github.com/allisson/aobs/issues/71)), whose amount half arrived
 //! with the writing rules ([#100](https://github.com/allisson/aobs/issues/100)) — and
 //! [`entry`], the word-entry component the retype and three later screens drive
-//! ([#73](https://github.com/allisson/aobs/issues/73)), and [`psbt`], the whole rejection
+//! ([#73](https://github.com/allisson/aobs/issues/73), whose inferred length and
+//! phrase-shaped run arrived with seed import,
+//! [#75](https://github.com/allisson/aobs/issues/75)), and [`psbt`], the whole rejection
 //! policy: its structural half first ([#79](https://github.com/allisson/aobs/issues/79)), then
 //! the derivation check and the review model those numbers are written from
 //! ([#80](https://github.com/allisson/aobs/issues/80)), and [`ur`], the QR boundary inbound —

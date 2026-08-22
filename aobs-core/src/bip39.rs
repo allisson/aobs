@@ -25,7 +25,7 @@ use core::fmt;
 use bitcoin::hashes::{hmac::Hmac, hmac::HmacEngine, sha256, sha512, Hash, HashEngine};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
-use crate::entry::Entry;
+use crate::entry::{self, Entry};
 use crate::secret::{redacted, Entropy, Passphrase, Seed};
 
 pub use english::WORDS;
@@ -48,6 +48,21 @@ const MAX_SENTENCE: usize = MAX_WORDS * 8 + (MAX_WORDS - 1);
 
 /// PBKDF2 iterations, fixed by BIP-39.
 const ITERATIONS: usize = 2048;
+
+/// The import screen's entry state: twenty-four slots over the English list, Done at any of
+/// [`LENGTHS`] (`04-screens.md` §6, `02-core.md` §4).
+///
+/// Here rather than in the shell for the reason [`Mnemonic::type_back`] is: the three
+/// constants an import screen would otherwise have to assemble — the wordlist, the slot count
+/// and the accepted lengths — are all facts about BIP-39, and a screen that picked them would
+/// be a second place they are stated.
+#[must_use]
+pub fn import() -> Entry {
+    // 24 is `MAX_SLOTS`, every length is in 1..=24 and the English list is 2048 ASCII words,
+    // so the constructor's conditions are all facts about this module. `AOBS-E04` covers
+    // being wrong about that.
+    Entry::inferred(&WORDS, MAX_WORDS, &LENGTHS).expect("the English list drives entry")
+}
 
 /// What a mnemonic can fail to be.
 ///
@@ -161,6 +176,27 @@ impl Mnemonic {
         let mut bytes = Zeroizing::new([0u8; Entropy::CAPACITY]);
         bytes[..entropy_len].copy_from_slice(&packed[..entropy_len]);
         Entropy::prefix(*bytes, entropy_len)
+    }
+
+    /// The phrase an import screen has typed (`04-screens.md` §6).
+    ///
+    /// **The checksum is evaluated here and nowhere earlier**, which is `02-core.md` §4's
+    /// behaviour 4 as a call site rather than as a promise: [`Entry`] validates no phrase, so
+    /// nothing before this point could have said the words are in the wrong order — and
+    /// [`Error::Checksum`] cannot say *which* word it is.
+    ///
+    /// It takes the entry by reference and returns a new value, which is the other half of
+    /// §4's *a failed checksum keeps the words*: there is nothing here that could clear a
+    /// slot, so the diff between paper and screen survives the rejection by construction.
+    pub fn from_entry(entry: &Entry) -> Result<Self, Error> {
+        let mut indices = Zeroizing::new([0u16; entry::MAX_SLOTS]);
+        // A run with a hole in it is not a phrase of any length, and `WordCount` is the
+        // error that says so. Unreachable from the screen — Done is `can_finish`, which
+        // refuses the same shape — and reachable from a caller that never asked.
+        let Some(count) = entry.indices(&mut indices) else {
+            return Err(Error::WordCount(entry.settled()));
+        };
+        Self::from_indices(&indices[..count])
     }
 
     /// The retype, as an [`Entry`] that already knows the answer (`04-screens.md` §4).

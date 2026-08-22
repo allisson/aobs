@@ -34,6 +34,10 @@ export enum Intent {
     create-confirm,
     create-done,
     import,
+    // 04-screens.md §6's `⏎`. Its own name rather than a second `create-done`, because the
+    // frame names what the user asked for and these are two different asks: one finishes a
+    // retype against an answer we hold, the other finishes a phrase nothing has checked yet.
+    import-done,
     restore,
     // 04-screens.md §5's one confirm. Which of the two things it is — *continue without
     // passphrase* or *use this passphrase* — is stated by the label the user pressed, and is
@@ -77,6 +81,8 @@ export enum Screen {
     dice,
     words,
     retype,
+    // §6's twenty-four slots, driven by the same reducer the retype is and knowing no answer.
+    import,
     load,
     identity,
     scan,
@@ -825,6 +831,82 @@ component RetypeScreen inherits Rectangle {
             note: root.done
                 ? "Press Enter to finish."
                 : root.settled + " of 24 typed.";
+            available: root.done;
+            current: root.selected == 0;
+        }
+    }
+}
+
+// 04-screens.md §6. **Seed import: a fixed 24-slot grid, and no answer anywhere.**
+//
+// The same reducer, the same grid and the same `SlotRow` as the retype above — and one
+// difference that changes everything the screen can say. There is nothing here to compare a
+// word against, so the only verdict is BIP-39's checksum over the phrase as a whole, and it
+// cannot name the wrong word. A device that pointed at one would be lying.
+//
+// **Twenty-four slots are drawn for a twelve-word phrase.** That is the named cost of
+// inferring the length rather than asking for it (02-core.md §4, behaviour 6), and it buys
+// the thing a length menu cannot: the accepted lengths are self-evident at a glance, and
+// there is no wrong answer for the user to give before they start.
+//
+// The heights are §3's, so the sum `AOBS_WORDS` already prints covers this screen too: the
+// live line sits *inside* the banner rather than below it, for exactly that reason.
+component ImportScreen inherits Rectangle {
+    in property <[Slot]> left;
+    in property <[Slot]> right;
+    in property <string> note;
+    in property <string> progress;
+    in property <bool> done;
+    in property <int> selected;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: Metrics.words-gap;
+
+        VerticalLayout {
+            height: Metrics.words-banner;
+            spacing: 6px;
+
+            Text {
+                text: "Type your seed phrase.";
+                color: Palette.ink;
+                font-size: 20px;
+                font-weight: 600;
+            }
+
+            // The live line. Before the user starts it names **English and the keymap**,
+            // which §6 requires of this screen by name — a non-English mnemonic fails as a
+            // wall rather than a message, so the wall is announced. `import.rs` writes it.
+            Text {
+                text: root.note;
+                color: Palette.ink-mid;
+                font-size: 13px;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 28px;
+
+            VerticalLayout {
+                for slot in root.left: SlotRow {
+                    slot: slot;
+                }
+            }
+
+            VerticalLayout {
+                for slot in root.right: SlotRow {
+                    slot: slot;
+                }
+            }
+        }
+
+        // Locked, this states the five accepted lengths and how many words are in — which is
+        // the whole of what §6 reports as progress. There is no bar and no tick for a word
+        // that matched: nothing here knows whether a word is the right one.
+        Choice {
+            height: Metrics.words-continue;
+            label: "Done";
+            note: root.progress;
             available: root.done;
             current: root.selected == 0;
         }
@@ -2066,6 +2148,15 @@ export component AppWindow inherits Window {
     in property <int> retype-settled;
     in property <bool> retype-done;
 
+    // 04-screens.md §6. `progress` is a whole sentence rather than a count, because the
+    // accepted lengths it states are core's `LENGTHS` and `import.rs` reads them from there —
+    // a number formatted here would be a second place they are written down.
+    in property <[Slot]> import-left;
+    in property <[Slot]> import-right;
+    in property <string> import-note;
+    in property <string> import-progress;
+    in property <bool> import-done;
+
     // The load screen (04-screens.md §5). `passphrase` arrives already rendered — delimited,
     // and with every space drawn as a mark — because the rendering is §5.1's mitigation and
     // belongs in one testable place, not in a binding here. `network-testnet` is the selector's
@@ -2180,6 +2271,12 @@ export component AppWindow inherits Window {
     callback typed(string);
     callback entry-back();
     callback entry-step(int);
+    // §6's own three, rather than the retype's with a screen test inside them: the two screens
+    // hold two different entries, and a callback that had to ask which one is live would be
+    // the branch this shell exists not to have.
+    callback import-typed(string);
+    callback import-back();
+    callback import-step(int);
     // The load screen's three, for the same reason: a character of the passphrase is a byte the
     // user typed, and **a network selection is a value too** — `04-screens.md` §5.2's selector is
     // a parameter of derivation, not a destination, so it never crosses the router either.
@@ -2205,6 +2302,8 @@ export component AppWindow inherits Window {
         : root.screen == Screen.dice ? 1
         : root.screen == Screen.words ? 1
         : root.screen == Screen.retype ? 1
+        // §6's Done, and nothing else: *discard* is the row this frame appends to every ring.
+        : root.screen == Screen.import ? 1
         // §5.2's two-state selector, then §5.1's confirm.
         : root.screen == Screen.load ? 3
         // §7's four actions, and a fifth once a transaction has been signed. The *re-display the
@@ -2289,6 +2388,11 @@ export component AppWindow inherits Window {
         if (root.screen == Screen.retype && row == 0) {
             return root.retype-done;
         }
+        // §6's Done, unlocked by core's `can_finish` over its own five accepted lengths.
+        // **The length is inferred, not declared**: this row is the whole of what says so.
+        if (root.screen == Screen.import && row == 0) {
+            return root.import-done;
+        }
         // §7: *sign a transaction* and *verify a receive address* both need the camera, and they
         // are **adjacent** — which is what forced the third link into `move` below.
         if (root.screen == Screen.identity && (row == 1 || row == 2)) {
@@ -2341,6 +2445,8 @@ export component AppWindow inherits Window {
             root.intent(Intent.create-confirm);
         } else if (root.screen == Screen.retype) {
             root.intent(Intent.create-done);
+        } else if (root.screen == Screen.import) {
+            root.intent(Intent.import-done);
         } else if (root.screen == Screen.load) {
             // Rows 0 and 1 are §5.2's selector and they carry a *value*, so they go through the
             // value callback the dice and the retype use rather than through an intent (standing
@@ -2424,6 +2530,19 @@ export component AppWindow inherits Window {
                 root.entry-back();
                 return EventResult.accept;
             }
+            // §6's screen is the same two correction keys over its own entry.
+            if (root.screen == Screen.import && event.text == Key.LeftArrow) {
+                root.import-step(-1);
+                return EventResult.accept;
+            }
+            if (root.screen == Screen.import && event.text == Key.RightArrow) {
+                root.import-step(1);
+                return EventResult.accept;
+            }
+            if (root.screen == Screen.import && event.text == Key.Backspace) {
+                root.import-back();
+                return EventResult.accept;
+            }
             // The passphrase field's one correction key (04-screens.md §5.1). Read before the
             // ring's for the reason the retype's are: Backspace means *character* here and means
             // nothing to the ring, while Up/Down and Enter below keep working on this screen
@@ -2467,6 +2586,12 @@ export component AppWindow inherits Window {
             // land is named from the outcome core returns (02-core.md §4, behaviour 3).
             if (root.screen == Screen.retype) {
                 root.typed(event.text);
+                return EventResult.accept;
+            }
+            // And everything else on the import screen is a letter or the space bar, handed
+            // over the same way and for the same reason: core owns the wordlist.
+            if (root.screen == Screen.import) {
+                root.import-typed(event.text);
                 return EventResult.accept;
             }
             // And everything else on the load screen is a passphrase character, handed over as
@@ -2558,6 +2683,15 @@ export component AppWindow inherits Window {
                         note: root.retype-note;
                         settled: root.retype-settled;
                         done: root.retype-done;
+                        selected: root.selected;
+                    }
+
+                    if root.screen == Screen.import: ImportScreen {
+                        left: root.import-left;
+                        right: root.import-right;
+                        note: root.import-note;
+                        progress: root.import-progress;
+                        done: root.import-done;
                         selected: root.selected;
                     }
 

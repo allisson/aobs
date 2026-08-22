@@ -438,6 +438,117 @@ fn a_wordlist_or_a_slot_count_the_buffers_cannot_hold_is_refused() {
 
 // --- What the state says about itself --------------------------------------------
 
+// --- 6. The length is inferred, not declared -------------------------------------
+
+/// The import screen's own entry: twenty-four slots, Done at any of the five lengths.
+fn inferred() -> Entry {
+    crate::bip39::import()
+}
+
+/// Commit `count` copies of `abandon`, which is a word in every accepted-length vector.
+fn abandons(entry: &mut Entry, count: usize) {
+    for _ in 0..count {
+        assert_eq!(word(entry, "aban"), Outcome::Accepted);
+    }
+}
+
+#[test]
+fn twenty_four_slots_are_drawn_for_a_twelve_word_phrase() {
+    // The named cost of inferring the length (`02-core.md` §4, behaviour 6): the array is
+    // always 24, which is what makes the accepted lengths self-evident at a glance.
+    let entry = inferred();
+    assert_eq!(entry.slots(), 24);
+    assert_eq!(entry.settled(), 0);
+    assert!(!entry.can_finish());
+}
+
+#[test]
+fn done_unlocks_at_twelve_and_locks_again_at_thirteen() {
+    let mut entry = inferred();
+
+    abandons(&mut entry, 11);
+    assert!(!entry.can_finish());
+
+    abandons(&mut entry, 1);
+    assert_eq!(entry.settled(), 12);
+    assert!(entry.can_finish());
+
+    abandons(&mut entry, 1);
+    assert!(!entry.can_finish());
+    abandons(&mut entry, 1);
+    assert!(!entry.can_finish());
+    abandons(&mut entry, 1);
+    assert_eq!(entry.settled(), 15);
+    assert!(entry.can_finish());
+}
+
+#[test]
+fn done_unlocks_at_every_accepted_length_and_at_no_other_count() {
+    let mut entry = inferred();
+    for count in 1..=24 {
+        abandons(&mut entry, 1);
+        assert_eq!(
+            entry.can_finish(),
+            crate::bip39::LENGTHS.contains(&count),
+            "{count} words typed"
+        );
+    }
+}
+
+#[test]
+fn the_twelfth_word_does_not_need_a_space_after_it() {
+    let mut entry = inferred();
+    abandons(&mut entry, 11);
+    letters(&mut entry, "aban");
+    assert!(entry.can_finish());
+    assert_eq!(entry.apply(Action::Finish), Outcome::Complete);
+    assert_eq!(entry.settled(), 12);
+    // And the twelve slots past it are still empty, which is what *inferred* means as state.
+    assert_eq!(entry.word(11), Some("abandon"));
+    assert_eq!(entry.word(12), None);
+}
+
+#[test]
+fn a_word_settled_past_an_empty_slot_is_not_a_phrase() {
+    // Twenty-four slots are always drawn, so the arrow keys reach slot 20 with eleven words
+    // typed. Twelve settled slots with a hole at eleven is a count Done accepts and a phrase
+    // nobody has typed — the hole is what this refuses, not the count.
+    let mut entry = inferred();
+    abandons(&mut entry, 11);
+    assert_eq!(entry.apply(Action::Goto(20)), Outcome::Accepted);
+    assert_eq!(word(&mut entry, "art"), Outcome::Accepted);
+
+    assert_eq!(entry.settled(), 12);
+    assert!(!entry.can_finish());
+    assert_eq!(entry.apply(Action::Finish), Outcome::Ignored);
+    assert_eq!(entry.indices(&mut [0u16; MAX_SLOTS]), None);
+    // And it destroyed nothing on the way past.
+    assert_eq!(entry.word(20), Some("art"));
+}
+
+#[test]
+fn the_indices_are_the_words_that_landed() {
+    let mut entry = inferred();
+    abandons(&mut entry, 11);
+    assert_eq!(word(&mut entry, "abou"), Outcome::Accepted);
+
+    let mut out = [0u16; MAX_SLOTS];
+    assert_eq!(entry.indices(&mut out), Some(12));
+    // `abandon` is index 0 and `about` is index 3 — BIP-39's own all-zero 12-word vector.
+    assert_eq!(out[..12], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3]);
+}
+
+#[test]
+fn a_length_set_no_array_could_reach_is_refused() {
+    assert!(Entry::inferred(&TINY, 3, &[]).is_none());
+    assert!(Entry::inferred(&TINY, 3, &[4]).is_none());
+    assert!(Entry::inferred(&TINY, 3, &[0]).is_none());
+    assert!(Entry::inferred(&TINY, 0, &[1]).is_none());
+    // And what it does accept still refuses everything `open` does.
+    assert!(Entry::inferred(&[], 3, &[2]).is_none());
+    assert!(Entry::inferred(&TINY, 3, &[2, 3]).is_some());
+}
+
 #[test]
 fn debug_and_display_are_redacted() {
     let entry = retype();
