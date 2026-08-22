@@ -14,6 +14,14 @@
 //! shell is forbidden (standing rule 4) — and putting it here puts the payload-class guarantee
 //! inside the 98% bar instead of in the untested layer.
 //!
+//! **The UR message is a CBOR byte string wrapping the payload** (§1), and [`unwrap`] is the
+//! only place that is read. `ur` 0.5.2 does no CBOR at all, so the registry's layer is ours to
+//! add on both sides — [`crate::outbound`] calls [`wrap`], this module calls [`unwrap`], and
+//! [#112](https://github.com/allisson/aobs/issues/112) is why they are one pair rather than a
+//! convention each half remembered separately. It applies to every UR the crate reads, because
+//! it is a property of the **type** and not of the screen: `ur:bytes` cannot mean CBOR at the
+//! signing prompt and raw at the restore prompt.
+//!
 //! **Two of the three classes never touch the fountain decoder at all.** [`Class::Address`]
 //! because a coordinator emits a receive QR as plain text or a BIP-21 URI and never as a UR, and
 //! [`Class::Backup`] because it is single-part by rule (§7). That is the second and third path
@@ -71,6 +79,72 @@ const _: () = assert!(PART_BUDGET == 1_024);
 
 /// §2's bound on the address class: ≤ 256 bytes of printable ASCII, single-part plain text.
 pub const MAX_ADDRESS_LEN: usize = 256;
+
+/// §1's message form: the payload wrapped in a **CBOR definite-length byte string**.
+///
+/// `crypto-psbt`, `psbt` and `bytes` all define their message exactly this way, and both
+/// coordinators in scope implement it in both directions — the evidence is
+/// `docs/research/02-qr-transport-format.md` §7. The wrapper is a property of the **UR type**
+/// and never of the screen, so it lives here, beside the type check, and [`crate::outbound`]
+/// calls the same pair.
+///
+/// The header is minimal, which is what BCR-2020-006's *deterministic length* asks for and what
+/// its own test vector shows: 167 bytes is `58 A7`, not `59 00 A7`.
+///
+/// # Panics
+///
+/// On a payload of 2^32 bytes or more, which is the widest length BCR-2020-006 admits and four
+/// orders of magnitude past anything this appliance can hold — [`MAX_MESSAGE_LEN`] bounds what
+/// arrives at 64 KiB, and what we emit is one signed transaction derived from it.
+pub(crate) fn wrap(payload: &[u8]) -> Vec<u8> {
+    let len = payload.len();
+    let mut message = Vec::with_capacity(len + 5);
+    match len {
+        0..=0x17 => message.push(0x40 | u8::try_from(len).expect("under 0x18")),
+        0x18..=0xff => message.extend_from_slice(&[0x58, u8::try_from(len).expect("under 0x100")]),
+        0x100..=0xffff => {
+            message.push(0x59);
+            message.extend_from_slice(&u16::try_from(len).expect("under 0x10000").to_be_bytes());
+        }
+        _ => {
+            message.push(0x5a);
+            message.extend_from_slice(&u32::try_from(len).expect("under 2^32").to_be_bytes());
+        }
+    }
+    message.extend_from_slice(payload);
+    message
+}
+
+/// The payload inside a registry-form message, or `None` if the message is not one.
+///
+/// **Strict about shape, permissive about width.** One CBOR byte string and *nothing else*: the
+/// declared length must be exactly the bytes that follow, so trailing data is a refusal rather
+/// than something silently ignored, and the indefinite-length form (`0x5f`) — which the registry
+/// forbids and which would let a payload arrive in chunks — is not a byte string we read. But a
+/// non-minimal header is accepted, on [`read_header`]'s reasoning run the other way: the payload
+/// it yields is byte-identical, so rejecting it would refuse an honest coordinator to enforce a
+/// property nothing downstream depends on.
+pub(crate) fn unwrap(message: &[u8]) -> Option<&[u8]> {
+    let (&head, rest) = message.split_first()?;
+    let width = match head {
+        // A byte string whose length is in the head itself.
+        0x40..=0x57 => {
+            let len = usize::from(head - 0x40);
+            return (rest.len() == len).then_some(rest);
+        }
+        0x58 => 1,
+        0x59 => 2,
+        0x5a => 4,
+        0x5b => 8,
+        _ => return None,
+    };
+    let declared = rest.get(..width)?;
+    let len = declared
+        .iter()
+        .fold(0u64, |value, &byte| (value << 8) | u64::from(byte));
+    let payload = &rest[width..];
+    (u64::try_from(payload.len()).ok()? == len).then_some(payload)
+}
 
 /// The CBOR overhead of a part around its fragment: the five-element array header, four
 /// integers at their `u32` widest, and a byte-string header.
@@ -259,8 +333,15 @@ pub enum Discard {
     /// claim, and it is dropped on the decimal in the URI path.
     SequenceCountTooLarge,
     /// §3's first bound — a declared or delivered `messageLen` outside
-    /// `1..=`[`MAX_MESSAGE_LEN`].
+    /// `1..=`[`MAX_MESSAGE_LEN`], or a registry-form message whose payload is empty.
     MessageTooLarge,
+    /// §1's message form — the UR decoded, and its message is not the CBOR byte string the
+    /// registry defines for this type.
+    ///
+    /// **Not a wrong-class refusal**, because the type string was right: this is a stream that
+    /// announced itself correctly and then carried something else, which from the screen's side
+    /// is indistinguishable from a bad scan and is treated as one.
+    NotRegistryForm,
     /// A UR of an accepted type that did not decode into a part, or a part the dependency
     /// refused.
     NotAPart,
@@ -432,17 +513,33 @@ impl Scanner {
 
     /// A UR with no `seq` component — §6's *"an animation of length one that happens not to
     /// move"*, and the only form the backup class accepts.
-    fn single_part(&mut self, symbol: &str, wrap: fn(Vec<u8>) -> Payload) -> Outcome {
+    fn single_part(&mut self, symbol: &str, class_of: fn(Vec<u8>) -> Payload) -> Outcome {
         match ::ur::ur::decode(symbol) {
             Ok((Kind::SinglePart, message)) => {
                 if message.is_empty() || message.len() > MAX_MESSAGE_LEN {
                     return Outcome::Discarded(Discard::MessageTooLarge);
                 }
-                self.done = true;
-                Outcome::Complete(wrap(message))
+                self.complete(&message, class_of)
             }
             _ => Outcome::Discarded(Discard::NotAPart),
         }
+    }
+
+    /// §1's message form, taken off a completed message — the last thing that happens on either
+    /// path, and the only place a [`Payload`] is built.
+    ///
+    /// **Both paths land here**, which is what makes the registry form one rule rather than two
+    /// that could drift: a single-part `ur:bytes` at the restore prompt and a 24-part
+    /// `ur:crypto-psbt` at the signing prompt are unwrapped by the same call.
+    fn complete(&mut self, message: &[u8], class_of: fn(Vec<u8>) -> Payload) -> Outcome {
+        let Some(payload) = unwrap(message) else {
+            return Outcome::Discarded(Discard::NotRegistryForm);
+        };
+        if payload.is_empty() {
+            return Outcome::Discarded(Discard::MessageTooLarge);
+        }
+        self.done = true;
+        Outcome::Complete(class_of(payload.to_owned()))
     }
 
     /// One fountain part, through all four of §3's bounds and §4's identity pin.
@@ -497,18 +594,18 @@ impl Scanner {
             // is the same field this scan bounded — see [`read_header`] on why the two readers
             // cannot disagree about its value.
             //
-            // **A stream that completes into something the dependency refuses — nonzero
-            // padding, or a message that fails its own CRC-32 — leaves this scanner unable to
-            // complete ever again**, because the decoder stays `complete()` and its message
-            // stays bad. That is a dead end the screen cannot see: it stays live and every
-            // further symbol is discarded. No honest encoder can produce it, the remedy is
-            // cancel and re-enter, and inventing a reset here would be a decision
-            // `03-transport.md` §4 does not make — it is recorded rather than papered over.
+            // **A stream that completes into something we will not take — nonzero padding or a
+            // failed CRC-32, which the dependency refuses, and now also a message that is not
+            // §1's registry form — leaves this scanner unable to complete ever again**, because
+            // the decoder stays `complete()` and its message stays the same one. That is a dead
+            // end the screen cannot see: it stays live and every further symbol is discarded. No
+            // honest encoder can produce either, the remedy is cancel and re-enter, and
+            // inventing a reset here would be a decision `03-transport.md` §4 does not make — it
+            // is recorded rather than papered over.
             let Ok(Some(message)) = self.decoder.message() else {
                 return Outcome::Discarded(Discard::NotAPart);
             };
-            self.done = true;
-            return Outcome::Complete(Payload::Transaction(message));
+            return self.complete(&message, Payload::Transaction);
         }
 
         Outcome::Received {
@@ -552,8 +649,17 @@ fn parse_indices(indices: &str) -> Option<(usize, usize)> {
 /// eight bytes big-endian — so a non-minimal or eight-byte encoding is read identically by both.
 /// That is what lets the bound checked on the declared `messageLen` stand for the delivered
 /// message without a second check downstream.
+///
+/// **The lowercasing is the dependency's own first step**, and leaving it out was a defect
+/// ([#112](https://github.com/allisson/aobs/issues/112)): `ur::ur::decode_with_indices` calls
+/// `to_ascii_lowercase` before it looks at anything, and bytewords is a lowercase alphabet — so
+/// without it every part of an **uppercase multi-part animation** failed here and was reported as
+/// a bad scan. §1 requires *we* emit uppercase and Specter emits it too
+/// (`qr-code.html`: `this.encoder.nextPart().toUpperCase()`), which made this the ordinary case
+/// rather than an edge one. Two readers of one field is only safe if they cannot disagree, and
+/// case was the one way they could.
 fn read_header(payload: &str, sequence: usize, sequence_count: usize) -> Option<Identity> {
-    let cbor = ::ur::bytewords::decode(payload, Style::Minimal).ok()?;
+    let cbor = ::ur::bytewords::decode(&payload.to_ascii_lowercase(), Style::Minimal).ok()?;
     let mut at = 0usize;
 
     if *cbor.first()? != 0x85 {

@@ -20,7 +20,9 @@ use super::{
 
 use proptest::prelude::*;
 
-use crate::corpus::{checksum_of, part, raw_part, single, stream, transport_message as message};
+use crate::corpus::{
+    checksum_of, part, raw_part, single, stream, transport_message, transport_payload as message,
+};
 
 /// Feed a whole animation and hand back the last outcome.
 fn feed(scanner: &mut Scanner, symbols: &[String]) -> Outcome {
@@ -178,7 +180,7 @@ fn the_address_prompt_accepts_the_length_bound_exactly() {
 
 #[test]
 fn the_restore_prompt_accepts_single_part_bytes_only() {
-    let backup = message(67);
+    let backup = transport_message(67);
     let mut scanner = Scanner::new(Class::Backup);
     assert_eq!(
         scanner.receive(&single("bytes", &backup)),
@@ -790,6 +792,149 @@ fn the_widest_integer_encoding_is_read_rather_than_refused() {
         scanner.receive(&raw_part("1-2", &cbor)),
         Outcome::Discarded(Discard::NotAPart)
     );
+}
+
+// --- §1: the registry's message form -----------------------------------------------------
+
+/// **The one fixture in the transport tests nobody here wrote.** BCR-2020-006's own published
+/// `psbt` example: a 167-byte PSBT, its CBOR (`58 A7 …`) and the UR string it produces, all three
+/// printed in the specification.
+///
+/// Every other transport test in this file builds a stream and reads it back, which holds
+/// whichever convention we picked — that symmetry is exactly why nothing in the tree could catch
+/// [#112](https://github.com/allisson/aobs/issues/112). This one starts from a string the
+/// registry published and asserts we get its PSBT out, so it fails if the wrapper is ever taken
+/// back off.
+const BCR_2020_006_PSBT_UR: &str = "ur:psbt/hdosjojkidjyzmadaenyaoaeaeaeaohdvsknclrejnpebncnrnmnjojofejzeojlkerdonspkpkkdkykfelokgprpyutkpaeaeaeaeaezmzmzmzmlslgaaditiwpihbkispkfgrkbdaslewdfycprtjsprsgksecdratkkhktikewdcaadaeaeaeaezmzmzmzmaojopkwtayaeaeaeaecmaebbtphhdnjstiambdassoloimwmlyhygdnlcatnbggtaevyykahaeaeaeaecmaebbaeplptoevwwtyakoonlourgofgvsjydpcaltaemyaeaeaeaeaeaeaeaeaebkgdcarh";
+
+/// The same document's PSBT, hex as the specification prints it.
+const BCR_2020_006_PSBT_HEX: &str = "70736274ff01009a020000000258e87a21b56daf0c23be8e7070456c336f7cbaa5c8757924f545887bb2abdd750000000000ffffffff838d0427d0ec650a68aa46bb0b098aea4422c071b2ca78352a077959d07cea1d0100000000ffffffff0270aaf00800000000160014d85c2b71d0060b09c9886aeb815e50991dda124d00e1f5050000000016001400aea9a2e5f0f876a588df5546e8742d1d87008f000000000000000000";
+
+fn bcr_2020_006_psbt() -> Vec<u8> {
+    (0..BCR_2020_006_PSBT_HEX.len() / 2)
+        .map(|i| u8::from_str_radix(&BCR_2020_006_PSBT_HEX[i * 2..i * 2 + 2], 16).expect("hex"))
+        .collect()
+}
+
+#[test]
+fn the_registrys_own_published_ur_decodes_to_the_psbt_it_publishes() {
+    let mut scanner = Scanner::new(Class::Psbt);
+    assert_eq!(
+        scanner.receive(BCR_2020_006_PSBT_UR),
+        Outcome::Complete(Payload::Transaction(bcr_2020_006_psbt()))
+    );
+}
+
+#[test]
+fn the_registrys_own_message_is_the_bytes_wrapped_and_nothing_else() {
+    let psbt = bcr_2020_006_psbt();
+    let (_, message) = ::ur::ur::decode(BCR_2020_006_PSBT_UR).expect("the registry's own UR");
+
+    assert_eq!(message.len(), 167 + 2, "58 A7 and then the PSBT");
+    assert_eq!(&message[..2], &[0x58, 0xa7]);
+    assert_eq!(super::unwrap(&message), Some(&psbt[..]));
+    assert_eq!(super::wrap(&psbt), message);
+}
+
+#[test]
+fn a_ur_whose_message_is_not_a_cbor_byte_string_is_dropped() {
+    // Every one of these decodes as a UR and then carries something the registry does not
+    // define — including the **bare PSBT** we used to emit, whose first byte `0x70` is a CBOR
+    // text string of 16 and not a byte string at all.
+    for message in [
+        b"psbt\xff\x01\x00".to_vec(), // a bare document, the pre-#112 convention
+        vec![0x82, 0x01, 0x02],       // an array
+        vec![0x58, 0x04, 0x01, 0x02, 0x03], // a byte string that under-runs its declaration
+        vec![0x58, 0x02, 0x01, 0x02, 0x03], // …and one with a trailing byte
+        vec![0x5f, 0x41, 0x01, 0xff], // the indefinite-length form
+        vec![0x58],                   // a header with no length
+    ] {
+        let mut scanner = Scanner::new(Class::Psbt);
+        let symbol = ::ur::ur::encode(&message, &::ur::Type::Custom("crypto-psbt"));
+        assert_eq!(
+            scanner.receive(&symbol),
+            Outcome::Discarded(Discard::NotRegistryForm),
+            "{message:02x?}"
+        );
+        // Nothing was refused, so the screen stays live (`06-codes.md` §4).
+        assert!(!scanner.spent(), "{message:02x?}");
+    }
+}
+
+#[test]
+fn a_message_that_is_an_empty_byte_string_is_dropped_on_the_length_bound() {
+    let mut scanner = Scanner::new(Class::Psbt);
+    let symbol = ::ur::ur::encode(&[0x40], &::ur::Type::Custom("crypto-psbt"));
+    assert_eq!(
+        scanner.receive(&symbol),
+        Outcome::Discarded(Discard::MessageTooLarge)
+    );
+}
+
+#[test]
+fn a_multi_part_stream_carrying_something_that_is_not_the_registry_form_is_dropped() {
+    // The other path into `complete`, which is the one a hostile animation reaches: the stream
+    // is well-formed and completes, and only then is the message not a byte string.
+    let mut scanner = Scanner::new(Class::Psbt);
+    let mut encoder = ::ur::Encoder::new(&[0x82; 3_000], 1_000, "crypto-psbt").expect("a message");
+    let mut last = Outcome::Discarded(Discard::Unreadable);
+    for _ in 0..3 {
+        last = scanner.receive(&encoder.next_part().expect("a part"));
+    }
+    assert_eq!(last, Outcome::Discarded(Discard::NotRegistryForm));
+}
+
+/// A non-minimal header is read rather than refused, on the same reasoning `read_header` takes:
+/// the payload it yields is byte-identical, so refusing it would turn an honest coordinator's
+/// encoding choice into a failed scan.
+#[test]
+fn a_non_minimal_byte_string_header_is_accepted() {
+    let mut scanner = Scanner::new(Class::Psbt);
+    // `0x5a 00 00 00 03` is a four-byte length for three bytes — legal CBOR, not the minimal
+    // form, and what `wrap` would have written as `0x43`.
+    let symbol = ::ur::ur::encode(
+        &[0x5a, 0x00, 0x00, 0x00, 0x03, 0xaa, 0xbb, 0xcc],
+        &::ur::Type::Custom("crypto-psbt"),
+    );
+    assert_eq!(
+        scanner.receive(&symbol),
+        Outcome::Complete(Payload::Transaction(vec![0xaa, 0xbb, 0xcc]))
+    );
+
+    // And the widest form there is: an eight-byte length, which is the one width `wrap` can
+    // never write and a reader that stopped at four would refuse.
+    let mut scanner = Scanner::new(Class::Psbt);
+    let symbol = ::ur::ur::encode(
+        &[0x5b, 0, 0, 0, 0, 0, 0, 0, 3, 0xaa, 0xbb, 0xcc],
+        &::ur::Type::Custom("crypto-psbt"),
+    );
+    assert_eq!(
+        scanner.receive(&symbol),
+        Outcome::Complete(Payload::Transaction(vec![0xaa, 0xbb, 0xcc]))
+    );
+}
+
+/// Every width `wrap` can write, read back by `unwrap` — including the two boundaries where the
+/// header grows, which is where a hand-written codec goes wrong.
+#[test]
+fn the_wrapper_round_trips_at_every_header_width() {
+    for len in [1, 23, 24, 255, 256, 65_535, 65_536] {
+        let payload = transport_message(len);
+        let message = super::wrap(&payload);
+        let header = match len {
+            0..=23 => 1,
+            24..=0xff => 2,
+            0x100..=0xffff => 3,
+            _ => 5,
+        };
+        assert_eq!(message.len(), len + header, "len={len}");
+        assert_eq!(super::unwrap(&message), Some(&payload[..]), "len={len}");
+    }
+    // The empty payload is a byte string too — the length bound is what rejects it, not the
+    // codec.
+    assert_eq!(super::wrap(&[]), vec![0x40]);
+    assert_eq!(super::unwrap(&[0x40]), Some(&[][..]));
+    assert_eq!(super::unwrap(&[]), None);
 }
 
 #[test]

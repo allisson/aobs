@@ -921,32 +921,57 @@ pub(crate) fn raw_part(indices: &str, cbor: &[u8]) -> String {
     )
 }
 
-/// A real animation over `message`, which is the only way to get parts whose checksum and
+/// A real animation carrying `payload`, which is the only way to get parts whose checksum and
 /// padding the fountain decoder will actually accept.
+///
+/// **Takes the payload, not the message.** §1's message is the payload in a CBOR byte string, so
+/// a coordinator's animation is built the way [`crate::outbound`] builds ours — and every test
+/// below that asserts what comes out asserts the payload it put in. Where the *message* length is
+/// the subject, [`message_len`] is how a test names it.
 pub(crate) fn stream(
     ur_type: &str,
-    message: &[u8],
+    payload: &[u8],
     max_fragment_length: usize,
     count: usize,
 ) -> Vec<String> {
-    let mut encoder = ur::Encoder::new(message, max_fragment_length, ur_type).expect("a message");
+    let message = crate::ur::wrap(payload);
+    let mut encoder = ur::Encoder::new(&message, max_fragment_length, ur_type).expect("a message");
     (0..count)
         .map(|_| encoder.next_part().expect("a part"))
         .collect()
 }
 
-/// The single-part form of `message` — `03-transport.md` §6's *"an animation of length one that
-/// happens not to move"*, which arrives with no `seq` component at all.
-pub(crate) fn single(ur_type: &str, message: &[u8]) -> String {
-    ur::ur::encode(message, &ur::Type::Custom(ur_type))
+/// The single-part form carrying `payload` — `03-transport.md` §6's *"an animation of length one
+/// that happens not to move"*, which arrives with no `seq` component at all.
+pub(crate) fn single(ur_type: &str, payload: &[u8]) -> String {
+    ur::ur::encode(&crate::ur::wrap(payload), &ur::Type::Custom(ur_type))
 }
 
-/// A message whose bytes are not all the same, so a fragment that lands in the wrong slot
+/// A payload whose bytes are not all the same, so a fragment that lands in the wrong slot
 /// cannot pass unnoticed.
 pub(crate) fn transport_message(len: usize) -> Vec<u8> {
     (0..len)
         .map(|i| u8::try_from(i % 251).expect("under 251"))
         .collect()
+}
+
+/// A payload whose **message** is exactly `len` bytes once §1's wrapper is on it.
+///
+/// `03-transport.md` §3's bounds and §9's arithmetic are both stated over the message, and so is
+/// every fragment count a transport test asserts — so this, and not [`transport_message`], is
+/// what a case names when the number it cares about is a `messageLen` or a `seqLen`. The wrapper
+/// is 1, 2, 3 or 5 bytes depending on the width, so the payload is solved for rather than
+/// subtracted.
+///
+/// # Panics
+///
+/// If `len` is too small to hold a wrapper and at least one byte.
+pub(crate) fn transport_payload(len: usize) -> Vec<u8> {
+    let payload = (1..len)
+        .map(|candidate| len - candidate)
+        .find(|&candidate| crate::ur::wrap(&vec![0u8; candidate]).len() == len)
+        .expect("every length above 1 is one byte of header plus a payload");
+    transport_message(payload)
 }
 
 /// The checksum a real animation put in its parts, so a hand-built part can disagree with a
@@ -1051,7 +1076,7 @@ pub(crate) const TRANSPORT_CASES: &[TransportCase] = &[
     TransportCase {
         name: "the 64 KiB boundary, exactly at the limit",
         expected: Class::Psbt,
-        symbols: || stream("crypto-psbt", &transport_message(64 * 1024), 2_048, 32),
+        symbols: || stream("crypto-psbt", &transport_payload(64 * 1024), 2_048, 32),
         last: Expect::Accepted,
     },
     TransportCase {
@@ -1060,7 +1085,22 @@ pub(crate) const TRANSPORT_CASES: &[TransportCase] = &[
         // Same fragment length as the row above, so `messageLen` is the only field that
         // differs — at a smaller fragment the `seqLen` bound would trip first and the case
         // would be asserting the wrong thing.
-        symbols: || stream("crypto-psbt", &transport_message(64 * 1024 + 1), 2_048, 33),
+        symbols: || stream("crypto-psbt", &transport_payload(64 * 1024 + 1), 2_048, 33),
+        last: Expect::Discarded,
+    },
+    TransportCase {
+        name: "a crypto-psbt whose message is a bare PSBT rather than the registry's byte string",
+        expected: Class::Psbt,
+        // The convention this crate emitted and accepted before
+        // [#112](https://github.com/allisson/aobs/issues/112). It is in the corpus because it is
+        // the shape a regression would take: nothing else here would notice the wrapper coming
+        // back off, since every other case builds its stream with `single`/`stream`.
+        symbols: || {
+            vec![ur::ur::encode(
+                b"psbt\xff\x01\x00\x00",
+                &ur::Type::Custom("crypto-psbt"),
+            )]
+        },
         last: Expect::Discarded,
     },
     TransportCase {
@@ -1085,14 +1125,14 @@ pub(crate) const TRANSPORT_CASES: &[TransportCase] = &[
 
 /// A real first part, then a hand-built second one differing only in `seqLen`.
 fn inconsistent_sequence_count() -> Vec<String> {
-    let parts = stream("crypto-psbt", &transport_message(4_000), 1_000, 1);
+    let parts = stream("crypto-psbt", &transport_payload(4_000), 1_000, 1);
     let checksum = checksum_of(&parts[0]);
     vec![parts[0].clone(), part(2, 8, 4_000, checksum, &[0u8; 1_000])]
 }
 
 /// The same, differing only in `messageLen`.
 fn inconsistent_message_length() -> Vec<String> {
-    let parts = stream("crypto-psbt", &transport_message(4_000), 1_000, 1);
+    let parts = stream("crypto-psbt", &transport_payload(4_000), 1_000, 1);
     let checksum = checksum_of(&parts[0]);
     vec![parts[0].clone(), part(2, 4, 4_001, checksum, &[0u8; 1_000])]
 }
@@ -1100,7 +1140,7 @@ fn inconsistent_message_length() -> Vec<String> {
 /// The same, differing only in the message checksum — the field a stream's identity rests on
 /// that neither decimal in the URI path can carry.
 fn foreign_checksum() -> Vec<String> {
-    let parts = stream("crypto-psbt", &transport_message(4_000), 1_000, 1);
+    let parts = stream("crypto-psbt", &transport_payload(4_000), 1_000, 1);
     let checksum = checksum_of(&parts[0]).wrapping_add(1);
     vec![parts[0].clone(), part(2, 4, 4_000, checksum, &[0u8; 1_000])]
 }
@@ -1108,7 +1148,7 @@ fn foreign_checksum() -> Vec<String> {
 /// Sequence 1 of a four-part stream, over and over: well-formed, consistent with the stream's
 /// identity, and never completing it. This is the shape fountain coding makes free.
 fn budget_exhausted() -> Vec<String> {
-    let parts = stream("crypto-psbt", &transport_message(4_000), 1_000, 1);
+    let parts = stream("crypto-psbt", &transport_payload(4_000), 1_000, 1);
     vec![parts[0].clone(); PART_BUDGET + 1]
 }
 

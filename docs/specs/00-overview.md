@@ -175,7 +175,7 @@ printed line, because the appliance is not what knows the answer — a signed tr
   Finalizing is a test-only step; §8 forbids the appliance the Finalizer role, and what is forbidden
   is emitting a finalized document rather than measuring one.
 
-Eight verification obligations, distinct from measurements:
+Nine verification obligations, distinct from measurements:
 
 - **The fbdev display tier on real firmware**, verified only under QEMU + `ramfb` so far: that
   `efifb`'s reported pixel format negotiates against the renderer's five accepted arms, and that
@@ -212,6 +212,14 @@ Eight verification obligations, distinct from measurements:
 - **That the master fingerprint is identical on every network** is read from the BIP-32 text, not
   measured against `bitcoin` 0.32.x. The identity screen's only network signal rests on it, so it
   carries an assertion in the suite ([#34](https://github.com/allisson/aobs/issues/34)).
+- **A real coordinator finalizing and broadcasting what we emit, on signet** — Sparrow and Specter
+  Desktop, `05-testing-and-release.md` §6.3. [#112](https://github.com/allisson/aobs/issues/112)
+  settled the *encoding* question this row used to carry, against both coordinators' own source and
+  against BCR-2020-006's published vector, and the vector is a checked-in fixture — so what is left
+  is the end-to-end claim, in both directions, which no test in this tree can make: **our decoder
+  reads our own encoder, and symmetry holds whichever convention we picked.** It is a release-gate
+  row because a signature nobody can broadcast is the failure the whole outbound path exists to
+  avoid.
 
 Two recorded revisit triggers, which are not v1 work:
 
