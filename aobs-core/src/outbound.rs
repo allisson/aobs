@@ -35,17 +35,18 @@
 //! to byte mode and cost about a third of the capacity — a v27 symbol at ECC L carries 2 132
 //! alphanumeric characters but only 1 465 bytes.
 //!
-//! **What the UR message is, stated because it is the one thing §6 leaves implicit.** The message
-//! is the PSBT's serialised bytes, which is the same convention [`crate::ur`] accepts on the way
-//! in and the one §9.1's arithmetic is written over — `messageLen` is the PSBT's own length there,
-//! with no wrapper charged. Emitting anything else would make the inbound and outbound halves of
-//! this crate disagree about what a `crypto-psbt` carries.
+//! **What the UR message is** (§1): the PSBT wrapped in a **CBOR byte string**, which is
+//! BCR-2020-006's own form and what both coordinators in scope encode and decode
+//! ([#112](https://github.com/allisson/aobs/issues/112);
+//! `docs/research/02-qr-transport-format.md` §7). [`crate::ur::wrap`] is that layer and
+//! [`crate::ur::unwrap`] is its inverse — **one pair, called from both halves of the crate**,
+//! because a convention each half remembered separately is what shipped three bytes short of
+//! interoperable in the first place.
 //!
-//! **Whether that is what a coordinator expects is
-//! [#112](https://github.com/allisson/aobs/issues/112)**, and no test in this crate can answer it:
-//! BCR-2020-006 defines the payload as a CBOR byte string wrapping the PSBT, our own decoder reads
-//! our own encoder, and symmetry holds whichever convention we picked. It moves in both directions
-//! at once or in neither (§6a).
+//! It costs three bytes on every payload §1's capacity table names, and §9's arithmetic already
+//! absorbed it: `messageLen` is charged its `u32` maximum in the ceiling, so **2 013 characters
+//! against 2 132 is unchanged**. What moves is where the fragment boundaries fall — §9.3's
+//! *"a message of exactly 960 B is one fragment"* is now a PSBT of 957.
 
 use qrcodegen::{QrCode, QrCodeEcc, QrSegment, Version};
 
@@ -140,13 +141,16 @@ enum Source {
 impl Animation {
     /// The animation for one signed PSBT, at §9's fragment length.
     ///
+    /// Takes the PSBT's own bytes: §1's CBOR wrapper is put on here, so the shell never holds a
+    /// UR message and cannot put one on twice.
+    ///
     /// # Panics
     ///
-    /// If `message` is empty. A serialised PSBT never is — it carries the magic bytes and an
+    /// If `psbt` is empty. A serialised PSBT never is — it carries the magic bytes and an
     /// unsigned transaction — and the only way to reach this is with bytes no `Accepted` produced.
     #[must_use]
-    pub fn psbt(message: &[u8]) -> Self {
-        Self::with_fragment_length(message, MAX_FRAGMENT_LEN)
+    pub fn psbt(psbt: &[u8]) -> Self {
+        Self::with_fragment_length(psbt, MAX_FRAGMENT_LEN)
     }
 
     /// The same, at a chosen fragment length.
@@ -157,11 +161,16 @@ impl Animation {
     ///
     /// # Panics
     ///
-    /// If `message` is empty or `max_fragment_length` is zero.
+    /// If `psbt` is empty or `max_fragment_length` is zero.
     #[must_use]
-    pub fn with_fragment_length(message: &[u8], max_fragment_length: usize) -> Self {
-        let encoder = ::ur::Encoder::new(message, max_fragment_length, UR_TYPE)
-            .expect("a signed PSBT is never empty and the fragment length is never zero");
+    pub fn with_fragment_length(psbt: &[u8], max_fragment_length: usize) -> Self {
+        assert!(!psbt.is_empty(), "a signed PSBT is never empty");
+
+        // §1's message form. The wrapper is never empty, so the only thing left that can make
+        // `Encoder::new` refuse is a zero fragment length.
+        let message = crate::ur::wrap(psbt);
+        let encoder = ::ur::Encoder::new(&message, max_fragment_length, UR_TYPE)
+            .expect("the message is never empty and the fragment length is never zero");
         let parts = encoder.fragment_count();
 
         // §6's one encoding rule, and the only branch in this module: when it fits, the
@@ -170,7 +179,8 @@ impl Animation {
         // stream of length one — which is a different thing on the wire from a UR that is
         // simply not fragmented.
         let source = if parts == 1 {
-            let text = ::ur::ur::encode(message, &::ur::Type::Custom(UR_TYPE)).to_ascii_uppercase();
+            let text =
+                ::ur::ur::encode(&message, &::ur::Type::Custom(UR_TYPE)).to_ascii_uppercase();
             Source::Single {
                 symbol: symbol(&text),
                 text,

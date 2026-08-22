@@ -61,6 +61,10 @@ already accepted, for the same reason: someone else's copy of the old behaviour 
 - **Bytes that never became a PSBT.** `02-core.md` §7: *"failing to decode is not the same as
   rejecting"* — that is overwhelmingly a bad scan, it says so and returns to scanning, and giving it a
   code would file the commonest harmless event under the same heading as an attack.
+- **A UR whose message is not the registry's CBOR byte string** (`03-transport.md` §1). The type
+  string was right, so this is not a wrong-class refusal — and from the screen's side it is
+  indistinguishable from the bad scan it almost always is, which is the first bullet's reasoning
+  applied one layer up ([#112](https://github.com/allisson/aobs/issues/112)).
 - **A failed BIP-39 checksum on import.** The words stay on screen and the screen states what the check
   covers (`04-screens.md` §6). Nothing was refused and nothing was discarded.
 - **The single advisory warning** on the fee row. A warning is not a refusal (ADR-0005), and coding it

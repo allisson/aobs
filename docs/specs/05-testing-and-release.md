@@ -183,6 +183,11 @@ The cases:
 - whitespace and unicode in parsed address-adjacent fields (Coldcard 2019, where the review screen
   itself was the vulnerability);
 - the 64 KiB boundary at exactly the limit and one byte over;
+- **a `crypto-psbt` whose message is a bare PSBT rather than the registry's CBOR byte string** — a
+  discard with no code, and the shape a regression to the pre-[#112](https://github.com/allisson/aobs/issues/112)
+  convention would take. It is in the corpus because nothing else here would notice: every other
+  transport case builds its stream with the same encoder that reads it back, so all of them hold
+  whichever convention we picked;
 - **six outputs, and seven** — the second refusing on `AOBS-R15` — plus a PSBT packing outputs to the
   transport bound, which is where the ~2,000-output case lives;
 - **two taproot inputs each claiming `u64::MAX` satoshis** — `AOBS-R16`, the amount bound, and the
@@ -298,12 +303,15 @@ can silently re-resolve. That is what leaves the harness exactly one site to tra
   `01-boot-layer.md` §7 records for the fbdev tier.
 - **A real coordinator finalizing and broadcasting what we emit**, on signet: Sparrow and Specter
   Desktop at least, since §7's `crypto-account` decision already rests on Specter's scanner and §1's
-  type-string decision rests on both. Nothing in CI can do this — our own decoder reads our own
-  encoder, which asserts symmetry and not interoperability — and it is the only row that would catch
-  §6a's open question about whether `crypto-psbt`'s payload is the PSBT's bytes or a CBOR byte string
-  wrapping them ([#112](https://github.com/allisson/aobs/issues/112)). **A signature nobody can
+  type-string and message-form decisions rest on both. Nothing in CI can do this — our own decoder
+  reads our own encoder, which asserts symmetry and not interoperability. **A signature nobody can
   broadcast is the failure the whole outbound path exists to avoid**, so this is a release-gate row
-  and not a nice-to-have.
+  and not a nice-to-have. It is **narrower than it was**: [#112](https://github.com/allisson/aobs/issues/112)
+  settled the message form against both coordinators' own source and against BCR-2020-006's
+  published vector, and that vector is now a checked-in fixture — so what this row still owes is the
+  *end-to-end* claim (finalized, and broadcast) rather than the encoding question.
+  **Scan in both directions**, not only out: a Specter animation is uppercase multi-part, which is
+  the shape that was silently dropped until #112 and which no QEMU row can produce.
 - **A phone or coordinator camera reading the symbol at the 800×600 floor**, where the square is
   258 px against the ~700 the v27 cap was priced on (`04-screens.md` §11.5). It is §6.4's owed
   measurement, sharpened: the floor is the hard case, not the design canvas.

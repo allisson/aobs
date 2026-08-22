@@ -22,6 +22,44 @@ Emit the **deprecated `crypto-psbt` spelling**, not the registry's newer `psbt`/
 decodes `psbt` but never writes it, and Specter's scanner regexes match only `UR:CRYPTO-*` and
 `UR:BYTES/`, so `ur:psbt/…` falls through unhandled.
 
+**The UR message is a CBOR definite-length byte string wrapping the payload**, on every type we
+read or write — `crypto-psbt`, `psbt` and `bytes` alike. Decided on coordinator source, not docs
+([#112](https://github.com/allisson/aobs/issues/112); `docs/research/02-qr-transport-format.md`
+§7): Sparrow's `CryptoPSBT.toCbor()` returns a `ByteString` and its `fromCbor` casts to one,
+Specter's `CryptoPSBT.toDataItem()` wraps a `Buffer` and its `fromDataItem` unwraps one, and
+**neither accepts a bare document** — a PSBT's first byte `0x70` is a CBOR *text* string of 16, so
+Sparrow throws and Specter's `getData()` returns something that is not the PSBT. BCR-2020-006's own
+published example is the same shape (`58 A7` and then 167 bytes), and it is a checked-in fixture
+because it is the one transport case not written by us.
+
+Three consequences, each load-bearing:
+
+- **It is a property of the type and never of the screen.** `ur:bytes` cannot mean CBOR at the
+  signing prompt and raw at the restore prompt, so §7's encrypted backup carries the wrapper too —
+  two bytes on a 67-byte payload, nowhere near version 20's budget at ECC H.
+- **`messageLen` is the wrapped length**, which is what §3's bounds and every figure in §9 are
+  stated over. Nothing in §9 moves: the ceiling charges `messageLen` its `u32` maximum, and §9.2's
+  and §9.3's figures were computed this way and reproduce exactly. What moves is which *payload*
+  produces each message — §9.3's *"a message of exactly 960 B"* is a 957-byte PSBT.
+- **We are strict about shape and permissive about width.** One byte string and nothing else:
+  trailing bytes and the indefinite-length form are refused, because the registry says
+  *deterministic length* and a payload arriving in chunks is a second parser. A non-minimal header
+  is read, because the payload it yields is byte-identical and refusing it would fail an honest
+  coordinator to enforce nothing. A message that is not the registry's form is a **discard with no
+  code** (§4, `06-codes.md` §4) — the type string was right, so from the screen's side it is
+  indistinguishable from a bad scan.
+
+**Emit the uppercase spelling** — `UR:CRYPTO-PSBT/…` — because Specter's scanner regexes match
+`UR:CRYPTO-*`, and because it buys QR alphanumeric mode for free (§8). This is the requirement §8
+refers back to.
+
+**Accept either case, all the way down**, which is not free: `ur` lowercases before it looks at
+anything, and our own `messageLen` pre-reader (§3's ordering) has to do the same or every part of an
+**uppercase multi-part animation** fails on the bytewords alphabet. Specter emits exactly that
+(`qr-code.html`: `this.encoder.nextPart().toUpperCase()`), so it is the ordinary case rather than an
+edge one — and it was a defect until #112, reported to the user as a bad scan with nothing on screen
+to distinguish it from one.
+
 BBQr was measured and lost on one fact: **its supported set is a strict subset of BC-UR's.** Nothing
 in scope does BBQr and not UR2; Specter Desktop does UR2 and not BBQr. Choosing BBQr subtracts
 Specter and adds nobody. Density does not decide it (frames are within one of each other at our
@@ -82,7 +120,7 @@ Before any part reaches `ur`:
 
 | Bound | Value | What it stops |
 |---|---|---|
-| `messageLen` | ≤ 64 KiB | ~17× the largest realistic payload (3 744 B). Generous enough that no honest user reaches it. |
+| `messageLen` | ≤ 64 KiB | ~17× the largest realistic payload (3 744 B). Generous enough that no honest user reaches it. The bound is on the **message** — §1's CBOR byte string, which is what the decoder allocates — so the largest PSBT it admits is 65 533 bytes. |
 | `seqLen` | ≤ 64 frames | 64 KiB at v40-L density is ~32 frames; 64 leaves room for sparser v27 codes without admitting a four-billion-frame claim. |
 | **Total parts accepted** | ≤ 1024, then refuse | `seqLen` bounds the *claim*; this bounds the *work*. Fountain coding lets a hostile animation feed well-formed parts forever without completing, and only a counter on parts actually received stops that. |
 | UR type | Checked **before** decoding | Not after. |
@@ -274,16 +312,19 @@ once and the QR's own flicker carries liveness. Nothing at all in the single-par
 Two things this section leaves implicit and one it gets slightly wrong about the dependency
 ([#82](https://github.com/allisson/aobs/issues/82)).
 
-**The UR message is the PSBT's serialised bytes, with no CBOR wrapper charged.** §9.1's arithmetic
-already assumes it — `messageLen` there is the PSBT's own length — and it is the convention the
-inbound half of the crate accepts, since `ur` 0.5.2 does no CBOR unwrapping and `Scanner` hands a
-completed message straight to `psbt::validate`. Stated here because the two halves have to agree and
-nothing else says so. **It is also the interoperability question this ticket did not settle**:
-BCR-2020-006 defines `crypto-psbt`'s payload as a CBOR byte string wrapping the PSBT, so a
-coordinator implementing the registry to the letter expects three more bytes at the front than we
-emit and than we accept. §6.3's by-hand round trip against a real Sparrow and a real Specter is
-where that gets found; **fixing it is [#112](https://github.com/allisson/aobs/issues/112), and it moves both directions at once or
-neither.**
+**What the UR message is, is §1's decision and no longer this section's open question.** #82 left
+it as *the PSBT's serialised bytes, with no wrapper charged*, which is what the tree emitted and
+accepted and which **no coordinator reads**. [#112](https://github.com/allisson/aobs/issues/112)
+settled it on Sparrow's and Specter's own source and moved both halves in one commit:
+`aobs_core::ur::wrap` and `::unwrap` are the pair, called from
+[`outbound`](../../aobs-core/src/outbound.rs) and [`ur`](../../aobs-core/src/ur.rs) respectively,
+and `03-transport.md` §1 is the rule. **The mechanism that let it ship wrong is the part worth
+keeping in view**: the two halves each remembered a convention, and every test in the tree asserted
+symmetry — which holds whichever one they remembered.
+
+**`ur` 0.5.2 does no CBOR at all**, in either direction: `ur::ur::decode` bytewords-decodes and
+returns, `ur::ur::encode` bytewords-encodes what it is given. So the registry's layer is ours to
+add, which is why it is one function pair rather than a dependency's behaviour.
 
 **§6's *"same screen, same code path"* costs one branch, in core, on the fragment count.**
 `ur::Encoder` emits `ur:crypto-psbt/{seq}-{seqLen}/…` unconditionally, so a one-fragment message
@@ -303,7 +344,7 @@ than an arbitrary string.
 
 | Artifact | Encoding | Notes |
 |---|---|---|
-| Encrypted backup | `ur:bytes`, 67 bytes → ~529 alphanumeric chars → **version 20 (97×97) at ECC H** | ECC H because paper creases and fades. Type `bytes` and not `crypto-psbt` is a free confusion-attack guard: a PSBT scanned at the restore prompt is rejected on the type string rather than on a crypto failure. No compression on this path at all; integrity is the AEAD tag, not UR's CRC-32. |
+| Encrypted backup | `ur:bytes`, 67 bytes → ~529 alphanumeric chars → **version 20 (97×97) at ECC H** | ECC H because paper creases and fades. Type `bytes` and not `crypto-psbt` is a free confusion-attack guard: a PSBT scanned at the restore prompt is rejected on the type string rather than on a crypto failure. No compression on this path at all; integrity is the AEAD tag, not UR's CRC-32. **§1's CBOR wrapper applies here too** — `ur:bytes` is a registry type and the wrapper is a property of the type, not of the screen — so the message is 69 bytes and the char figure grows by four. It is derived rather than measured either way and the headroom to version 20 absorbs it; the inbound half of this path already reads the wrapper ([#112](https://github.com/allisson/aobs/issues/112)) and the outbound half is [#85](https://github.com/allisson/aobs/issues/85)'s to build against it. |
 | Watch-only export | `ur:crypto-account` (registry type 311) | Four output descriptors, one per BIP family, account 0. **Estimated ~460 B CBOR → ~1,000 UR chars — derived, not measured.** If four descriptors ever fail to fit one QR, **the fix is narrowing what we export, never animating it.** |
 
 **`crypto-account`, not `account-descriptor` (40311)** — decided on coordinator source, not docs:
@@ -393,6 +434,14 @@ written `as u32`** (`fountain::Part`'s `Encode` impl, four `.u32()` calls), so n
 That is what turns a sweep into a bound: charge all four fields their `u32` maximum and both decimals
 ten digits, and the result is the largest part the animation can *ever* emit.
 
+**`messageLen` is §1's message, not the PSBT** — the payload plus its CBOR byte-string header, which
+is three bytes at every size §1's capacity table names. That changes nothing here, because the
+ceiling charges the field its `u32` maximum in any case, and it changes nothing in §9.2 or §9.3
+either: every figure below was computed over the message and reproduces exactly
+([#112](https://github.com/allisson/aobs/issues/112) re-ran them). What it changes is which payload
+lands where — the boundary in §9.3 is a **957-byte PSBT**, and 23 017 is the message a 23 014-byte
+one produces.
+
 At `F = 960` that ceiling is **2 013 characters against v27-L's 2 132** — 119 spare.
 
 The formula is not asserted, it was checked character-for-character against what `ur` 0.5.2 actually
@@ -468,6 +517,8 @@ bound is **23 017 B**, whose 24-way split leaves exactly 960; §1's 3 744 B row 
 sibling case is the boundary itself: a message of exactly 960 B is one fragment, and §6 emits it as the
 single-part form with no `seq` component, which at **1 943 characters is v26** — the largest single
 symbol we ever draw. One byte more splits in two and the symbol collapses to 1 017 characters at v18.
+(In PSBTs those two are **957 and 958 bytes**, and 23 014 is the worst one — §1's wrapper, and the
+one place in §9 where the payload and the message are worth stating separately.)
 
 **The fragment is not the only field that widens.** `seqLen` and `messageLen` sit in the same CBOR
 array, and each crosses a minimal-uint boundary at 24, 256 and 65 536 — two characters, two, then four,

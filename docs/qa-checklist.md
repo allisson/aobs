@@ -267,6 +267,31 @@ the way the seven-output row is.
 - [ ] And the honest side is unchanged: an ordinary spend with no signature fields still reaches the
       panel, signs, and finalizes.
 
+### The message a coordinator actually reads ([#112](https://github.com/allisson/aobs/issues/112))
+
+**The release-gate row**, and the only one on this list that needs another wallet rather than
+another PSBT. `03-transport.md` §1's message form was settled against Sparrow's and Specter's own
+source and against BCR-2020-006's published vector, all three of which are now assertions in the
+suite — but *finalized, and broadcast* is a claim no test in this tree can make, because our
+decoder reads our own encoder and symmetry holds whichever convention we picked
+(`05-testing-and-release.md` §6.3).
+
+On **signet**, with a wallet loaded from a mnemonic both sides know:
+
+- [ ] **Sparrow, outbound.** Build a spend in Sparrow, show it as a QR, scan it on the appliance,
+      sign, and scan the appliance's animation back into Sparrow. Sparrow **finalizes** it and
+      **broadcasts** it. Do this once for a single-frame payload and once for a multi-frame one.
+- [ ] **Sparrow, inbound, multi-frame.** The animation Sparrow displays for a PSBT above one frame
+      is read to completion. The progress fraction advances and the panel draws.
+- [ ] **Specter Desktop, outbound.** The same round trip, finalized and broadcast.
+- [ ] **Specter Desktop, inbound.** Specter's animation is **uppercase multi-part**
+      (`qr-code.html`: `nextPart().toUpperCase()`), which is the exact shape that was silently
+      dropped before #112 — every frame reported as a bad scan, with nothing on screen to say why.
+      This row is the one that catches it coming back.
+- [ ] **The broadcast transaction pays what the panel said.** Compare the txid's outputs and fee
+      against the review panel's own numbers, which is the only end-to-end check that
+      `04-screens.md` §11.2's mitigation describes the transaction that actually settled.
+
 ### Creating a wallet ([#72](https://github.com/allisson/aobs/issues/72))
 
 - [ ] At 800×600, **two columns of 12 words are all on screen at once** — 1–12 left, 13–24

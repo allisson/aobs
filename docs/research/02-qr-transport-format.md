@@ -5,6 +5,10 @@ Research resolving [issue #2](https://github.com/allisson/aobs/issues/2) of the
 against cloned source trees at the commits named in §3, not against documentation or
 third-party write-ups.
 
+**§7 was added later**, by [#112](https://github.com/allisson/aobs/issues/112): what a
+`ur:crypto-psbt` *message* is, which this file originally settled in one clause of §1 and nobody
+checked against a coordinator.
+
 ## Recommendation
 
 **PSBT transport, both directions: BC-UR / UR2, emitting and accepting `ur:crypto-psbt`.**
@@ -58,7 +62,9 @@ A UR is `ur:<type>/<seqNum>-<seqLen>/<fragment>`; the fragment is CBOR, Byteword
   scanner cannot parse them at all (§3.3). aobs must therefore *emit the deprecated
   `crypto-psbt`* and *accept both spellings*.
 - The CDDL for `psbt` is simply `bytes`; the CBOR layer adds no structure, it wraps the
-  BIP-174 blob.
+  BIP-174 blob. **It does wrap it, though, and that is not a detail** — §7 establishes against
+  both coordinators' source that the wrapper is required in both directions, which the tree got
+  wrong for two tickets.
 
 ### BBQr
 
@@ -399,6 +405,89 @@ dependencies solely for a 250-byte blob. Not worth it for two QR versions.
   choice rather than reverse it.
 - **The registry rename reaches deployed wallets.** If Sparrow and Specter start emitting
   `ur:psbt`, the accept-both rule in §3.2 can eventually shed the deprecated spelling.
+- **A coordinator appears that emits a bare PSBT in a `crypto-psbt`.** §7 found none, and both
+  implementations in scope would refuse it themselves — but it is the fact that would turn the
+  strict reader into a lenient one, and the two forms are distinguishable on the first byte.
+
+---
+
+## 7. What a `ur:crypto-psbt` message actually is — settled on coordinator source
+
+**Finding: the message is a CBOR definite-length byte string wrapping the PSBT, in both
+directions, in both coordinators, with no leniency on either side.** Established for
+[#112](https://github.com/allisson/aobs/issues/112) by reading the code that runs, not the
+registry text — the same standard §3.3's `crypto-account` decision was taken to.
+
+### 7.1 Sparrow — `hummingbird`, the BC-UR library Sparrow depends on
+
+`CryptoPSBT` is the registry item, and it is four lines in each direction:
+
+```java
+public DataItem toCbor() { return new ByteString(psbt); }
+public static CryptoPSBT fromCbor(DataItem item) { return new CryptoPSBT(((ByteString)item).getBytes()); }
+```
+
+`RegistryItem.toUR()` CBOR-encodes that `DataItem` **untagged** — the tag lives in the UR type
+string, not in the message — so `ur:crypto-psbt`'s message is exactly `bytes(psbt)`.
+`RegistryType` maps `crypto-psbt` → 310 and `psbt` → 40310, and `URPSBT` (the 40310 spelling)
+extends `CryptoPSBT` unchanged, so the two spellings carry the same message.
+
+Both call sites are Sparrow's own: `HeadersController` and `AppController` build
+`new CryptoPSBT(psbtBytes).toUR()` for display, and `QRScanDialog` reads a scan back with
+`(CryptoPSBT) ur.decodeFromRegistry()`.
+
+**There is no lenient path.** `decodeFromRegistry` casts the decoded `DataItem` to `ByteString`
+unconditionally. A bare PSBT's first byte is `0x70` — CBOR major type 3, a *text* string of 16 —
+so the cast raises `ClassCastException`, caught by `QRScanDialog`'s trailing
+`catch(Exception e)` and reported as *"Error parsing UR CBOR"*. The same holds for the
+`RegistryType.BYTES` arm, which does `((ByteString)item).getBytes()` before it tries
+`new PSBT(urBytes, false)` — so a PSBT carried as `ur:bytes` (Foundation Passport's form) is
+CBOR-wrapped in this ecosystem too.
+
+### 7.2 Specter Desktop — `@keystonehq/ur-registry`, bundled as `static/bcur/urlib.min.js`
+
+Outbound, `templates/includes/qr-code.html` builds `new window.URlib.CryptoPSBT(data)` from the
+base64 PSBT and animates `encoder.nextPart().toUpperCase()`. Inbound,
+`templates/includes/overlay/qr_code_sign.jinja` does
+`window.URlib.CryptoPSBT.fromCBOR(result.cbor).getPSBT().toString("base64")`.
+
+The library's `CryptoPSBT.ts` is the same shape as hummingbird's:
+
+```ts
+public toDataItem = () => new DataItem(this.psbt);
+public static fromDataItem = (dataItem: DataItem) => new CryptoPSBT(dataItem.getData());
+```
+
+so `toCBOR()` emits a CBOR byte string and `fromCBOR` reads one. A bare PSBT decodes as a text
+string and `getData()` does not hand back the document.
+
+### 7.3 The registry's own vector, which is the third independent witness
+
+BCR-2020-006's `psbt` section publishes all three of a 167-byte PSBT's hex, its CBOR
+(`58 A7` and then the bytes) and the UR string
+`ur:psbt/hdosjojkidjyzmadaenyaoaeaeaeaohdvsknclrejnpebncnrnmnjojofejzeojlkerdonspkpkkdkykfelokgprpyutkpae…`.
+It is now a checked-in fixture in `aobs-core/src/ur_tests.rs`, and it is the **only** transport
+test in the tree we did not write both halves of — which is precisely why it is there. BCR-2020-005
+adds that `bytes` *"exists only for testing and validation of UR implementations"*; the ecosystem
+uses it for PSBTs anyway, which is why §3.2's accept-list includes it.
+
+### 7.4 Nobody accepts both, so there is nothing to choose between
+
+The strict-superset reasoning §1 used for UR2 over BBQr does not get a chance to apply here: the
+registry's form is the only form either coordinator reads. What we shipped before #112 — the bare
+document, in both directions — is refused by both, which makes the pre-#112 outbound path *"a
+signature nobody can broadcast"*.
+
+### 7.5 A second finding, on the way in rather than out
+
+**Specter's animated QRs are uppercase** (`qr-code.html`: `this.encoder.nextPart().toUpperCase()`),
+and `ur` 0.5.2 handles that by lowercasing in `decode_with_indices` before it touches the string.
+Our own `messageLen` pre-reader (`03-transport.md` §3's ordering requires we read the header before
+the dependency does) called `ur::bytewords::decode` directly on the payload as scanned — and
+bytewords is a lowercase alphabet, so **every part of an uppercase multi-part animation failed and
+was reported as a bad scan**. Single-part uppercase worked, which is why the tree's one uppercase
+test passed. Fixed with #112; the lesson is the one `ur.rs` already states about two readers of one
+field, extended to case.
 
 ---
 
@@ -421,6 +510,8 @@ Specs:
 - BIP-371, taproot PSBT fields — https://github.com/bitcoin/bips/blob/master/bip-0371.mediawiki
 - BCR-2020-005, Uniform Resources — https://github.com/BlockchainCommons/Research/blob/master/papers/bcr-2020-005-ur.md
 - BCR-2020-006, UR type registry — https://github.com/BlockchainCommons/Research/blob/master/papers/bcr-2020-006-urtypes.md
+  (§7.3's `psbt` vector: the CDDL is `bytes`, and the worked example prints the hex, the `58 A7`
+  CBOR and the UR string)
 - BCR-2020-012, Bytewords — https://github.com/BlockchainCommons/Research/blob/master/papers/bcr-2020-012-bytewords.md
 - BBQr specification — https://github.com/coinkite/BBQr/blob/master/BBQr.md
 
@@ -435,6 +526,13 @@ Wallet source (all verified in cloned trees, August 2026):
 - Sparrow descriptor export — https://github.com/sparrowwallet/sparrow/blob/master/src/main/java/com/sparrowwallet/sparrow/wallet/SettingsController.java#L386-L441
 - drongo `WalletModel.showBbqr()` — https://github.com/sparrowwallet/drongo/blob/master/src/main/java/com/sparrowwallet/drongo/wallet/WalletModel.java#L147-L169
 - hummingbird `RegistryType.java` — https://github.com/sparrowwallet/hummingbird/blob/master/src/main/java/com/sparrowwallet/hummingbird/registry/RegistryType.java
+- hummingbird `CryptoPSBT.java` (§7.1, the CBOR byte string in both directions) — https://github.com/sparrowwallet/hummingbird/blob/master/src/main/java/com/sparrowwallet/hummingbird/registry/CryptoPSBT.java
+- hummingbird `URPSBT.java` (the 40310 spelling, same message) — https://github.com/sparrowwallet/hummingbird/blob/master/src/main/java/com/sparrowwallet/hummingbird/registry/URPSBT.java
+- hummingbird `UR.java` (`decodeFromRegistry`, `toBytes`, the untagged encoding) — https://github.com/sparrowwallet/hummingbird/blob/master/src/main/java/com/sparrowwallet/hummingbird/UR.java
+- hummingbird `RegistryItem.java` (`toUR()`) — https://github.com/sparrowwallet/hummingbird/blob/master/src/main/java/com/sparrowwallet/hummingbird/registry/RegistryItem.java
+- Sparrow `AppController.java` PSBT export — https://github.com/sparrowwallet/sparrow/blob/master/src/main/java/com/sparrowwallet/sparrow/AppController.java#L888-L898
+- KeystoneHQ `ur-registry` `CryptoPSBT.ts` (§7.2, Specter's bundled `urlib`) — https://github.com/KeystoneHQ/ur-registry/blob/master/src/CryptoPSBT.ts
+- Specter `qr_code_sign.jinja` (`CryptoPSBT.fromCBOR(result.cbor)`) — https://github.com/cryptoadvance/specter-desktop/blob/master/src/cryptoadvance/specter/templates/includes/overlay/qr_code_sign.jinja#L22-L34
 - Sparrow BBQr commit `7f388561`, release 1.8.3 — https://github.com/sparrowwallet/sparrow/releases/tag/1.8.3
 - Specter scanner — https://github.com/cryptoadvance/specter-desktop/blob/master/src/cryptoadvance/specter/templates/includes/qr-scanner.html#L100-L185
 - Specter display — https://github.com/cryptoadvance/specter-desktop/blob/master/src/cryptoadvance/specter/templates/includes/qr-code.html#L278-L395
