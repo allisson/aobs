@@ -30,7 +30,7 @@ use aobs_core::entry::{Action, Entry, Outcome};
 use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::phrase::Phrase;
-use crate::typing::{columns, refusal};
+use crate::typing::{columns, destination, keystroke, refusal};
 use crate::{AppWindow, Screen};
 
 /// One retype, or none yet.
@@ -108,41 +108,21 @@ impl Confirm {
         self.act(ui, Action::Finish);
     }
 
-    /// One printable keystroke.
+    /// One keystroke, as `typing::keystroke` reads it: space commits, a printable key is a
+    /// letter, and anything with no printable form is dropped rather than announced.
     fn typed(&self, ui: &AppWindow, text: &str) {
-        let mut letters = text.chars();
-        let (Some(key), None) = (letters.next(), letters.next()) else {
-            return;
-        };
-        // Slint delivers named keys as characters too, and the ones the frame does not bind
-        // arrive here as private-use code points. A key with no printable form has no name to
-        // report either, so it is dropped rather than announced — the alternative is a screen
-        // naming a key the user cannot see (standing rule 8).
-        if key != ' ' && !key.is_ascii_graphic() {
-            return;
+        if let Some(action) = keystroke(text) {
+            self.act(ui, action);
         }
-        // **Space commits.** The keystroke-to-action mapping is the shell's whole share of
-        // 02-core.md §4: what a letter does with the wordlist is core's.
-        self.act(
-            ui,
-            if key == ' ' {
-                Action::Commit
-            } else {
-                Action::Char(key)
-            },
-        );
     }
 
-    /// An arrow key, as a destination slot. Off either end there is no destination, so
-    /// nothing happens — and in particular the buffer is not settled by a move that is not
-    /// going to happen.
+    /// One arrow key, as a destination slot.
     fn step(&self, ui: &AppWindow, delta: i32) {
         let Some(target) = self
             .entry
             .borrow()
             .as_ref()
-            .map(Entry::cursor)
-            .and_then(|cursor| cursor.checked_add_signed(delta as isize))
+            .and_then(|entry| destination(entry, delta))
         else {
             return;
         };

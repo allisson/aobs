@@ -1,14 +1,20 @@
 //! What every word-entry screen draws, given core's state (02-core.md §4).
 //!
-//! Two functions, and neither is a decision: one turns an [`Entry`] into the [`Slot`] model
-//! the grid renders, the other turns an [`Outcome`] into the sentence the live line reports.
-//! Both are pure adapters over what core already said.
+//! Four functions, and none of them is a decision: two turn a keystroke into an [`Action`],
+//! one turns an [`Entry`] into the [`Slot`] model the grid renders, and one turns an
+//! [`Outcome`] into the sentence the live line reports. All four are pure adapters between the
+//! keyboard and what core already said.
 //!
 //! **They are here rather than copied per screen for one reason: they are the only two places
 //! the shell restates something core decided.** `columns` reads the buffer, the ghost and the
 //! settled word back; `refusal` names the key that did not land and how many words a prefix
 //! still matches. Two copies of that are two places that can disagree about what core said —
 //! and disagreement here looks like a screen that draws a word the reducer did not place.
+//!
+//! Two more turn a keystroke into an [`Action`], which is the shell's whole share of §4 and is
+//! the same share on every screen: **space commits**, a key with no printable form is dropped
+//! rather than announced (standing rule 8), and an arrow key off either end of the array is not
+//! a destination.
 //!
 //! What is deliberately **not** here is the copy. The heading, the standing hint and the Done
 //! control's note are each screen's own: the retype is typing from paper against an answer we
@@ -23,6 +29,30 @@ use crate::Slot;
 /// drawn in (04-screens.md §3) — so the paper, the phrase screen and every screen that types
 /// words back agree on where word 13 is, and the copy stays positional rather than sequential.
 pub const COLUMN: usize = 12;
+
+/// What one keystroke means, or `None` for one that means nothing.
+///
+/// **Space commits** — that mapping is the shell's whole contribution to 02-core.md §4, and what
+/// a letter does with the wordlist is core's. Slint delivers named keys as characters too, and
+/// the ones the frame does not bind arrive as private-use code points: a key with no printable
+/// form has no name to report either, so it is dropped rather than announced (standing rule 8).
+pub fn keystroke(text: &str) -> Option<Action> {
+    let mut letters = text.chars();
+    let (Some(key), None) = (letters.next(), letters.next()) else {
+        return None;
+    };
+    match key {
+        ' ' => Some(Action::Commit),
+        printable if printable.is_ascii_graphic() => Some(Action::Char(printable)),
+        _ => None,
+    }
+}
+
+/// An arrow key, as a destination slot. Off either end there is no destination, so nothing
+/// happens — and in particular the buffer is not settled by a move that is not going to happen.
+pub fn destination(entry: &Entry, delta: i32) -> Option<usize> {
+    entry.cursor().checked_add_signed(delta as isize)
+}
 
 /// An entry as two columns: **1–12 left, 13–24 right**, column-major.
 ///
@@ -78,7 +108,7 @@ pub fn refusal(entry: &Entry, action: Action, outcome: Outcome) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{columns, refusal, COLUMN};
+    use super::{columns, destination, keystroke, refusal, COLUMN};
     use aobs_core::bip39;
     use aobs_core::entry::{Action, Entry, Outcome};
 
@@ -147,6 +177,33 @@ mod tests {
         let outcome = entry.apply(Action::Commit);
         assert_eq!(outcome, Outcome::Ignored);
         assert!(refusal(&entry, Action::Commit, outcome).starts_with("“ab” still matches "));
+    }
+
+    #[test]
+    fn space_commits_and_a_key_with_no_printable_form_is_dropped() {
+        // `assert!` rather than `assert_eq!`: `Action` has no `Debug`, deliberately — a
+        // `Char` is a letter of the user's mnemonic (01-boot-layer.md §9).
+        assert!(keystroke(" ") == Some(Action::Commit));
+        assert!(keystroke("a") == Some(Action::Char('a')));
+        // A capital and a digit are keys core will refuse, and they are still keystrokes: the
+        // screen names what did not land, and it can only do that for a key it was handed.
+        assert!(keystroke("A") == Some(Action::Char('A')));
+        assert!(keystroke("7") == Some(Action::Char('7')));
+        // A named key Slint delivers as a private-use code point, and a text run that is not
+        // one character at all.
+        assert!(keystroke("\u{f700}").is_none());
+        assert!(keystroke("").is_none());
+        assert!(keystroke("ab").is_none());
+    }
+
+    #[test]
+    fn an_arrow_off_the_front_of_the_array_is_not_a_destination() {
+        let mut entry = bip39::import();
+        assert_eq!(destination(&entry, -1), None);
+        assert_eq!(destination(&entry, 1), Some(1));
+        letters(&mut entry, "aban");
+        entry.apply(Action::Commit);
+        assert_eq!(destination(&entry, -1), Some(0));
     }
 
     #[test]

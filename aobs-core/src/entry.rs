@@ -155,9 +155,10 @@ impl Entry {
         slots: usize,
         lengths: &'static [usize],
     ) -> Option<Self> {
-        let reachable =
-            !lengths.is_empty() && lengths.iter().all(|count| (1..=slots).contains(count));
-        reachable.then(|| Self::build(words, slots, Some(lengths)))?
+        if lengths.is_empty() || !lengths.iter().all(|count| (1..=slots).contains(count)) {
+            return None;
+        }
+        Self::build(words, slots, Some(lengths))
     }
 
     fn build(
