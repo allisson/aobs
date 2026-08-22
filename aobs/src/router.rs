@@ -154,10 +154,10 @@ pub fn wire(ui: &AppWindow, screens: Screens) -> Rc<Cell<Option<Ending>>> {
             Intent::LoadConfirm => load.confirm(&ui),
 
             // §7's two camera actions, which are §11.1's other two configurations. A completed
-            // transaction scan lands on §11.2's panel and a completed address scan still lands
-            // on `Screen::Unbuilt` — but neither destination is chosen here: the payload is a
-            // value, so it goes to `review` from inside the screen that received it rather than
-            // through an arm of this match.
+            // transaction scan lands on §11.2's panel and a completed address scan on one of
+            // §12's two verdicts — but neither destination is chosen here: the payload is a
+            // value, so it goes to `review` or `verify` from inside the screen that received it
+            // rather than through an arm of this match.
             Intent::Sign => scan.begin(&ui, Class::Psbt),
             Intent::VerifyAddress => scan.begin(&ui, Class::Address),
 

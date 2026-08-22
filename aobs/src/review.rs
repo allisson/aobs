@@ -59,11 +59,13 @@ const NO_WALLET: &str = "No wallet is loaded, so there is nothing to check this 
 /// sure?*. There is nothing to acknowledge and no key to press.
 const FEE_ABOVE_PAYMENT: &str = "You are paying miners more than you are paying your recipient.";
 
-/// Where a completed transaction scan left the appliance.
+/// Where a completed scan left the appliance.
 ///
-/// Two arms because 02-core.md §7 has two, and they end differently: one screen of this
-/// module's is up and the scan is over, or nothing came of the bytes and the scanning screen
-/// stays live with a sentence on it.
+/// Two arms because 02-core.md §7 has two, and they end differently: a screen is up and the scan
+/// is over, or nothing came of the payload and the scanning screen stays live with a sentence on
+/// it. **Shared with [`crate::verify`]**, which asks the same question of an address scan — it
+/// lives here because this is where the two-armed answer first had to exist, and a second copy
+/// of it would be a second vocabulary for one fact.
 pub enum Landed {
     /// The panel or the refusal screen is showing. The camera is down.
     Shown,
@@ -357,7 +359,10 @@ fn warning(warning: Option<Warning>) -> &'static str {
 /// The gap is the layout's, not ours: `format.rs` returns groups **as data** precisely so that
 /// nothing on the way here can turn the gap into a space character occupying a full monospace
 /// cell (§0, §11.2.1).
-fn groups(groups: Vec<String>) -> ModelRc<SharedString> {
+///
+/// `pub(crate)` for §12's verdict screen, which draws an address at full width for the same
+/// reason §11.3's walk does: one function, so the two cannot disagree about what a group is.
+pub(crate) fn groups(groups: Vec<String>) -> ModelRc<SharedString> {
     ModelRc::new(VecModel::from(
         groups
             .into_iter()

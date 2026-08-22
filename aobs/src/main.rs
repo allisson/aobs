@@ -20,7 +20,8 @@
 //! §11.2's panel, §11.3's per-address walk, and the screen 02-core.md §7's refusal ends on.
 //! [#82](https://github.com/allisson/aobs/issues/82) is the far side of it: §11.4's hold-to-confirm
 //! gate, core's signing call, and `outbound` — §11.5's animation at 4 fps and 02-core.md §12's one
-//! re-display slot.
+//! re-display slot. [#83](https://github.com/allisson/aobs/issues/83) is `verify`: §12's two
+//! verdicts over core's receive-address search.
 
 mod buildinfo;
 mod camera;
@@ -44,6 +45,7 @@ mod router;
 mod scan;
 mod session;
 mod typing;
+mod verify;
 
 use std::rc::Rc;
 
@@ -219,10 +221,15 @@ fn run() -> Result<Ending, Failure> {
 
     let review = review::wire(session.clone(), outbound.clone());
 
+    // §12's verdict. It holds the session for the same reason `review` does — the search is over
+    // our own key material — and it is built before `scan` because a completed address scan hands
+    // its payload straight to it (standing rule 4: a scanned address is a value too).
+    let verify = verify::wire(session.clone());
+
     // §11.1's one scanning screen, in whichever of its three configurations the router asks
     // for. It holds no wallet and no payload: the camera thread and core's `Scanner` are the
     // whole of its state.
-    let scan = scan::wire(&ui, review.clone());
+    let scan = scan::wire(&ui, review.clone(), verify);
 
     // Everything the user can ask for goes through here, and nothing else. The cell is where
     // §13's answer lands, because the event loop is what ends and it carries nothing back.

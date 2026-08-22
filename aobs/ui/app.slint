@@ -95,6 +95,13 @@ export enum Screen {
     // signature exists and the animation is the first one after it.
     gate,
     outbound,
+    // §12's two verdicts. **Two screens rather than one with a flag**, because they state
+    // different facts: one carries the path, the index, the branch and the address, and the
+    // other carries a headline and the window that was searched. A single component would
+    // hold properties that are empty in one of its two states, and a screen may not have a
+    // property for a fact its verdict does not carry.
+    verified,
+    not-yours,
     refused,
     unbuilt,
     ending,
@@ -1997,6 +2004,132 @@ component OutboundScreen inherits Rectangle {
     }
 }
 
+// 04-screens.md §12's positive verdict: **the full derivation path, the index, which branch it
+// came from, and the address in 4-character groups.**
+//
+// The address drawn here is the one *we derived*, never the string that was scanned — which is
+// the difference the two shouted cases in the corpus turn on, and the reason nothing on this
+// screen is attacker-controlled text. It is drawn at §11.3's larger type and full width for the
+// same reason a payment address is: this is a screen whose whole job is a character-by-character
+// comparison against something in the user's other hand.
+//
+// The path, the branch and the index are three statements and not one: the path contains the
+// other two, and a user matching a coordinator's *"address #7 on the receive branch"* against a
+// path they have to parse is doing our arithmetic for us.
+component VerifiedScreen inherits Rectangle {
+    in property <string> path;
+    in property <string> branch;
+    in property <string> index;
+    in property <[string]> groups;
+    in property <length> room;
+    in property <int> selected;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: 18px;
+
+        Heading {
+            text: "This address is yours.";
+        }
+
+        AddressBlock {
+            groups: root.groups;
+            size: Metrics.walk-address-size;
+            room: root.room;
+        }
+
+        HorizontalLayout {
+            alignment: start;
+            spacing: 34px;
+
+            Fact {
+                label: "Derivation path";
+                value: root.path;
+                unit: "";
+            }
+
+            Fact {
+                label: "Branch";
+                value: root.branch;
+                unit: "";
+            }
+
+            Fact {
+                label: "Index";
+                value: root.index;
+                unit: "";
+            }
+        }
+
+        Choice {
+            label: "Done";
+            note: "Returns to the wallet screen.";
+            current: root.selected == 0;
+        }
+    }
+}
+
+// §12's negative, and the copy is the decision: **"This address is not yours."** with the weight
+// of a refusal though no transaction is involved, plus a subordinate line naming precisely what
+// was searched.
+//
+// It cannot honestly mean *not yours* — it means *not in what I searched* — and the hedge is
+// deliberately not in the headline, because the failure the user must not make is treating an
+// unmatched address as safe and a hedged headline invites exactly that (02-core.md §10). The
+// honesty is paid for one line down, where the window is stated in full.
+//
+// **The scanned string is not on this screen.** It is attacker-controlled text, and there is
+// nothing a user can do with it that they cannot do with the address in their other hand —
+// Coldcard 2019 is what a review screen rendering hostile input costs. And there is **no code**
+// (06-codes.md §4): nothing was refused and nothing was discarded.
+component NotYoursScreen inherits Rectangle {
+    in property <string> searched;
+    in property <int> selected;
+
+    VerticalLayout {
+        alignment: start;
+        spacing: 18px;
+
+        // The refusal's weight, in the treatment RefusedScreen uses for the same reason —
+        // minus the code cell, which this screen has nothing to put in.
+        Rectangle {
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: Palette.crit;
+            background: Palette.panel;
+
+            HorizontalLayout {
+                padding: 16px;
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 8px;
+
+                    Text {
+                        text: "This address is not yours.";
+                        color: Palette.ink;
+                        font-size: 26px;
+                        font-weight: 600;
+                    }
+
+                    Text {
+                        text: root.searched;
+                        color: Palette.ink-mid;
+                        font-size: 15px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+
+        Choice {
+            label: "Done";
+            note: "Returns to the wallet screen. Nothing was signed and nothing changed.";
+            current: root.selected == 0;
+        }
+    }
+}
+
 // 02-core.md §7's refusal, as the screen it ends on: **the specific reason in plain language, a
 // stable machine-readable code alongside it, and exactly one action — discard.**
 //
@@ -2212,6 +2345,16 @@ export component AppWindow inherits Window {
     in property <string> address-amount;
     in property <[string]> address-groups;
     in property <bool> address-last;
+    // §12's two verdicts. Every string arrives already written: `format::address_groups` did
+    // the 4-character split, `identity::notation` wrote the path in the notation this product
+    // writes paths in, and `verify.rs` named the branch and assembled the sentence naming the
+    // window from `aobs_core::derive::SEARCH_INDICES`. Only one of the two sets is ever
+    // populated at a time, because only one of the two screens is ever shown.
+    in property <string> verify-path;
+    in property <string> verify-branch;
+    in property <string> verify-index;
+    in property <[string]> verify-groups;
+    in property <string> verify-searched;
     // 02-core.md §7's two halves, both computed in core.
     in property <string> refusal-reason;
     in property <string> refusal-code;
@@ -2322,6 +2465,12 @@ export component AppWindow inherits Window {
         : root.screen == Screen.review ? 1
         : root.screen == Screen.address ? 1
         : root.screen == Screen.refused ? 1
+        // §12's two verdicts, one row each. A verdict is a statement and not a decision, so
+        // there is nothing here for a second row to be — no *check another*, which is the
+        // hub's row one Escape away, and on the negative no *use it anyway*, which is not a
+        // thing this screen could offer even if it wanted to.
+        : root.screen == Screen.verified ? 1
+        : root.screen == Screen.not-yours ? 1
         // §11.4's two, and the asymmetry is not in the count: row 0 is a hold and row 1 is a
         // press. §11.5's one, which is the whole of that screen's ring — there is no second exit.
         : root.screen == Screen.gate ? 2
@@ -2483,6 +2632,11 @@ export component AppWindow inherits Window {
             // The same intent Escape fires, for the reason the stopped scan's row does: §7's
             // one action is *discard*, the router already knows where a discard goes, and a
             // second path to it is a second path that can drift.
+            root.intent(Intent.cancel);
+        } else if (root.screen == Screen.verified || root.screen == Screen.not-yours) {
+            // Both verdicts, one arm: the row says *Done* and the router already knows that
+            // with a wallet loaded there is exactly one place back to (§13, ADR-0010). Nothing
+            // is held for a leave to drop — a verdict is a string, and the search is over.
             root.intent(Intent.cancel);
         } else if (root.screen == Screen.identity) {
             // Row 3 is §7's re-display when it exists, and *backup export* is the last row either
@@ -2759,6 +2913,20 @@ export component AppWindow inherits Window {
                         qr: root.outbound-qr;
                         parts: root.outbound-parts;
                         side: root.outbound-room;
+                        selected: root.selected;
+                    }
+
+                    if root.screen == Screen.verified: VerifiedScreen {
+                        path: root.verify-path;
+                        branch: root.verify-branch;
+                        index: root.verify-index;
+                        groups: root.verify-groups;
+                        room: root.walk-room;
+                        selected: root.selected;
+                    }
+
+                    if root.screen == Screen.not-yours: NotYoursScreen {
+                        searched: root.verify-searched;
                         selected: root.selected;
                     }
 
