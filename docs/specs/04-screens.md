@@ -699,6 +699,36 @@ Scan (single-part text class), then the verdict.
   though no transaction is involved, plus a subordinate line naming precisely what was searched —
   account path, both branches, indices 0–999.
 
+Four things [#83](https://github.com/allisson/aobs/issues/83) settled while building it:
+
+- **Two screens, not one component with a flag.** They state different facts, and a single component
+  would carry properties that are empty in one of its two states — a screen may not hold a property
+  for a fact its verdict does not carry. Each contributes exactly **one** row to the ring: a verdict
+  is a statement, so there is no *check another* (that is the hub's row, one Escape away) and no *use
+  it anyway* on the negative.
+- **The path, the branch and the index are three statements.** The path contains the other two, and a
+  user matching a coordinator's *"address #7 on the receive branch"* against a path they have to
+  parse is doing our arithmetic for them.
+- **The scanned string reaches neither screen.** It is attacker-controlled text, and there is nothing
+  on a verdict a user could do with it that they cannot do with the address in their other hand —
+  Coldcard 2019 is what a review screen rendering hostile input costs. What the match draws is the
+  address **we derived**, which for a shouted bech32 QR is a different string from the one that
+  arrived.
+- **The address is drawn at §11.3's larger type and full width**, which means it wraps at the floor
+  exactly as the walk's does — the same job, so the same treatment (§0). No new measurement: the two
+  screens sum to about 235 logical px against the 458 `AOBS_WORDS` already reports.
+
+**Open, and named rather than improvised: this section says nothing about a wait.** The search runs
+synchronously on the event-loop thread, so the appliance is unresponsive for its duration — 246 ms on
+a dev machine, and unmeasured on target hardware (`05-testing-and-release.md` §6.4). At a few hundred
+milliseconds that is the right design and a wait screen would be noise; at seconds it is a freeze
+between the scan and the verdict, on the screen a user has just pointed a camera at. **Which it is,
+is exactly what §6.4's owed measurement decides**, and §12 answers neither — so
+[#83](https://github.com/allisson/aobs/issues/83) left it a ticket rather than inventing a screen
+the spec does not have. The lever that already exists is §6.4's own fallback (narrow the index
+window, and say what was searched); a wait screen would be a second one, and choosing between them
+needs the number.
+
 ## 13. Ending the session
 
 **"End the session" and "shut down" are the same action.** Any *close wallet and return to the start

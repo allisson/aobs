@@ -33,6 +33,7 @@ use aobs_core::ur::{Class, Outcome, Payload, Scanner};
 use slint::{ComponentHandle, Image, Rgb8Pixel, SharedPixelBuffer};
 
 use crate::review::{Landed, Review};
+use crate::verify::Verify;
 use crate::{camera, qr, AppWindow, Screen};
 
 /// The preview's ceiling, in the design canvas's own pixels (04-screens.md §0).
@@ -97,6 +98,9 @@ pub struct Scan {
     /// Where a completed transaction goes (04-screens.md §11.2). Held rather than routed: a
     /// payload is a value, and no value crosses the router (standing rule 4).
     review: Rc<Review>,
+    /// And where a completed address goes (§12), held for the same reason: a scanned address is
+    /// a value too, so it never crosses the router either.
+    verify: Rc<Verify>,
     /// Held by a capture thread for the whole of its run, so **two of them can never hold the
     /// device at once.**
     ///
@@ -118,7 +122,7 @@ pub struct Scan {
 /// `scan-tick` carries nothing at all: the frame and the symbols are already in the slot and
 /// the channel, and the callback exists only because a `Send` closure cannot hold an `Rc`
 /// (the same shape as `create`'s `gathered`).
-pub fn wire(ui: &AppWindow, review: Rc<Review>) -> Rc<Scan> {
+pub fn wire(ui: &AppWindow, review: Rc<Review>, verify: Rc<Verify>) -> Rc<Scan> {
     let (outbox, inbox) = mpsc::channel();
     let scan = Rc::new(Scan {
         generation: Arc::new(AtomicUsize::new(0)),
@@ -128,6 +132,7 @@ pub fn wire(ui: &AppWindow, review: Rc<Review>) -> Rc<Scan> {
         scanner: RefCell::new(None),
         class: Cell::new(Class::Psbt),
         review,
+        verify,
         device: Arc::new(Mutex::new(())),
     });
 
@@ -284,8 +289,9 @@ impl Scan {
             // between the user and the thing they asked for.
             //
             // The payload goes where its own variant says, and that is the whole of the
-            // dispatch: a transaction to `review`, which validates it in core; the address
-            // verdict and the restore words to the screens later tickets bring. **This is a
+            // dispatch: a transaction to `review`, which validates it in core; an address to
+            // `verify`, which searches for it in core; the restore words to the screen a later
+            // ticket brings. **This is a
             // branch on a payload class, never on a validation outcome** — the class was fixed
             // when the [`Scanner`] was built, so the arm below is which door was already open
             // and not a judgement about the bytes (standing rule 4).
@@ -309,10 +315,25 @@ impl Scan {
                         ui.set_scan_code(String::new().into());
                     }
                 },
-                // The address verdict (§12) and the restore words (§10) are each a later
-                // ticket, and `Screen::Unbuilt` says so instead of swallowing the press
-                // (standing rule 8).
-                Payload::Address(_) | Payload::Backup(_) => {
+                // §12's verdict, and it is the same shape the transaction arm is: core answers
+                // and `verify` shows whichever screen the answer names. The one difference is
+                // that a candidate address has no *not a PSBT* case — a string either matches
+                // our own material or does not — so the `Scanning` arm here is only the
+                // unreachable no-wallet one.
+                Payload::Address(candidate) => match self.verify.arrived(ui, &candidate) {
+                    Landed::Shown => {
+                        self.leave();
+                        return true;
+                    }
+                    Landed::Scanning(note) => {
+                        self.scanner.replace(Some(Scanner::new(self.class.get())));
+                        ui.set_scan_note(note.into());
+                        ui.set_scan_code(String::new().into());
+                    }
+                },
+                // The restore words (§10) are a later ticket, and `Screen::Unbuilt` says so
+                // instead of swallowing the press (standing rule 8).
+                Payload::Backup(_) => {
                     self.leave();
                     ui.set_screen(Screen::Unbuilt);
                     return true;

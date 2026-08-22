@@ -139,6 +139,24 @@ impl Family {
         ChildNumber::Hardened { index }
     }
 
+    /// Whether this family's addresses are bech32 or bech32m rather than base58.
+    ///
+    /// **This is the whole of `02-core.md` §10's third step, and it is read off the family
+    /// rather than off the candidate.** BIP-173 says encoders MUST emit lowercase but that QR
+    /// presentation SHOULD use uppercase for alphanumeric mode, so a scanned bech32 address is
+    /// usually all uppercase and an exact compare would report *not yours* for the user's own
+    /// address. Base58 is case-sensitive, so comparing *it* loosely would report **yours** for
+    /// an address the user mistyped in case.
+    ///
+    /// A `match` over four variants rather than a reading of a derived address's type: there is
+    /// no unknown arm to default, and adding a fifth family would be a compile error here.
+    fn bech32(self) -> bool {
+        match self {
+            Self::Bip44 | Self::Bip49 => false,
+            Self::Bip84 | Self::Bip86 => true,
+        }
+    }
+
     /// Its slot in [`Family::ALL`] and in [`Wallet`]'s account array.
     fn slot(self) -> usize {
         match self {
@@ -161,12 +179,60 @@ pub enum Branch {
 }
 
 impl Branch {
+    /// Both of them, in the order the receive search walks them.
+    ///
+    /// It exists for the same reason [`Family::ALL`] does: a branch the product derives but
+    /// forgets to search is a false *"this address is not yours"*, and §10 includes change
+    /// because excluding it would produce exactly that for a user checking one.
+    pub const ALL: [Self; 2] = [Self::Receive, Self::Change];
+
     fn child(self) -> ChildNumber {
         match self {
             Self::Receive => ChildNumber::Normal { index: 0 },
             Self::Change => ChildNumber::Normal { index: 1 },
         }
     }
+}
+
+/// How many indices the receive search walks on each branch of each account: **0–999**
+/// (`02-core.md` §10).
+///
+/// 1000 is far past BIP-44's gap limit of 20, which is what makes a negative answer worth
+/// something. It is public because the screen that reports a negative has to name *precisely
+/// what was searched* — and if §6.4's fallback is ever taken and the window narrows, the
+/// sentence has to narrow with it. One constant is what makes that impossible to forget.
+pub const SEARCH_INDICES: u32 = 1_000;
+
+/// How many derivations a search that finds nothing performs: **8,000** — four accounts, both
+/// branches, [`SEARCH_INDICES`] each.
+///
+/// It is here rather than multiplied out by whoever needs it, because it is a fact about the
+/// search and the shell prints it (`05-testing-and-release.md` §6.2). A shell computing it from
+/// three of core's constants would be a second place that has to be right about the shape of the
+/// walk.
+pub const SEARCH_WINDOW: usize = SEARCH_INDICES as usize * Family::ALL.len() * Branch::ALL.len();
+
+/// Where a scanned address turned out to live in our own key material (`02-core.md` §10).
+///
+/// It carries the path *and* the three components the path is assembled from, because
+/// `04-screens.md` §12 states all of them: the full derivation path, the index, and which
+/// branch it came from. A screen that had to take the index back out of the path would be
+/// parsing something we already knew.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found {
+    /// Which of the four families the address belongs to.
+    pub family: Family,
+    /// Receive or change — §12 names it, because a user checking a change address is a
+    /// case the search deliberately covers.
+    pub branch: Branch,
+    /// The index, within [`SEARCH_INDICES`].
+    pub index: u32,
+    /// The full five-level path, for the screen to state.
+    pub path: DerivationPath,
+    /// The address **we derived**, not the string that was scanned. That is the whole point:
+    /// what the screen shows is our own material, so a candidate that matched loosely on case
+    /// is displayed in the form the wallet actually holds.
+    pub address: Address,
 }
 
 /// What a claimed derivation path and a `scriptPubKey` amount to when checked against our own
@@ -308,18 +374,86 @@ impl Wallet {
         if index >= 1 << 31 {
             return None;
         }
-        let key = self.accounts[family.slot()]
-            .derive_pub(&self.secp, &[branch.child(), ChildNumber::Normal { index }])
+
+        Some(self.address_at(family, &self.branch_xpub(family, branch), index))
+    }
+
+    /// The branch-level key, `m/purpose'/coin'/0'/{0,1}`.
+    ///
+    /// Split out for [`Wallet::find_address`], which derives it **once per branch** instead of
+    /// once per index: the search is 8,000 addresses and the branch child is one of the two
+    /// point derivations each of them would otherwise pay for. Measured at 415 ms down to
+    /// 246 ms — see `05-testing-and-release.md` §6.4.
+    fn branch_xpub(&self, family: Family, branch: Branch) -> Xpub {
+        self.accounts[family.slot()]
+            .derive_pub(&self.secp, &[branch.child()])
+            .expect("a normal child of an xpub always derives")
+    }
+
+    /// The address at `index` under an already-derived branch key.
+    ///
+    /// **One implementation of *which script this family means*,** shared by the single-address
+    /// path and the search. Two would be free to disagree, and the one that disagreed would be
+    /// the one deciding whether an address is the user's.
+    fn address_at(&self, family: Family, branch: &Xpub, index: u32) -> Address {
+        let key = branch
+            .derive_pub(&self.secp, &[ChildNumber::Normal { index }])
             .expect("normal children of an xpub always derive");
 
-        Some(match family {
+        match family {
             Family::Bip44 => Address::p2pkh(key.to_pub(), self.network.kind()),
             Family::Bip49 => Address::p2shwpkh(&key.to_pub(), self.network.kind()),
             Family::Bip84 => Address::p2wpkh(&key.to_pub(), self.network.hrp()),
             Family::Bip86 => {
                 Address::p2tr(&self.secp, key.to_x_only_pub(), None, self.network.hrp())
             }
-        })
+        }
+    }
+
+    /// Receive-address verification: **scan one address, compare strings, answer**
+    /// (`02-core.md` §10).
+    ///
+    /// The window is all four accounts, both branches, indices `0..`[`SEARCH_INDICES`] — 8,000
+    /// derivations, and the first match wins. `None` cannot honestly mean *not yours*; it means
+    /// *not in what was searched*, and `04-screens.md` §12 is where that distinction is paid for
+    /// in copy rather than hedged here.
+    ///
+    /// **The candidate's form is never consulted, inferred or trusted.** [`normalize`] strips
+    /// what BIP-21 allows and nothing else; the comparison's looseness comes from
+    /// [`Family::bech32`], which is a fact about material we derived ourselves.
+    ///
+    /// Nothing here originates an address (§10): origination was cut because an originated
+    /// address still reaches the payer through the user's online machine, where it is altered
+    /// exactly as before.
+    #[must_use]
+    pub fn find_address(&self, candidate: &str) -> Option<Found> {
+        let candidate = normalize(candidate);
+
+        for family in Family::ALL {
+            for branch in Branch::ALL {
+                let key = self.branch_xpub(family, branch);
+                for index in 0..SEARCH_INDICES {
+                    let address = self.address_at(family, &key, index);
+                    if !matches(family, &address, candidate) {
+                        continue;
+                    }
+
+                    let path = self
+                        .account_path(family)
+                        .extend([branch.child(), ChildNumber::Normal { index }]);
+
+                    return Some(Found {
+                        family,
+                        branch,
+                        index,
+                        path,
+                        address,
+                    });
+                }
+            }
+        }
+
+        None
     }
 
     /// The re-derivation byte-compare: what a claimed path and a `scriptPubKey` amount to
@@ -415,6 +549,51 @@ impl Wallet {
         let out = f(&master);
         master.private_key.non_secure_erase();
         out
+    }
+}
+
+/// The BIP-21 scheme, which that BIP makes case-insensitive.
+const SCHEME: &[u8] = b"bitcoin:";
+
+/// `02-core.md` §10's first two normalization steps: **strip an optional `bitcoin:` prefix
+/// case-insensitively, then truncate at the first `?`.**
+///
+/// Total, allocation-free and non-indexing — it hands back a slice of what it was given, and
+/// there is no third step that could reach for a heuristic. In particular it does not trim
+/// whitespace, does not accept a second scheme, and does not look at what is left: a candidate
+/// that is not one of these two shapes is simply compared as it arrived, and fails to match.
+///
+/// The prefix test is over **bytes**, so a candidate whose first eight bytes are not a
+/// character boundary cannot panic here. Every address we could match is ASCII, and this cannot
+/// be the place a scanned string dies.
+fn normalize(candidate: &str) -> &str {
+    let stripped = match candidate.as_bytes().get(..SCHEME.len()) {
+        Some(prefix) if prefix.eq_ignore_ascii_case(SCHEME) => &candidate[SCHEME.len()..],
+        _ => candidate,
+    };
+
+    match stripped.find('?') {
+        Some(query) => &stripped[..query],
+        None => stripped,
+    }
+}
+
+/// §10's third step: **`eq_ignore_ascii_case` only when our address is bech32/bech32m, exact
+/// `eq` otherwise.**
+///
+/// `ours` is the address *we derived*, and `family` is what tells us which of the two rules
+/// applies. Nothing about `candidate` is examined beyond the comparison itself — no length, no
+/// prefix, no case — because the moment the candidate's form selected the rule, an attacker
+/// would be choosing how strictly their own string is compared.
+fn matches(family: Family, ours: &Address, candidate: &str) -> bool {
+    // The one allocation on this path, and it is the dependency's rendering rather than a step
+    // of the normalization: §10's four steps are what stays allocation-free.
+    let ours = ours.to_string();
+
+    if family.bech32() {
+        ours.eq_ignore_ascii_case(candidate)
+    } else {
+        ours == candidate
     }
 }
 
