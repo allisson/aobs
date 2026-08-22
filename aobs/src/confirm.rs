@@ -17,9 +17,11 @@
 //! back only the words the user typed.
 //!
 //! The same [`Entry`] drives seed import (§6) and both halves of the encrypted backup (§9,
-//! §10) in later slices. What changes between them is the wordlist, the slot count and
-//! whether an answer is known — all three of them parameters of core's constructor — so those
-//! screens bring their own drawing and their own copy, and nothing else.
+//! §10). What changes between them is the wordlist, the slot count and whether an answer is
+//! known — all three of them parameters of core's constructor — so what each screen brings is
+//! its own **copy**: the heading, the standing hint and the Done control's note. The two
+//! adapters that restate what core said are shared and live in [`crate::typing`], because two
+//! copies of *the key that did not land* are two places that can disagree about it.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -27,13 +29,9 @@ use std::rc::Rc;
 use aobs_core::entry::{Action, Entry, Outcome};
 use slint::{ComponentHandle, ModelRc, VecModel};
 
-use crate::create::Create;
-use crate::{AppWindow, Screen, Slot};
-
-/// Slots per column. Twelve, in two column-major columns, the same geometry the phrase is
-/// drawn in (04-screens.md §3) — so the paper, the phrase screen and this screen all agree
-/// on where word 13 is, and the copy stays positional rather than sequential.
-const COLUMN: usize = 12;
+use crate::phrase::Phrase;
+use crate::typing::{columns, refusal};
+use crate::{AppWindow, Screen};
 
 /// One retype, or none yet.
 pub struct Confirm {
@@ -41,6 +39,9 @@ pub struct Confirm {
     /// nothing* means as state rather than as a promise: coming back from the repair returns
     /// to the words already typed, at the position that was refused.
     entry: RefCell<Option<Entry>>,
+    /// The phrase this is typed against, which never reaches this module: what crosses is an
+    /// [`Entry`] that already holds the answer (04-screens.md §5's slot, `phrase.rs`).
+    phrase: Rc<Phrase>,
 }
 
 /// Wire the three callbacks that carry a keystroke rather than an intent.
@@ -48,9 +49,10 @@ pub struct Confirm {
 /// They bypass the router for the reason a die face does (standing rule 4): a letter of the
 /// mnemonic is a value the user typed, and the router's claim is that no arm of it inspects
 /// one. What the letter *does* is not decided here either — it is handed to core.
-pub fn wire(ui: &AppWindow) -> Rc<Confirm> {
+pub fn wire(ui: &AppWindow, phrase: Rc<Phrase>) -> Rc<Confirm> {
     let confirm = Rc::new(Confirm {
         entry: RefCell::new(None),
+        phrase,
     });
 
     let handle = ui.as_weak();
@@ -83,9 +85,9 @@ pub fn wire(ui: &AppWindow) -> Rc<Confirm> {
 impl Confirm {
     /// Show the retype — the first time from the phrase, and afterwards exactly as it was
     /// left.
-    pub fn begin(&self, ui: &AppWindow, create: &Create) {
+    pub fn begin(&self, ui: &AppWindow) {
         if self.entry.borrow().is_none() {
-            self.entry.replace(create.type_back());
+            self.entry.replace(self.phrase.type_back());
         }
         ui.set_screen(Screen::Retype);
         self.draw(ui, "");
@@ -206,60 +208,6 @@ impl Confirm {
     }
 }
 
-/// The retype as two columns: **1–12 left, 13–24 right**, column-major, for the reason
-/// 04-screens.md §3 gives — a column of twelve is the shape of the card being copied *from*
-/// here, so the two screens and the paper share one geometry.
-///
-/// **Only what the user typed crosses.** A committed word is echoed, because nothing in this
-/// product is masked and an off-by-one has to be visible as a *shift* rather than as a mystery
-/// rejection at word 20. The slot being typed into shows the buffer instead, so a word in
-/// progress is never confused with one that landed.
-fn columns(entry: &Entry) -> (Vec<Slot>, Vec<Slot>) {
-    let slot = |position: usize| {
-        let current = position == entry.cursor();
-        let typed = entry.buffer();
-        Slot {
-            position: i32::try_from(position).unwrap_or_default() + 1,
-            text: if current && !typed.is_empty() {
-                typed.into()
-            } else {
-                entry.word(position).unwrap_or_default().into()
-            },
-            ghost: if current { entry.ghost() } else { "" }.into(),
-            current,
-        }
-    };
-    (
-        (0..COLUMN).map(slot).collect(),
-        (COLUMN..2 * COLUMN).map(slot).collect(),
-    )
-}
-
-/// What the live line says about the action that just ran, or `""` for one that simply
-/// worked.
-///
-/// The two things it can report are both 02-core.md §4's: **the key that was ignored**, and
-/// how many words a prefix still matches. Neither is a judgement — the outcome came from
-/// core, and this turns it into a sentence.
-fn refusal(entry: &Entry, action: Action, outcome: Outcome) -> String {
-    match (action, outcome) {
-        (Action::Char(key), Outcome::Ignored) => {
-            format!(
-                "“{key}” did nothing: no word in the list begins “{}{key}”.",
-                entry.buffer()
-            )
-        }
-        (Action::Commit, Outcome::Ignored) if entry.matches() > 1 => {
-            format!(
-                "“{}” still matches {} words. Keep typing.",
-                entry.buffer(),
-                entry.matches()
-            )
-        }
-        _ => String::new(),
-    }
-}
-
 /// The standing line: **the keymap**, how to type a word, and what the screen is not showing.
 ///
 /// The keymap is named before the user starts, which 04-screens.md §5.1 requires of every typing
@@ -289,9 +237,9 @@ fn hint(entry: &Entry) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{columns, hint, refusal, COLUMN};
+    use super::hint;
     use aobs_core::bip39::Mnemonic;
-    use aobs_core::entry::{Action, Entry, Outcome};
+    use aobs_core::entry::{Action, Entry};
     use aobs_core::secret::Entropy;
 
     /// The retype of BIP-39's own all-zero vector: `abandon` twenty-three times, then `art`.
@@ -305,79 +253,6 @@ mod tests {
         for letter in word.chars() {
             entry.apply(Action::Char(letter));
         }
-    }
-
-    #[test]
-    fn the_grid_is_twelve_and_twelve_column_major() {
-        let (left, right) = columns(&retype());
-        assert_eq!(left.len(), COLUMN);
-        assert_eq!(right.len(), COLUMN);
-        assert_eq!(left[0].position, 1);
-        assert_eq!(left[COLUMN - 1].position, 12);
-        assert_eq!(right[0].position, 13);
-        assert_eq!(right[COLUMN - 1].position, 24);
-    }
-
-    #[test]
-    fn a_fresh_retype_shows_nothing_at_all() {
-        // 04-screens.md §4: the mnemonic is never re-shown during the retype. The phrase is in
-        // the entry — the compare needs it — and no slot can draw it.
-        let (left, right) = columns(&retype());
-        for slot in left.iter().chain(right.iter()) {
-            assert_eq!(slot.text, "");
-            assert_eq!(slot.ghost, "");
-        }
-        assert!(left[0].current);
-    }
-
-    #[test]
-    fn committed_words_are_echoed_and_the_slot_being_typed_shows_the_buffer() {
-        let mut entry = retype();
-        letters(&mut entry, "aban");
-        entry.apply(Action::Commit);
-        letters(&mut entry, "aba");
-
-        let (left, _) = columns(&entry);
-        assert_eq!(left[0].text, "abandon");
-        assert!(!left[0].current);
-        // The word in progress, with the rest of the single match ghosted after it.
-        assert_eq!(left[1].text, "aba");
-        assert_eq!(left[1].ghost, "ndon");
-        assert!(left[1].current);
-        // And nothing anywhere else.
-        assert_eq!(left[2].text, "");
-        assert_eq!(left[2].ghost, "");
-    }
-
-    #[test]
-    fn the_ignored_key_is_named_along_with_the_prefix_that_refused_it() {
-        let mut entry = retype();
-        letters(&mut entry, "aba");
-        let outcome = entry.apply(Action::Char('x'));
-        assert_eq!(outcome, Outcome::Ignored);
-        assert_eq!(
-            refusal(&entry, Action::Char('x'), outcome),
-            "“x” did nothing: no word in the list begins “abax”."
-        );
-    }
-
-    #[test]
-    fn a_space_on_an_ambiguous_prefix_says_how_many_words_are_left() {
-        let mut entry = retype();
-        letters(&mut entry, "ab");
-        let outcome = entry.apply(Action::Commit);
-        assert_eq!(outcome, Outcome::Ignored);
-        assert!(refusal(&entry, Action::Commit, outcome).starts_with("“ab” still matches "));
-    }
-
-    #[test]
-    fn an_action_that_worked_says_nothing_and_leaves_the_hint_in_place() {
-        let mut entry = retype();
-        letters(&mut entry, "aban");
-        let outcome = entry.apply(Action::Commit);
-        assert_eq!(outcome, Outcome::Accepted);
-        assert_eq!(refusal(&entry, Action::Commit, outcome), "");
-        assert!(hint(&entry).starts_with("US keyboard layout."));
     }
 
     /// 04-screens.md §5.1 and §6: **the screen names the keymap before the user starts.** The

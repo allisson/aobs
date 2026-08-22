@@ -176,6 +176,16 @@ Six settled behaviours, each of which is a rule and not a preference:
    twenty-four slots are drawn for a twelve-word phrase, which makes the accepted lengths
    self-evident at a glance.
 
+   **6a. A settled slot past an empty one is a hole, and a run with a hole in it is no length at
+   all** ([#75](https://github.com/allisson/aobs/issues/75)). Twenty-four slots are always drawn
+   and the correction keys move freely between them, so a user with eleven words typed can reach
+   slot 20 and settle a twelfth there. Twelve settled slots is a count the rule above accepts and
+   nothing anybody typed: *inferred* infers from where the words **stop**, so the words have to
+   form a run from the first. The alternative — reading the first twelve settled slots — silently
+   drops a word the user typed and can see, which is the one thing this screen must never do.
+   `Done` therefore asks for a run, not for a count, and the count it reports as progress is
+   deliberately the other question.
+
 **A failed checksum keeps the words.** Wiping destroys no secret — the phrase is on the user's paper
 — it destroys the **diff between paper and screen**, which is the user's only instrument for finding
 their own mistake.

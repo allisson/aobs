@@ -11,6 +11,9 @@
 //! and [#73](https://github.com/allisson/aobs/issues/73) closes it with `confirm`, the retype.
 //! [#74](https://github.com/allisson/aobs/issues/74) is `load`, `session` and `identity`: the
 //! passphrase, the network, ADR-0010's `OnceLock`, and the hub the first journey ends on.
+//! [#75](https://github.com/allisson/aobs/issues/75) is `import`, §6's seed entry — and the two
+//! modules it made structural: `phrase`, which is §5's *one screen on every load path* as state,
+//! and `typing`, the two adapters every word-entry screen restates core with.
 //! [#78](https://github.com/allisson/aobs/issues/78) is the QR boundary's near side: `camera`
 //! grew the capture loop, `qr` is `rqrr` on a luma plane, and `scan` is §11.1's one screen in
 //! its three configurations. [#81](https://github.com/allisson/aobs/issues/81) is `review`:
@@ -29,15 +32,18 @@ mod entropy;
 mod fail;
 mod gate;
 mod identity;
+mod import;
 mod load;
 mod notify;
 mod outbound;
+mod phrase;
 mod power;
 mod qr;
 mod review;
 mod router;
 mod scan;
 mod session;
+mod typing;
 
 use std::rc::Rc;
 
@@ -168,14 +174,24 @@ fn run() -> Result<Ending, Failure> {
     // camera plugged in later is not something a startup decision can have ruled out.
     ui.set_camera_present(camera::present());
 
+    // 04-screens.md §5's *one screen, always present, on every load path*, as the state that
+    // makes it true: create and import both write the phrase here and the load screen reads it,
+    // so there is no arm anywhere choosing between two sources.
+    let phrase = Rc::new(phrase::Phrase::new());
+
     // The create path's own state, and the two callbacks that carry a value rather than an
     // intent (04-screens.md §2). Wired before the router, which holds it to reach §2 and §3.
-    let create = create::wire(&ui);
+    let create = create::wire(&ui, phrase.clone());
 
     // §4's retype, and the three callbacks that carry a keystroke rather than an intent. Its
     // state is core's — the phrase, the prefix matching and the per-word compare — and this
     // module holds only what the screen draws.
-    let confirm = confirm::wire(&ui);
+    let confirm = confirm::wire(&ui, phrase.clone());
+
+    // §6's seed import: the same reducer over the same grid, knowing no answer, with its own
+    // three keystroke callbacks — two screens holding two entries, so neither callback has to
+    // ask which one is live.
+    let import = import::wire(&ui, phrase.clone());
 
     // ADR-0010's `OnceLock`, and the reason it is a local rather than a `static`: a `static` is
     // never dropped, so the wallet's wrapped master key would never be zeroized and §5's wipe
@@ -186,7 +202,7 @@ fn run() -> Result<Ending, Failure> {
     // §5's one load screen, and the three callbacks that carry a value rather than an intent. It
     // holds the phrase's owner and the session, because confirming is where a wallet comes into
     // existence and both are what that needs.
-    let load = load::wire(&ui, create.clone(), session.clone());
+    let load = load::wire(&ui, phrase, session.clone());
 
     // §11.2's panel and §11.3's walk. It holds the session because validating a transaction is
     // the one thing on this path that needs the wallet, and it is built before `scan` because a
@@ -215,6 +231,7 @@ fn run() -> Result<Ending, Failure> {
         router::Screens {
             create: create.clone(),
             confirm,
+            import,
             load,
             scan,
             review,

@@ -25,13 +25,13 @@ use std::time::{Duration, Instant};
 
 use aobs_core::bip39::Mnemonic;
 use aobs_core::entropy::mix;
-use aobs_core::entry::Entry;
 use aobs_core::secret::{Csprng32, Dice, Luma};
 use slint::{ComponentHandle, ModelRc, Timer, TimerMode, VecModel};
 use zeroize::Zeroizing;
 
 use crate::entropy::EntropyUnavailable;
 use crate::fail::Failure;
+use crate::phrase::Phrase;
 use crate::{camera, entropy, AppWindow, Screen, Word};
 
 /// Words per column. **Twelve, in two column-major columns** — 04-screens.md §3, and the
@@ -74,13 +74,13 @@ pub struct Create {
     ticker: Timer,
     gathering: Cell<bool>,
     failure: Cell<Option<Failure>>,
-    /// The phrase, once it exists, for as long as the session does.
+    /// Where the phrase goes once it exists: 04-screens.md §5's one slot, which the retype
+    /// and the load screen both read and which import writes too (`phrase.rs`).
     ///
-    /// It stays in core's zeroizing type and never becomes anything else here: 04-screens.md
-    /// §4's retype compares against it and 02-core.md §4 puts that comparison in core, so what
-    /// this module can do with it is hand out an [`Entry`] that already holds it
-    /// ([`Self::type_back`]) — and read the words for the screen, which is what §3 is.
-    phrase: RefCell<Option<Mnemonic>>,
+    /// It stays in core's zeroizing type and never becomes anything else here. What this
+    /// module does with a phrase is put it there and read the words for the screen, which is
+    /// what §3 is.
+    phrase: Rc<Phrase>,
 }
 
 /// Build the state and wire the two callbacks that carry a value rather than an intent.
@@ -88,7 +88,7 @@ pub struct Create {
 /// `roll` is deliberately not an [`crate::Intent`]: a die face is a byte the user typed, and
 /// the router's whole claim is that no arm of it inspects one (standing rule 4). It lands
 /// here instead, where it is appended to a buffer and counted.
-pub fn wire(ui: &AppWindow) -> Rc<Create> {
+pub fn wire(ui: &AppWindow, phrase: Rc<Phrase>) -> Rc<Create> {
     let (outbox, inbox) = mpsc::channel();
     let create = Rc::new(Create {
         rolls: RefCell::new(Zeroizing::new(Vec::new())),
@@ -99,7 +99,7 @@ pub fn wire(ui: &AppWindow) -> Rc<Create> {
         ticker: Timer::default(),
         gathering: Cell::new(false),
         failure: Cell::new(None),
-        phrase: RefCell::new(None),
+        phrase,
     });
 
     let handle = ui.as_weak();
@@ -257,29 +257,9 @@ impl Create {
         ui.set_screen(Screen::Words);
 
         // The `Mnemonic` itself stays, in the type that zeroizes it, because the retype has
-        // to compare against it and the load path has to derive from it.
-        self.phrase.replace(Some(mnemonic));
-    }
-
-    /// The retype's entry state: core's byte compare, already holding the answer
-    /// (04-screens.md §4).
-    ///
-    /// `None` before a phrase exists, which the one caller cannot reach — the intent that
-    /// leads here is fired from the phrase screen, and that screen is what [`Self::words`]
-    /// shows after storing one.
-    pub fn type_back(&self) -> Option<Entry> {
-        self.phrase.borrow().as_ref().map(Mnemonic::type_back)
-    }
-
-    /// Run `f` over the phrase, which never leaves this module.
-    ///
-    /// A closure rather than an accessor, for the reason `Wallet::with_master` gives: a
-    /// `Mnemonic` handed out by value would be key material with a second lifetime to reason
-    /// about, and the load path wants exactly one thing from it — the seed. `None` before a
-    /// phrase exists, which the one caller cannot reach: 04-screens.md §5's screen is arrived at
-    /// from the retype, and the retype is arrived at from the phrase.
-    pub fn with_phrase<T>(&self, f: impl FnOnce(&Mnemonic) -> T) -> Option<T> {
-        self.phrase.borrow().as_ref().map(f)
+        // to compare against it and the load path has to derive from it — in `phrase.rs`,
+        // which is the one slot 04-screens.md §5's load reads whichever path filled it.
+        self.phrase.set(mnemonic);
     }
 
     /// The failure that ended the session, if one did.
