@@ -289,8 +289,9 @@ impl Scan {
             // between the user and the thing they asked for.
             //
             // The payload goes where its own variant says, and that is the whole of the
-            // dispatch: a transaction to `review`, which validates it in core; the address
-            // verdict and the restore words to the screens later tickets bring. **This is a
+            // dispatch: a transaction to `review`, which validates it in core; an address to
+            // `verify`, which searches for it in core; the restore words to the screen a later
+            // ticket brings. **This is a
             // branch on a payload class, never on a validation outcome** — the class was fixed
             // when the [`Scanner`] was built, so the arm below is which door was already open
             // and not a judgement about the bytes (standing rule 4).

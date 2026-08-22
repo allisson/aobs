@@ -676,12 +676,33 @@ inferred, never trusted.**
 **Search window: all four accounts, both branches, indices 0–999.** Change is included because it
 costs the same loop and excluding it would produce a false negative for a user checking a change
 address. 1000 is far past BIP-44's gap limit of 20, which is what makes a negative answer worth
-something. 8,000 derivations — **timing owed on target hardware.**
+something. 8,000 derivations, and the window is **one constant** (`derive::SEARCH_INDICES`) read by
+both the search and the sentence the negative screen states — so if §6.4's fallback is ever taken and
+the window narrows, the copy narrows with it rather than becoming a lie.
+
+**The branch key is derived once per branch, not once per index**
+([#83](https://github.com/allisson/aobs/issues/83)). `Wallet::address` and the search share one
+`address_at`, so *which script this family means* has one implementation rather than two free to
+disagree — and the hoist is what makes the walk 246 ms instead of 415 ms (release, Apple silicon).
+**Timing still owed on target hardware**, and it is now an instrument rather than an estimate: the
+appliance prints `AOBS_SEARCH window=8000 matched=yes|no elapsed-ms=…` on every search
+(`05-testing-and-release.md` §6.2). `matched` is what makes the number interpretable — a match
+returns on the first hit, so only `matched=no` walked the whole window, which is the case §6.4 is
+about.
 
 **The negative answer.** It cannot honestly mean "not yours"; it means "not in what I searched". But
 the failure the user must not make is treating an unmatched address as safe, and a hedged headline
 invites exactly that. So: headline **"This address is not yours."** with the weight of a refusal, and
 a subordinate line naming precisely what was searched.
+
+**Nothing about the candidate is examined beyond the comparison itself.** Step 3's looseness is
+selected by the *family*, which is a total `match` over four variants with no unknown arm to default
+— never by reading a prefix, a length or a case off the string that arrived. The moment the
+candidate's form selected the rule, an attacker would be choosing how strictly their own string is
+compared. One consequence is recorded rather than glossed: a **mixed-case** rendering of one of our
+own bech32 addresses *matches*, because case is the only thing the compare is blind to and no
+*different* address can be reached that way (`05-testing-and-release.md` §5's own address table says
+so).
 
 ## 11. Backup crypto
 

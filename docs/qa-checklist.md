@@ -356,3 +356,35 @@ On **signet**, with a wallet loaded from a mnemonic both sides know:
       twelve settled slots — the hole is refused, and the word at slot 20 is still there.
 - [ ] *Restart or shut down* is reachable from the import screen at every moment, and it is the
       only thing on the appliance that clears the words.
+
+### Verify a receive address ([#83](https://github.com/allisson/aobs/issues/83))
+
+**Not walked on an ISO, and this is where that is paid for.** The two verdict screens are
+structural copies of ones [#81](https://github.com/allisson/aobs/issues/81) already walked and
+fixed — an `AddressBlock` in a `VerticalLayout`, and a wrapped `Text` in the refusal screen's
+crit box — and the pair sums to about 235 logical px against the 458 `AOBS_WORDS` reports at
+the floor, so no measurement was at risk. What was not checked is everything below, and reaching
+any of it needs a camera, which QEMU has none of (§6.3).
+
+- [ ] **Scan one of your own addresses off a coordinator.** The verdict names the derivation
+      path, the branch and the index as three separate statements, and the address is drawn in
+      4-character groups at §11.3's larger type — which means it **wraps** at 800×600, in the
+      groups and never mid-group.
+- [ ] **Scan the same address as an uppercase QR** (Sparrow and Specter both emit bech32 that
+      way). It matches, and the address on screen comes back **lowercase** — what is drawn is
+      what we derived, not what was scanned.
+- [ ] **Scan a `bitcoin:` URI with an amount and a label in it.** It matches, and nothing of the
+      query string appears anywhere on the screen.
+- [ ] **Scan an address that is not yours.** The headline is *"This address is not yours."* with
+      the weight of a refusal and **no code beside it**, and the line under it names all four
+      account paths, both branches and indices 0 to 999. The scanned string is nowhere on the
+      screen.
+- [ ] **Scan a base58 (BIP44 or BIP49) address of yours with its case changed.** It reports *not
+      yours*, which is the direction that would otherwise be a false **yes**.
+- [ ] **§6.4's owed measurement: read `AOBS_SEARCH` off the serial console on real hardware**,
+      on a scan that reports *not yours* — `matched=no` is the only reading that walked the whole
+      8,000-derivation window. The dev-machine figure is 246 ms (release, Apple silicon); the
+      fallback if a slow machine makes the wait untenable is `05-testing-and-release.md` §6.4's,
+      and the copy narrows with the constant.
+- [ ] **Both verdicts return to the wallet screen** on the one row and on Escape, and the hub is
+      byte-identical to the one the scan was started from.
