@@ -118,7 +118,7 @@ Three we write, one we skip, one deliberate exception.
    invariants that matter: *it never accepts a transaction containing an output classified as ours
    whose scriptPubKey we did not ourselves produce*; — added by
    [#113](https://github.com/allisson/aobs/issues/113) — *every input it accepts as ours is one
-   `sign` produces a signature for*; and — added by
+   `sign` produces a signature for, in the field that input's family is signed from*; and — added by
    [#115](https://github.com/allisson/aobs/issues/115) — *an input arriving with a signature already
    in it is never accepted at all.* The first two are re-derived in the target with its own path
    arithmetic through `Wallet::address`, never by asking the code under test whether it agrees with
@@ -129,7 +129,11 @@ Three we write, one we skip, one deliberate exception.
    seam between the two (`02-core.md` §8a). **The third is what makes the second a claim about the
    delta**: `Psbt::sign` declines a taproot key path whose `tap_key_sig` is already set, so without
    `AOBS-R17` a signature that merely *arrived* would satisfy it — and the third invariant names no
-   code, because which one a refusal earns is the corpus's assertion and never a target's.
+   code, because which one a refusal earns is the corpus's assertion and never a target's. **The
+   second's per-family form is restated here rather than shared**
+   ([#117](https://github.com/allisson/aobs/issues/117)): `sign` reads the family off the `Accepted`
+   the check built, where the target decides it from the `scriptPubKey` it already read to
+   re-derive — so this is the one place where saying the rule twice is the point.
 4. **Skipped: Bytewords and CBOR encode/decode** — `ur` fuzzes those three targets upstream.
    Recorded so a later reviewer does not read the gap as an oversight.
 5. **Deliberate exception: the address-verification path gets no fuzz target.** Its "parser" is a
