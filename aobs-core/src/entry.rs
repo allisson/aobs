@@ -26,9 +26,11 @@
 //! 5. **The final word is never offered as a candidate.** [`Entry::ghost`] completes the word
 //!    being *typed* and never proposes one; the appliance supplies no key material the user
 //!    did not.
-//! 6. **The length is inferred, not declared.** This file counts settled slots
-//!    ([`Entry::settled`]) and names no accepted length: the screen decides what its Done
-//!    control needs, which for a type-back is every slot and for import is one of the five.
+//! 6. **The length is inferred, not declared.** This file names no accepted length — the
+//!    caller supplies them ([`Entry::inferred`]) and a type-back simply wants every slot
+//!    ([`Entry::open`]). What this file *does* own is the shape a phrase has to have:
+//!    [`Entry::can_finish`] counts the words settled so far and refuses a run with a hole in
+//!    it, because a slot filled past an empty one is not the twelfth word of anything.
 //!
 //! **The sixth action `02-core.md` §4 names — `discard` — is deliberately absent.** Per the
 //! session model discard *is* a restart (ADR-0010), so it ends the process rather than
@@ -109,6 +111,10 @@ pub struct Entry {
     #[zeroize(skip)]
     words: &'static [&'static str],
     slots: usize,
+    /// The word counts Done unlocks at, or `None` for *every slot*. Public data — five
+    /// numbers out of BIP-39 — so the zeroizer skips it.
+    #[zeroize(skip)]
+    lengths: Option<&'static [usize]>,
     /// The answer, when there is one. Indices into [`Self::words`], and there is no accessor
     /// that hands them back: `04-screens.md` §4's *the mnemonic is never re-shown* is a
     /// missing method, not a screen that remembers to hide it.
@@ -122,23 +128,55 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// Entry with no answer to compare against: seed import (`04-screens.md` §6) and the
-    /// restore side of the backup (§10).
+    /// Entry with no answer to compare against, finished when **every** slot holds a word:
+    /// the restore side of the backup (`04-screens.md` §10), whose eight words are eight
+    /// words.
     ///
     /// `None` when the buffers could not hold what this wordlist would put in them — a word
-    /// that is empty, longer than [`MAX_WORD`] or not ASCII, an empty list, or a slot count
-    /// outside 1..=[`MAX_SLOTS`]. Both wordlists the appliance ships satisfy all of it, which
-    /// is what lets every keystroke below index without a bound check of its own.
+    /// that is empty, longer than [`MAX_WORD`] or not ASCII, an empty list, a list longer
+    /// than an index fits in, or a slot count outside 1..=[`MAX_SLOTS`]. Both wordlists the
+    /// appliance ships satisfy all of it, which is what lets every keystroke below index
+    /// without a bound check of its own.
     #[must_use]
     pub fn open(words: &'static [&'static str], slots: usize) -> Option<Self> {
+        Self::build(words, slots, None)
+    }
+
+    /// Entry whose Done unlocks at any of `lengths` rather than at a full array: seed import
+    /// (`04-screens.md` §6), where twenty-four slots are always drawn and the length is
+    /// *inferred* from where the words stop (`02-core.md` §4, behaviour 6).
+    ///
+    /// **The accepted counts are the caller's.** This file still names none; what it adds is
+    /// that they have to be reachable — `None` on everything [`Self::open`] refuses, plus an
+    /// empty set and any count outside `1..=slots`.
+    #[must_use]
+    pub fn inferred(
+        words: &'static [&'static str],
+        slots: usize,
+        lengths: &'static [usize],
+    ) -> Option<Self> {
+        let reachable =
+            !lengths.is_empty() && lengths.iter().all(|count| (1..=slots).contains(count));
+        reachable.then(|| Self::build(words, slots, Some(lengths)))?
+    }
+
+    fn build(
+        words: &'static [&'static str],
+        slots: usize,
+        lengths: Option<&'static [usize]>,
+    ) -> Option<Self> {
         let usable = (1..=MAX_SLOTS).contains(&slots)
             && !words.is_empty()
+            // An index into the list is handed out as a `u16` ([`Self::indices`]); 2048
+            // BIP-39 words and 7776 EFF ones are both far under it.
+            && words.len() <= usize::from(u16::MAX)
             && words
                 .iter()
                 .all(|word| word.is_ascii() && (1..=MAX_WORD).contains(&word.len()));
         usable.then(|| Self {
             words,
             slots,
+            lengths,
             answer: [0; MAX_SLOTS],
             known: false,
             placed: [0; MAX_SLOTS],
@@ -238,9 +276,9 @@ impl Entry {
 
     /// How many slots hold a settled word.
     ///
-    /// The screen's Done control is a function of this and nothing else — which is what keeps
-    /// behaviour 6's *inferred, not declared* out of here: import accepts five counts, a
-    /// type-back accepts one, and neither number is this file's.
+    /// This is the progress an import screen reports — *fourteen words typed* — and it is
+    /// deliberately not the same question as [`Self::can_finish`]: fourteen is a count and
+    /// not a length.
     #[must_use]
     pub fn settled(&self) -> usize {
         self.filled
@@ -250,15 +288,50 @@ impl Entry {
             .count()
     }
 
-    /// Whether `⏎` has anything to do: every slot settled, or every slot but the one being
-    /// typed into and a buffer that resolves.
+    /// The settled words as indices into the wordlist, written into `out`, and how many of
+    /// them there are — or `None` for the run [`Self::length`] refuses.
     ///
-    /// The second half is what stops the last word of a phrase needing a space after it
-    /// before Done unlocks.
+    /// **What the user typed, and only that.** A type-back's answer is no more reachable
+    /// through this than through [`Self::word`]: the indices are of the words that landed.
+    #[must_use]
+    pub fn indices(&self, out: &mut [u16; MAX_SLOTS]) -> Option<usize> {
+        let count = self.settled();
+        if !self.filled[..count].iter().all(|at| *at) {
+            return None;
+        }
+        for (slot, &index) in out.iter_mut().zip(&self.placed[..count]) {
+            // `as` rather than a fallible conversion: `open` refuses a wordlist longer than
+            // `u16::MAX`, so every index this can hold already fits.
+            *slot = index as u16;
+        }
+        Some(count)
+    }
+
+    /// Whether `⏎` has anything to do: the words settle into a phrase-shaped run, and its
+    /// length is one this entry accepts.
     #[must_use]
     pub fn can_finish(&self) -> bool {
-        (0..self.slots).all(|position| self.filled[position] || position == self.cursor)
-            && (self.filled[self.cursor] || self.resolve().is_some())
+        self.length().is_some_and(|count| match self.lengths {
+            Some(lengths) => lengths.contains(&count),
+            None => count == self.slots,
+        })
+    }
+
+    /// How many words the phrase would have if Done were pressed now, or `None` when the
+    /// settled slots do not form a run from the first.
+    ///
+    /// Two halves, and each is a rule. The buffer counts as a word when it resolves and the
+    /// slot it is going into is empty — which is what stops the last word of a phrase needing
+    /// a space after it before Done unlocks. And **a slot filled past an empty one is a
+    /// hole**: with twenty-four slots always drawn (behaviour 6), the arrow keys can reach
+    /// slot 20 with eleven words typed, and eleven words plus one is not a twelve-word
+    /// phrase.
+    fn length(&self) -> Option<usize> {
+        let pending = !self.filled[self.cursor] && self.resolve().is_some();
+        let count = self.settled() + usize::from(pending);
+        (0..count)
+            .all(|position| self.filled[position] || (pending && position == self.cursor))
+            .then_some(count)
     }
 
     /// The prefix being typed, as bytes.
