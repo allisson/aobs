@@ -7,11 +7,17 @@
 //! `psbt`'s and `R10`/`R11` are `ur`'s, both tabled here, and `R12`–`R14` are the backup's and
 //! will join them.
 //!
-//! **Two tables, because the two halves end differently.** [`CASES`] runs hostile bytes through
-//! `psbt::validate`, where every case is a refusal. [`TRANSPORT_CASES`] runs scanned symbols
-//! through a `ur::Scanner`, where §5's own list includes a bound that **accepts** (the 64 KiB
-//! boundary, exactly at the limit) and several that drop with no code at all — so the outcome,
-//! not the code, is what a transport case asserts.
+//! **Three tables, because the three halves end differently.** [`CASES`] runs hostile bytes
+//! through `psbt::validate`, where every case is a refusal. [`TRANSPORT_CASES`] runs scanned
+//! symbols through a `ur::Scanner`, where §5's own list includes a bound that **accepts** (the
+//! 64 KiB boundary, exactly at the limit) and several that drop with no code at all — so the
+//! outcome, not the code, is what a transport case asserts. [`ADDRESS_CASES`] runs §5's
+//! address-shaped entries through `Wallet::find_address`, where **nothing carries a code at
+//! all**: a receive verification has two outcomes and neither is a refusal (`02-core.md` §10,
+//! `04-screens.md` §12), so that table contributes nothing to the bijection and is here because
+//! §5 puts those entries in the corpus — which is also
+//! [`05-testing-and-release.md` §4's deliberate exception](https://github.com/allisson/aobs/issues/83):
+//! the address path gets **no fuzz target**, and these cases are what earn their place instead.
 //!
 //! **Two readings this file settles, both stated because a later reader would otherwise have to
 //! guess.**
@@ -1152,6 +1158,134 @@ fn budget_exhausted() -> Vec<String> {
     vec![parts[0].clone(); PART_BUDGET + 1]
 }
 
+// --- the receive-verification cases ------------------------------------------------------
+
+/// How an address case must end. **Two outcomes and no code**: a receive verification either
+/// finds the address in our own key material or does not, and the negative is not a refusal
+/// (`02-core.md` §10, `06-codes.md` §4 — nothing was refused and nothing was discarded).
+pub(crate) enum Answer {
+    /// Found, at exactly this place — asserted rather than merely *some* place, because a case
+    /// that matched the wrong index would still be a pass otherwise.
+    Found(Family, Branch, u32),
+    /// Not in what was searched. `04-screens.md` §12 is where that becomes a headline with the
+    /// weight of a refusal and a subordinate line naming the window.
+    NotFound,
+}
+
+/// One named address case: the candidate as it would arrive off the camera, and the answer.
+pub(crate) struct AddressCase {
+    /// What the case is, in the words §5 uses for it.
+    pub name: &'static str,
+    /// The candidate, built from the fixture wallet — so a case names *our* address and then
+    /// damages it, which is the only way the damage is the subject.
+    pub candidate: fn(&Wallet) -> String,
+    pub answer: Answer,
+}
+
+/// The wallet a substituted address comes from: a different seed, same network, real addresses.
+fn another_wallet() -> Wallet {
+    let mnemonic = Mnemonic::from_entropy(&Entropy::new(&[7u8; 16]).expect("16 bytes fit"))
+        .expect("16 bytes is an accepted length");
+    Wallet::load(
+        &mnemonic,
+        &Passphrase::new("").expect("empty fits"),
+        Network::Mainnet,
+    )
+}
+
+fn ours_at(wallet: &Wallet, family: Family, branch: Branch, index: u32) -> String {
+    wallet
+        .address(family, branch, index)
+        .expect("a normal index derives")
+        .to_string()
+}
+
+/// `05-testing-and-release.md` §5's address-shaped entries, verbatim from its own list.
+pub(crate) const ADDRESS_CASES: &[AddressCase] = &[
+    AddressCase {
+        name: "mixed-case bech32",
+        // BIP-173 forbids mixed case in a *valid* bech32 string, and this case records that we
+        // do not care: step 3 is `eq_ignore_ascii_case` for a bech32 address of ours, and the
+        // candidate's form is never consulted. So a mixed-case rendering of our own address
+        // **matches**, and no substitution is bought by it — case is the only thing the compare
+        // is blind to, so no *different* address can be made to match this way.
+        candidate: |wallet| {
+            let ours = ours_at(wallet, Family::Bip84, Branch::Receive, 4);
+            ours.char_indices()
+                .map(|(at, character)| {
+                    if at % 2 == 0 {
+                        character.to_ascii_uppercase()
+                    } else {
+                        character
+                    }
+                })
+                .collect()
+        },
+        answer: Answer::Found(Family::Bip84, Branch::Receive, 4),
+    },
+    AddressCase {
+        name: "truncated bech32",
+        // A prefix of ours is not ours, and there is no partial credit: the compare is total.
+        candidate: |wallet| {
+            let ours = ours_at(wallet, Family::Bip84, Branch::Receive, 0);
+            ours[..ours.len() - 6].to_owned()
+        },
+        answer: Answer::NotFound,
+    },
+    AddressCase {
+        name: "a valid address differing by one character",
+        // The attack, one character wide — and the one the 4-character grouping on the verdict
+        // screen exists to make readable.
+        candidate: |wallet| {
+            let mut ours = ours_at(wallet, Family::Bip86, Branch::Receive, 0);
+            let last = ours.pop().expect("an address has characters");
+            ours.push(if last == 'q' { 'p' } else { 'q' });
+            ours
+        },
+        answer: Answer::NotFound,
+    },
+    AddressCase {
+        name: "a valid address differing only in case",
+        // **The base58 half of step 3, and the direction that would report *yours*.** Base58 is
+        // case-sensitive, so this is a different string and must not match — which is why the
+        // looseness is selected by the family we derived and never by the candidate.
+        candidate: |wallet| ours_at(wallet, Family::Bip44, Branch::Receive, 0).to_uppercase(),
+        answer: Answer::NotFound,
+    },
+    AddressCase {
+        name: "`bitcoin:` with a query string",
+        candidate: |wallet| {
+            format!(
+                "bitcoin:{}?amount=0.0123&label=Coffee",
+                ours_at(wallet, Family::Bip49, Branch::Receive, 1)
+            )
+        },
+        answer: Answer::Found(Family::Bip49, Branch::Receive, 1),
+    },
+    AddressCase {
+        name: "an uppercase BIP-21 URI",
+        // Scheme and address both shouted, which is what a bech32 QR carrying a URI looks like:
+        // BIP-21 makes the scheme case-insensitive and BIP-173 SHOULD use uppercase for
+        // alphanumeric mode, so both halves of step 1 and step 3 fire on one symbol.
+        candidate: |wallet| {
+            format!(
+                "bitcoin:{}",
+                ours_at(wallet, Family::Bip84, Branch::Change, 2)
+            )
+            .to_uppercase()
+        },
+        answer: Answer::Found(Family::Bip84, Branch::Change, 2),
+    },
+    AddressCase {
+        name: "a correctly-formed address from the wrong account",
+        // Not damaged in any way — a real BIP84 receive address, of a different seed. This is
+        // what a substitution actually looks like on the wire, and the only thing that catches
+        // it is that we derived our own.
+        candidate: |_| ours_at(&another_wallet(), Family::Bip84, Branch::Receive, 0),
+        answer: Answer::NotFound,
+    },
+];
+
 // --- the registry ------------------------------------------------------------------------
 
 /// `06-codes.md` §6's refusal space, read from the file itself rather than copied into a
@@ -1270,17 +1404,76 @@ fn every_transport_case_ends_as_it_says() {
 }
 
 #[test]
+fn every_address_case_answers_as_it_says() {
+    // One wallet for the whole table: a search is 8,000 derivations and the fixture is the same
+    // one every other table here is written against.
+    let wallet = wallet();
+
+    for case in ADDRESS_CASES {
+        let candidate = (case.candidate)(&wallet);
+        assert!(!candidate.is_empty(), "{}: no candidate", case.name);
+
+        match (&case.answer, wallet.find_address(&candidate)) {
+            (Answer::Found(family, branch, index), Some(found)) => {
+                assert_eq!(
+                    (found.family, found.branch, found.index),
+                    (*family, *branch, *index),
+                    "{}",
+                    case.name
+                );
+                // What the screen shows is our own material, never the candidate — which for
+                // the two shouted cases is the whole difference between the two strings.
+                assert_eq!(
+                    found.address.to_string(),
+                    ours_at(&wallet, *family, *branch, *index),
+                    "{}",
+                    case.name
+                );
+            }
+            (Answer::NotFound, None) => {}
+            (Answer::Found(..), None) => panic!("{} was not found", case.name),
+            (Answer::NotFound, Some(found)) => {
+                panic!("{} was found at {}", case.name, found.path)
+            }
+        }
+    }
+}
+
+#[test]
 fn case_names_are_distinct() {
     let names = sorted_unique(
         CASES
             .iter()
             .map(|case| case.name)
-            .chain(TRANSPORT_CASES.iter().map(|case| case.name)),
+            .chain(TRANSPORT_CASES.iter().map(|case| case.name))
+            .chain(ADDRESS_CASES.iter().map(|case| case.name)),
     );
     assert_eq!(
         names.len(),
-        CASES.len() + TRANSPORT_CASES.len(),
+        CASES.len() + TRANSPORT_CASES.len() + ADDRESS_CASES.len(),
         "two cases share a name"
+    );
+}
+
+/// §5's own list of address-shaped entries is seven, and the table is those seven. A case
+/// quietly dropped would leave the suite green — which is what this asserts against, the same
+/// way [`the_registry_parses_to_the_codes_it_states`] does for the codes.
+#[test]
+fn the_address_table_is_the_seven_entries_section_five_names() {
+    assert_eq!(
+        ADDRESS_CASES
+            .iter()
+            .map(|case| case.name)
+            .collect::<Vec<_>>(),
+        [
+            "mixed-case bech32",
+            "truncated bech32",
+            "a valid address differing by one character",
+            "a valid address differing only in case",
+            "`bitcoin:` with a query string",
+            "an uppercase BIP-21 URI",
+            "a correctly-formed address from the wrong account",
+        ]
     );
 }
 

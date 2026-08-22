@@ -511,3 +511,257 @@ fn the_network_names_itself_and_the_other_one() {
     assert_eq!(Network::Testnet.name(), "testnet or signet");
     assert_ne!(Network::Mainnet.name(), Network::Testnet.name());
 }
+// --- §10's receive-address verification ---------------------------------------------------
+//
+// **A miss is 8,000 derivations, so the misses are counted rather than sprinkled.** Every
+// candidate that fails to match walks the whole window, and in a debug build one point
+// derivation is roughly a thousand times what the string comparison costs — so each test below
+// asserts a *rule* on the smallest number of full walks that can carry it, and the rules that
+// are purely about strings are asserted against `normalize` and `matches` directly, where they
+// live.
+
+/// The QR form of a bech32 address: BIP-173 SHOULD use uppercase for alphanumeric mode, which
+/// is what makes step 3's `eq_ignore_ascii_case` load-bearing rather than lenient.
+fn qr_form(address: &str) -> String {
+    address.to_uppercase()
+}
+
+/// `05-testing-and-release.md` §2's *Address verification* row: **derived addresses across all
+/// four families, matched in both lowercase and uppercase QR forms.**
+///
+/// The two halves are not symmetric, and that asymmetry is the whole of `02-core.md` §10's
+/// third step: a bech32 address matches whatever case it arrives in, and a base58 one matches
+/// only as it was derived. Both are asserted here, in one table, because a change that made the
+/// compare uniform in either direction would break exactly one of them — and the base58 half is
+/// the direction that would report **yours** for an address the user mistyped in case.
+#[test]
+fn every_derived_address_is_found_and_only_bech32_matches_loosely_on_case() {
+    let wallet = wallet(Network::Mainnet);
+
+    for family in Family::ALL {
+        for branch in Branch::ALL {
+            // The two ends of the window, which is also the cheapest and the dearest match.
+            for index in [0u32, SEARCH_INDICES - 1] {
+                let derived = address_of(&wallet, family, branch, index);
+
+                let found = wallet
+                    .find_address(&derived)
+                    .unwrap_or_else(|| panic!("{family:?} {branch:?} {index} was not found"));
+                assert_eq!(
+                    (found.family, found.branch, found.index),
+                    (family, branch, index)
+                );
+                assert_eq!(found.address.to_string(), derived);
+            }
+        }
+    }
+
+    // The case rule is a property of the family, so one address per family carries it. For the
+    // two bech32 families the shouted form matches and **what comes back is our own form**, not
+    // the string that was scanned; for the two base58 families it is a different string.
+    for family in Family::ALL {
+        let derived = address_of(&wallet, family, Branch::Receive, 0);
+        let shouted = wallet.find_address(&qr_form(&derived));
+
+        if family.bech32() {
+            let found = shouted.unwrap_or_else(|| panic!("{family:?}: the QR form must match"));
+            assert_eq!(found.index, 0);
+            assert_eq!(found.address.to_string(), derived, "{family:?}");
+        } else {
+            assert!(
+                shouted.is_none(),
+                "{family:?}: base58 is case-sensitive, so an uppercased one is a different \
+                 string and must not match"
+            );
+        }
+    }
+}
+
+/// The verdict states the three things `04-screens.md` §12 puts on the screen, and the path is
+/// assembled from them rather than beside them.
+#[test]
+fn a_match_carries_the_full_path_the_index_and_the_branch() {
+    let wallet = wallet(Network::Mainnet);
+    let derived = address_of(&wallet, Family::Bip84, Branch::Change, 7);
+
+    let found = wallet.find_address(&derived).expect("ours");
+
+    assert_eq!(found.family, Family::Bip84);
+    assert_eq!(found.branch, Branch::Change);
+    assert_eq!(found.index, 7);
+    assert_eq!(found.path.to_string(), "84'/0'/0'/1/7");
+    assert_eq!(found.address.to_string(), derived);
+    // Both branches are searched (the test above walks them), and this is the one that would
+    // otherwise be a false *not yours* for a user checking a change address.
+    assert_ne!(found.branch, Branch::Receive);
+}
+
+/// The window is 0–999 inclusive, on the nose. 1000 is the first address that is genuinely
+/// ours and that this search reports nothing about — which is why the negative screen names
+/// what was searched instead of claiming the address is not the user's.
+#[test]
+fn the_window_ends_at_nine_hundred_ninety_nine() {
+    let wallet = wallet(Network::Mainnet);
+    assert_eq!(SEARCH_INDICES, 1_000);
+
+    let last = address_of(&wallet, Family::Bip84, Branch::Receive, SEARCH_INDICES - 1);
+    assert!(wallet.find_address(&last).is_some());
+
+    let past = address_of(&wallet, Family::Bip84, Branch::Receive, SEARCH_INDICES);
+    assert!(
+        wallet.find_address(&past).is_none(),
+        "the index one past the window is ours and is not searched"
+    );
+}
+
+/// A BIP-21 URI, in both cases of the scheme and with and without a query string. The scheme is
+/// case-insensitive by BIP-21, and the query is where a coordinator puts the amount and the label.
+///
+/// Every candidate here **matches**, so none of them pays for a full walk.
+#[test]
+fn a_bitcoin_uri_is_stripped_case_insensitively_and_truncated_at_the_query() {
+    let wallet = wallet(Network::Mainnet);
+    let derived = address_of(&wallet, Family::Bip44, Branch::Receive, 0);
+    let bech32 = address_of(&wallet, Family::Bip84, Branch::Receive, 0);
+
+    for candidate in [
+        format!("bitcoin:{derived}"),
+        format!("BITCOIN:{derived}"),
+        format!("Bitcoin:{derived}"),
+        format!("bitcoin:{derived}?amount=0.001"),
+        format!("bitcoin:{derived}?amount=0.001&label=Coffee"),
+        format!("{derived}?amount=0.001"),
+        format!("bitcoin:{bech32}"),
+        // The uppercase BIP-21 URI a bech32 QR actually carries: scheme, address and all.
+        qr_form(&format!("bitcoin:{bech32}?amount=0.001")),
+    ] {
+        assert!(
+            wallet.find_address(&candidate).is_some(),
+            "{candidate} must match"
+        );
+    }
+}
+
+/// The two shapes the whole feature exists to catch, end to end: **one character different**,
+/// and a truncated address. Two full walks, and they are the two worth paying for.
+#[test]
+fn one_character_different_and_a_truncation_are_not_found() {
+    let wallet = wallet(Network::Mainnet);
+    let derived = address_of(&wallet, Family::Bip84, Branch::Receive, 0);
+
+    let mut altered = derived.clone();
+    altered.pop();
+    altered.push('q');
+    assert_ne!(altered, derived);
+    assert!(wallet.find_address(&altered).is_none(), "{altered}");
+
+    let truncated = derived[..derived.len() - 4].to_owned();
+    assert!(wallet.find_address(&truncated).is_none(), "{truncated}");
+}
+
+/// A correctly formed address from the **wrong account**: a real address of a different seed,
+/// which is what a substituted address from another wallet looks like. Asserted in both
+/// directions, so the two fixtures cannot accidentally be the same wallet.
+#[test]
+fn a_correctly_formed_address_from_another_wallet_is_not_found() {
+    let ours = wallet(Network::Mainnet);
+    let theirs = Wallet::load(
+        &Mnemonic::from_entropy(&Entropy::new(&[7u8; 16]).expect("16 bytes fit"))
+            .expect("16 bytes is an accepted length"),
+        &no_passphrase(),
+        Network::Mainnet,
+    );
+    assert_ne!(ours.fingerprint(), theirs.fingerprint());
+
+    let foreign = address_of(&theirs, Family::Bip84, Branch::Receive, 0);
+    assert!(ours.find_address(&foreign).is_none(), "{foreign}");
+
+    let mine = address_of(&ours, Family::Bip84, Branch::Receive, 0);
+    assert!(theirs.find_address(&mine).is_none(), "{mine}");
+}
+
+/// The network is a load parameter (ADR-0015) and the search is over the accounts the loaded
+/// network derived, so a testnet address is not found by a mainnet session. Asserted on the one
+/// family whose two networks share no prefix at all, in the direction a user would hit it.
+#[test]
+fn an_address_of_the_other_network_is_not_found() {
+    let mainnet = wallet(Network::Mainnet);
+    let testnet = wallet(Network::Testnet);
+
+    let theirs = address_of(&testnet, Family::Bip84, Branch::Receive, 0);
+    assert!(mainnet.find_address(&theirs).is_none(), "{theirs}");
+}
+
+/// The two normalization steps on their own, including the shapes that must not panic. A
+/// scanned symbol is printable ASCII by the time `ur.rs` is done with it, but this function may
+/// not rest on that: it is the one place a hostile string is sliced.
+#[test]
+fn the_normalization_is_two_slices_and_never_panics() {
+    assert_eq!(normalize("bc1qexample"), "bc1qexample");
+    assert_eq!(normalize("bitcoin:bc1qexample"), "bc1qexample");
+    assert_eq!(normalize("BITCOIN:BC1QEXAMPLE"), "BC1QEXAMPLE");
+    assert_eq!(normalize("bitcoin:bc1qexample?amount=1"), "bc1qexample");
+    assert_eq!(normalize("bc1qexample?a=1?b=2"), "bc1qexample");
+    assert_eq!(normalize("bitcoin:"), "");
+    assert_eq!(normalize("?"), "");
+    assert_eq!(normalize(""), "");
+    // Shorter than the scheme, so the prefix slice does not exist at all.
+    assert_eq!(normalize("bit"), "bit");
+    // Multi-byte characters at and around the prefix boundary: no byte index taken here is
+    // allowed to land inside one.
+    assert_eq!(normalize("₿itcoin:abc"), "₿itcoin:abc");
+    assert_eq!(normalize("bitcoin:₿ab?x"), "₿ab");
+    assert_eq!(normalize("₿?₿"), "₿");
+}
+
+/// Everything the four steps deliberately **do not** do, asserted where the steps are rather
+/// than through 8,000 derivations each: no whitespace trimming, no second scheme, no prefix
+/// BIP-21 does not name, and no recovery from a leading `?`.
+#[test]
+fn nothing_but_those_four_steps_happens() {
+    let wallet = wallet(Network::Mainnet);
+    let bech32 = wallet
+        .address(Family::Bip84, Branch::Receive, 0)
+        .expect("a normal index");
+    let base58 = wallet
+        .address(Family::Bip44, Branch::Receive, 0)
+        .expect("a normal index");
+
+    for ours in [&bech32, &base58] {
+        let derived = ours.to_string();
+        let family = if ours == &bech32 {
+            Family::Bip84
+        } else {
+            Family::Bip44
+        };
+
+        assert!(matches(family, ours, normalize(&derived)));
+
+        for candidate in [
+            format!(" {derived}"),
+            format!("{derived} "),
+            format!("lightning:{derived}"),
+            format!("bitcoin://{derived}"),
+            format!("?{derived}"),
+            "bitcoin:".to_owned(),
+            String::new(),
+        ] {
+            assert!(
+                !matches(family, ours, normalize(&candidate)),
+                "{family:?} {candidate:?} must not match"
+            );
+        }
+    }
+
+    // And the case rule, at the level it is implemented rather than through the search.
+    assert!(matches(
+        Family::Bip84,
+        &bech32,
+        &qr_form(&bech32.to_string())
+    ));
+    assert!(!matches(
+        Family::Bip44,
+        &base58,
+        &qr_form(&base58.to_string())
+    ));
+}
