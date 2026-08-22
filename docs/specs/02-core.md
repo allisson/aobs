@@ -318,6 +318,7 @@ a check are hostile until proven otherwise — discard, zeroize, no retry with t
 | Sighash other than `SIGHASH_ALL` (or `SIGHASH_DEFAULT` for taproot) | No user can evaluate what signing under `SIGHASH_SINGLE` exposes them to. |
 | Sum of outputs exceeds sum of inputs | Structurally impossible; a lie by construction. |
 | An input whose script type is outside BIP44/49/84/86 single-sig — **including a taproot input that does not declare its key path in full**: the internal key, *and* a `tap_key_origins` entry keyed by it carrying no leaf hashes (§8a) | We would be signing something we do not model — or, for the taproot half, declaring a key-path spend the document gives no way to sign. |
+| **An input that already carries a signature** — `partial_sigs`, `tap_key_sig`, `tap_script_sigs`, `final_script_sig` or `final_script_witness` ([#115](https://github.com/allisson/aobs/issues/115)) | We sign single-sig only, so we are the only Signer there is: a document that already holds a signature for an input is not a document asking us for one. |
 | An input that does not re-derive to our own key material | Foreign inputs mean the displayed cost is not the user's alone. |
 | An output we cannot render as an address | The user would be approving hex. |
 | **More than six outputs**, payment and change counted together | The review panel is non-scrolling and holds six rows in the minimum canvas (`04-screens.md` §11.2). A seventh output could only be shown by scrolling, clipping or summarising it, and all three mean approving what was not seen. |
@@ -338,6 +339,41 @@ the whole BIP-143 amount-spoofing class rather than its two published instances 
 it twice, six years apart. Taproot is genuinely exempt: BIP-341 commits to all input amounts and
 scriptPubKeys, so a lie invalidates the signature. **Accepted cost: a coordinator sending
 `witness_utxo` only is refused.**
+
+**`AOBS-R17` — a pre-signed input — and why it is wider than the defect that found it.** Settled by
+[#115](https://github.com/allisson/aobs/issues/115), which is §8a's second residual: `sign` could
+promise that the document going out carries a signature for every input the wallet owns, but not that
+*this call put one there*, because `bitcoin` 0.32's taproot path declines a key path when
+`tap_key_sig` is already set. So a PSBT arriving with 64 bytes of nonsense in that field satisfied
+the assertion, drew an honest review panel, took a three-second hold and went back out with nothing
+added under a screen reading *Signed*. Refusing such an input structurally is what makes the
+assertion and the screen the same claim, and the two alternatives were rejected: **verifying** the
+arriving signature puts signature verification into this crate on the signing path and still ends in
+`AOBS-E04` when the check fails, and **narrowing the screen's sentence** hands the user a document
+the coordinator will refuse, where a refusal costs them one scan. This is §7's own order applied —
+refuse early, structurally, before any key material.
+
+Three consequences, all deliberate:
+
+- **The rule is about the input, not about ownership.** The check needs no key material, so it runs
+  with the structural refusals and therefore before anything knows whose the input is: a pre-signed
+  input we do *not* own is refused too. That is the right answer independently — we sign single-sig,
+  so we are the only Signer, and BIP-174 gives a Signer no reason to accept an input somebody has
+  already signed.
+- **All five fields count, signatures and finalized alike.** BIP-174 has a Finalizer *remove*
+  `partial_sigs` when it writes the final script, so `final_script_witness` is the same signature in
+  the other encoding, and refusing one while accepting the other draws the line exactly where an
+  attacker chooses. It is also not merely tidiness: `Psbt::sign` never reads those two fields
+  (verified against 0.32.102), so a finalized input would come back carrying a final witness *and* a
+  fresh `partial_sigs` entry — a state BIP-174 does not describe, which is §8's *a change that fails
+  at their end* arriving from the other direction.
+- **The number is spent, and that was the cost weighed.** `AOBS-R17` is permanent. #113 declined to
+  spend it on a shape that turned out to sign correctly; this spends it on a shape that turned out
+  not to.
+
+**Named cost: a coordinator that co-signs before asking us is refused.** No such coordinator exists
+for single-sig — one that already held our signature would not be asking for it — and a multisig
+flow, where a partially-signed document is the normal shape, is outside v1 by construction.
 
 **Three checks deliberately not added:**
 
@@ -504,16 +540,21 @@ residual costs, both named rather than glossed:
   its key-path claim is not lands there, and R06 offers the passphrase, account 0 and the network as
   likely causes. It is the same trade §7 already takes for R06's other variants, on a shape no
   honest coordinator emits.
-- **The assertion is about the document going out, not about this call's delta**, and it has to be.
-  `Psbt::sign` declines a taproot key path when `tap_key_sig` is *already* set, so a PSBT arriving
-  with 64 bytes of nonsense in that field would make an *added a signature* assertion panic —
+- **The assertion was about the document going out and not about this call's delta**, and it had to
+  be while an input could arrive already signed. `Psbt::sign` declines a taproot key path when
+  `tap_key_sig` is *already* set, so an *added a signature* assertion would have panicked —
   `AOBS-E04` on bytes an attacker chooses, which is the trade this section rejected in the first
-  place. So a signature that **arrived** satisfies the assertion, and nothing checks that it is
-  valid: such a document reaches the coordinator and is refused there, which is the pre-#113 outcome
-  for a different shape. **Open, and a ticket rather than a decision taken here** —
-  [#115](https://github.com/allisson/aobs/issues/115), where the options are a refusal for an input
-  arriving pre-signed (which needs a code `06-codes.md` does not define) or verifying a pre-existing
-  signature before counting it.
+  place. So a signature that **arrived** satisfied it, and nothing checked that it was valid: such a
+  document reached the coordinator and was refused there, under a screen that had said *Signed*.
+  **Closed by [#115](https://github.com/allisson/aobs/issues/115), which spent the registry number
+  #113 declined to spend.** §7's new structural row refuses an input that arrives carrying a
+  signature at all — `AOBS-R17`, all five fields, before any key material and therefore whether or
+  not the input is ours — and the argument for its width is in §7 beside it. Because no accepted
+  input can then hold one, `sign` asserts the **delta**: every input the validator found ours
+  arrived unsigned and comes back signed, which is what the screen claims. The two halves are not the
+  same predicate and that is deliberate — *arrived unsigned* is R17's own five-field test, while
+  *comes back signed* is the narrow pair `Psbt::sign` writes, `partial_sigs` and `tap_key_sig`, so a
+  `tap_script_sigs` entry cannot stand in for the signature the input's family is signed from.
 
 **`sign_schnorr_no_aux_rand` is the deterministic arm, and which arm gets used is a feature flag
 rather than a call site.** `Psbt::sign` reaches `sign_schnorr` with fresh auxiliary randomness when

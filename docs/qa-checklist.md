@@ -249,6 +249,24 @@ it — which is what makes these rows about honesty rather than about money.
 - [ ] And the honest side is unchanged: an ordinary taproot spend from a real coordinator still
       reaches the panel, signs, and finalizes.
 
+### An input arriving pre-signed ([#115](https://github.com/allisson/aobs/issues/115))
+
+The last corner of the shape above, and the same kind of row: this PSBT reached the panel, the gate
+and *Signed. Show this to your wallet.* over a document with nothing added to it, because `bitcoin`
+0.32's taproot path silently declines an input whose `tap_key_sig` is already set. Crafted PSBTs, fed
+the way the seven-output row is.
+
+- [ ] A taproot PSBT of ours carrying **64 arbitrary bytes in `tap_key_sig`** is refused with
+      `AOBS-R17` before any review screen is drawn, on a discard-only screen. The copy says the input
+      already carries a signature and names the input **one-based**.
+- [ ] The same for a P2WPKH PSBT of ours carrying a `partial_sigs` entry, and for one carrying a
+      `final_script_witness` — all three are `AOBS-R17`, which is the width the decision took
+      (`02-core.md` §7): the finalized encoding is the same signature after a Finalizer moved it.
+- [ ] A PSBT whose pre-signed input is **not ours** is refused with `AOBS-R17` too, not with
+      `AOBS-R06`. The check needs no key material, so it runs first — that ordering is the row.
+- [ ] And the honest side is unchanged: an ordinary spend with no signature fields still reaches the
+      panel, signs, and finalizes.
+
 ### Creating a wallet ([#72](https://github.com/allisson/aobs/issues/72))
 
 - [ ] At 800×600, **two columns of 12 words are all on screen at once** — 1–12 left, 13–24

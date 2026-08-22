@@ -25,6 +25,12 @@
 //! claim the signing path would never reach, which is [`KeyPath`]'s axis — if §7's rule 6 ever
 //! widens back to *walk both maps*, such an input is accepted as ours and comes back unsigned.
 //!
+//! **A third invariant rides on the same plan** ([#115](https://github.com/allisson/aobs/issues/115)):
+//! an input arriving with a signature already in it is never accepted, which is [`Arriving`]'s axis.
+//! It is what makes the second invariant a claim about this call's *delta* rather than about the
+//! document going out — `Psbt::sign` declines a taproot key path whose `tap_key_sig` is already
+//! set, so without the refusal a signature that merely arrived would have satisfied it.
+//!
 //! **The second invariant is why this target signs**, which costs one signature per input of every
 //! accepted plan. It is the only way the assertion reaches a mutator: the set of inputs `sign`
 //! checks is `crate::psbt`'s own, so a target that did not re-derive independently would be
@@ -41,11 +47,13 @@ use bitcoin::absolute::LockTime;
 use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint};
 use bitcoin::hashes::Hash as _;
 use bitcoin::psbt::{Input, Psbt};
-use bitcoin::secp256k1::{PublicKey, Secp256k1, XOnlyPublicKey};
+use bitcoin::secp256k1::{schnorr, PublicKey, Secp256k1, XOnlyPublicKey};
+use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::taproot::TapLeafHash;
 use bitcoin::transaction::Version;
 use bitcoin::{
-    Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, WPubkeyHash, Witness,
+    ecdsa, taproot, Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, WPubkeyHash,
+    Witness,
 };
 
 use aobs_core::bip39::Mnemonic;
@@ -112,6 +120,39 @@ struct InputPlan {
     claim: InputClaim,
     /// How a taproot input declares its key path. Ignored by the other three families.
     key_path: KeyPath,
+    /// Whether the input turns up with a signature already in it.
+    arriving: Arriving,
+}
+
+/// Whether the input arrives already carrying a signature
+/// ([#115](https://github.com/allisson/aobs/issues/115)).
+///
+/// **Two variants rather than six, for [`KeyPath`]'s own reason.** Every signed form is refused, so
+/// a flat six-way enum would refuse five plans in six and starve the checks this target exists for.
+/// Nesting them puts [`Arriving::Unsigned`] back at half.
+///
+/// **What this axis reaches is the invariant `AOBS-R17` was spent on.** Before it, a taproot input
+/// arriving with `tap_key_sig` set was accepted and then silently declined by the dependency's key
+/// path, so the document went back out unchanged under a screen reading *Signed*. A plan that
+/// declares one must not be accepted at all — [`assert_no_accepted_input_arrived_signed`] — and if
+/// one ever is, `sign`'s delta assertion is the second finding on the same bytes.
+#[derive(Arbitrary, Debug)]
+enum Arriving {
+    /// All five fields empty, which is the only form the policy accepts.
+    Unsigned,
+    /// One of them filled with bytes that are not a signature this wallet would produce.
+    Signed(ArrivingSignature),
+}
+
+/// The five fields an input can arrive signed in — the three signature maps, and the two a
+/// Finalizer writes while removing `partial_sigs`.
+#[derive(Arbitrary, Debug)]
+enum ArrivingSignature {
+    PartialSig,
+    TapKeySig,
+    TapScriptSig,
+    FinalScriptSig,
+    FinalScriptWitness,
 }
 
 /// What an input says about itself.
@@ -408,6 +449,7 @@ fn build(wallet: &Wallet, plan: &Plan) -> Option<Vec<u8>> {
                 }
             }
         }
+        plant_arriving_signature(slot, &plan.arriving, key, x_only);
     }
 
     if plan.starve_first_input {
@@ -423,6 +465,59 @@ fn build(wallet: &Wallet, plan: &Plan) -> Option<Vec<u8>> {
     }
 
     Some(psbt.serialize())
+}
+
+/// Fill one of the five fields `AOBS-R17` refuses, or leave the input clean
+/// ([#115](https://github.com/allisson/aobs/issues/115)).
+///
+/// **Every value is non-empty on purpose.** These have to survive a serialise/deserialise round
+/// trip to reach the policy at all, and an empty `final_script_sig` is a plan that plants nothing
+/// while [`assert_no_accepted_input_arrived_signed`] would still demand a refusal.
+///
+/// Nothing here is a signature the wallet would produce. That is the point: the refusal is for
+/// carrying one at all, so a target that planted a *valid* signature would be testing a shape no
+/// attacker needs.
+fn plant_arriving_signature(
+    input: &mut Input,
+    arriving: &Arriving,
+    key: &PublicKey,
+    x_only: &XOnlyPublicKey,
+) {
+    let Arriving::Signed(field) = arriving else {
+        return;
+    };
+    let schnorr = taproot::Signature {
+        signature: schnorr::Signature::from_slice(&[0x42; 64]).expect("64 bytes is a signature"),
+        sighash_type: TapSighashType::Default,
+    };
+    match field {
+        ArrivingSignature::PartialSig => {
+            input.partial_sigs.insert(
+                bitcoin::PublicKey::new(*key),
+                ecdsa::Signature {
+                    // The low-`s` DER encoding of `(1, 1)`: well-formed, and a signature over
+                    // nothing.
+                    signature: bitcoin::secp256k1::ecdsa::Signature::from_der(&[
+                        0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01,
+                    ])
+                    .expect("well-formed DER"),
+                    sighash_type: EcdsaSighashType::All,
+                },
+            );
+        }
+        ArrivingSignature::TapKeySig => input.tap_key_sig = Some(schnorr),
+        ArrivingSignature::TapScriptSig => {
+            input
+                .tap_script_sigs
+                .insert((*x_only, TapLeafHash::from_byte_array([0x44; 32])), schnorr);
+        }
+        ArrivingSignature::FinalScriptSig => {
+            input.final_script_sig = Some(ScriptBuf::from_bytes(vec![0x51]));
+        }
+        ArrivingSignature::FinalScriptWitness => {
+            input.final_script_witness = Some(Witness::from_slice(&[[0x42; 64].as_slice()]));
+        }
+    }
 }
 
 /// The P2WPKH redeem script BIP49 wraps, for the first receive address.
@@ -582,6 +677,28 @@ fn assert_every_input_of_ours_came_back_signed(
     }
 }
 
+/// §4's third invariant ([#115](https://github.com/allisson/aobs/issues/115)): **no input of an
+/// accepted transaction arrived carrying a signature.**
+///
+/// It reads the plan rather than the document, which is the point — the plan is what *declared* the
+/// signature, so this cannot be fooled by a field that failed to survive the round trip. Reaching it
+/// at all means the transaction was accepted, so the plan having declared one is the finding.
+///
+/// The rule is wider than the shape the ticket found, and deliberately: the check needs no key
+/// material, so it runs before anything knows whose the input is, and a pre-signed input the wallet
+/// does not own is refused too. Which code that earns is the corpus's assertion — a fuzz target
+/// names no `AOBS-R##`.
+fn assert_no_accepted_input_arrived_signed(plan: &Plan) {
+    let pre_signed = plan
+        .inputs
+        .iter()
+        .any(|input| matches!(input.arriving, Arriving::Signed(_)));
+    assert!(
+        !pre_signed,
+        "a transaction with a pre-signed input was accepted"
+    );
+}
+
 fuzz_target!(|plan: Plan| {
     let wallet = wallet();
     let Some(bytes) = build(wallet, &plan) else {
@@ -589,6 +706,7 @@ fuzz_target!(|plan: Plan| {
     };
 
     if let Ok(accepted) = validate(wallet, &bytes) {
+        assert_no_accepted_input_arrived_signed(&plan);
         assert_no_output_is_ours_that_we_did_not_produce(wallet, &accepted);
         assert_every_input_of_ours_came_back_signed(wallet, &accepted, &sign(wallet, &accepted));
         let review = &accepted.review;
