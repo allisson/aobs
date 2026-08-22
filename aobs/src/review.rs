@@ -28,6 +28,7 @@ use std::cell::{Cell, RefCell};
 
 use std::rc::Rc;
 
+use aobs_core::bitcoin::Address;
 use aobs_core::format;
 use aobs_core::psbt::{
     self, Accepted, OutputKind, OutputRow, Rederivation, Refusal, Rejection, Review as Model,
@@ -286,10 +287,7 @@ fn walk(model: &Model, position: usize) -> Option<Step> {
     Some(Step {
         heading: format!("Payment {} of {}", position + 1, payments.len()),
         amount: format::btc(row.amount),
-        groups: format::address_groups(&row.address.to_string())
-            .into_iter()
-            .map(str::to_owned)
-            .collect(),
+        groups: address_groups(&row.address),
         last: position + 1 == payments.len(),
     })
 }
@@ -306,12 +304,7 @@ fn rows(model: &Model) -> Vec<Output> {
             label: label(&row.kind).into(),
             settled: settled(&row.kind).into(),
             amount: format::btc(row.amount).into(),
-            groups: groups(
-                format::address_groups(&row.address.to_string())
-                    .into_iter()
-                    .map(str::to_owned)
-                    .collect(),
-            ),
+            groups: address(&row.address),
         })
         .collect()
 }
@@ -359,16 +352,33 @@ fn warning(warning: Option<Warning>) -> &'static str {
 /// The gap is the layout's, not ours: `format.rs` returns groups **as data** precisely so that
 /// nothing on the way here can turn the gap into a space character occupying a full monospace
 /// cell (§0, §11.2.1).
-///
-/// `pub(crate)` for §12's verdict screen, which draws an address at full width for the same
-/// reason §11.3's walk does: one function, so the two cannot disagree about what a group is.
-pub(crate) fn groups(groups: Vec<String>) -> ModelRc<SharedString> {
+fn groups(groups: Vec<String>) -> ModelRc<SharedString> {
     ModelRc::new(VecModel::from(
         groups
             .into_iter()
             .map(SharedString::from)
             .collect::<Vec<_>>(),
     ))
+}
+
+/// One address, as §0's groups. **The whole of the trip from an `Address` to groups, in one
+/// place** — three sites wrote this chain out before it was a function (the panel's rows, the
+/// walk, and §12's verdict), and three copies of *how an address becomes groups* are three
+/// places that can disagree about it, on the screens where that is the mitigation.
+pub(crate) fn address_groups(address: &Address) -> Vec<String> {
+    format::address_groups(&address.to_string())
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The same, modelled — for the two screens that hand an address straight to a layout.
+///
+/// `pub(crate)` because §12's verdict draws an address at full width for the same reason §11.3's
+/// walk does. The walk takes the groups as data instead, because its own state carries them one
+/// step further before the layout sees them.
+pub(crate) fn address(address: &Address) -> ModelRc<SharedString> {
+    groups(address_groups(address))
 }
 
 /// The widest address class this appliance ships: a 62-character P2TR bech32m address.

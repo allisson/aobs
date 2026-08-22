@@ -203,6 +203,15 @@ impl Branch {
 /// sentence has to narrow with it. One constant is what makes that impossible to forget.
 pub const SEARCH_INDICES: u32 = 1_000;
 
+/// How many derivations a search that finds nothing performs: **8,000** — four accounts, both
+/// branches, [`SEARCH_INDICES`] each.
+///
+/// It is here rather than multiplied out by whoever needs it, because it is a fact about the
+/// search and the shell prints it (`05-testing-and-release.md` §6.2). A shell computing it from
+/// three of core's constants would be a second place that has to be right about the shape of the
+/// walk.
+pub const SEARCH_WINDOW: usize = SEARCH_INDICES as usize * Family::ALL.len() * Branch::ALL.len();
+
 /// Where a scanned address turned out to live in our own key material (`02-core.md` §10).
 ///
 /// It carries the path *and* the three components the path is assembled from, because

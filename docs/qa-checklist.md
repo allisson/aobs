@@ -383,8 +383,12 @@ any of it needs a camera, which QEMU has none of (§6.3).
       yours*, which is the direction that would otherwise be a false **yes**.
 - [ ] **§6.4's owed measurement: read `AOBS_SEARCH` off the serial console on real hardware**,
       on a scan that reports *not yours* — `matched=no` is the only reading that walked the whole
-      8,000-derivation window. The dev-machine figure is 246 ms (release, Apple silicon); the
-      fallback if a slow machine makes the wait untenable is `05-testing-and-release.md` §6.4's,
-      and the copy narrows with the constant.
+      8,000-derivation window. The dev-machine figure is 246 ms (release, Apple silicon).
+- [ ] **And judge the freeze while you are there.** The search is synchronous on the event-loop
+      thread and 04-screens.md §12 specifies no wait screen, so between the last camera frame and
+      the verdict the appliance draws nothing new. At a few hundred milliseconds that is right; if
+      it reads as a hang on the slowest machine tested, that is the open ticket §12 names — and the
+      two levers are §6.4's own fallback (narrow the window, and say what was searched) or a wait
+      screen, which is a decision the number has to come first for.
 - [ ] **Both verdicts return to the wallet screen** on the one row and on Escape, and the hub is
       byte-identical to the one the scan was started from.

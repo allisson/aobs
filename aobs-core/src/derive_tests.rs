@@ -603,6 +603,9 @@ fn a_match_carries_the_full_path_the_index_and_the_branch() {
 fn the_window_ends_at_nine_hundred_ninety_nine() {
     let wallet = wallet(Network::Mainnet);
     assert_eq!(SEARCH_INDICES, 1_000);
+    // The 8,000 the owed measurement is about, as the product of the window's three factors
+    // rather than as a literal typed beside them.
+    assert_eq!(SEARCH_WINDOW, 8_000);
 
     let last = address_of(&wallet, Family::Bip84, Branch::Receive, SEARCH_INDICES - 1);
     assert!(wallet.find_address(&last).is_some());
@@ -727,13 +730,8 @@ fn nothing_but_those_four_steps_happens() {
         .address(Family::Bip44, Branch::Receive, 0)
         .expect("a normal index");
 
-    for ours in [&bech32, &base58] {
+    for (family, ours) in [(Family::Bip84, &bech32), (Family::Bip44, &base58)] {
         let derived = ours.to_string();
-        let family = if ours == &bech32 {
-            Family::Bip84
-        } else {
-            Family::Bip44
-        };
 
         assert!(matches(family, ours, normalize(&derived)));
 

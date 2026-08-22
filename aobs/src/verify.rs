@@ -20,8 +20,7 @@
 use std::rc::Rc;
 use std::time::Instant;
 
-use aobs_core::derive::{Branch, Found, SEARCH_INDICES};
-use aobs_core::format;
+use aobs_core::derive::{Branch, Family, Found, Wallet, SEARCH_INDICES, SEARCH_WINDOW};
 
 use crate::review::Landed;
 use crate::session::Session;
@@ -38,21 +37,32 @@ const NO_WALLET: &str = "No wallet is loaded, so there is nothing to check this 
 /// A `None` from the search cannot mean *not yours*; it means *not in what I searched*. The
 /// headline does not hedge — a hedged headline invites treating an unmatched address as safe,
 /// which is the failure this feature exists to prevent — so the window is stated here instead,
-/// in full: all four accounts, both branches, and the index range **read off the constant the
-/// search actually walked**. If `05-testing-and-release.md` §6.4's fallback is ever taken and
-/// the window narrows, this sentence narrows with it rather than becoming a lie.
-fn searched(wallet: &aobs_core::derive::Wallet) -> String {
-    let accounts: Vec<String> = aobs_core::derive::Family::ALL
+/// in full: every account, both branches, and the index range **read off the constant the search
+/// actually walked**. If `05-testing-and-release.md` §6.4's fallback is ever taken and the window
+/// narrows, this sentence narrows with it rather than becoming a lie.
+///
+/// **Nothing here counts the accounts in words.** *"all four"* would be a number this sentence
+/// asserts and `Family::ALL` supplies — one that a fifth family would turn into a lie here while
+/// every `match` in core failed to compile, which is the wrong way round. The paths are listed,
+/// which says how many there are without claiming it.
+fn searched(wallet: &Wallet) -> String {
+    let accounts: Vec<String> = Family::ALL
         .iter()
         .map(|family| identity::notation(&wallet.account_path(*family)))
         .collect();
+    // `split_last` rather than two index expressions: the list is `Family::ALL`'s length, and a
+    // sentence about the search must not be the one thing in this file that can panic.
+    let (last, rest) = accounts
+        .split_last()
+        .expect("Family::ALL is not empty, and the product derives all of it");
 
     format!(
-        "Searched all four accounts — {} and {} — on both the receive and the change branch, at \
-         indices 0 to {}. An address beyond that window, or from a different seed, passphrase or \
-         network, would not be found here either.",
-        accounts[..accounts.len() - 1].join(", "),
-        accounts[accounts.len() - 1],
+        "Searched every account — {}{}{} — on both the receive and the change branch, at indices \
+         0 to {}. An address beyond that window, or from a different seed, passphrase or network, \
+         would not be found here either.",
+        rest.join(", "),
+        if rest.is_empty() { "" } else { " and " },
+        last,
         SEARCH_INDICES - 1,
     )
 }
@@ -73,20 +83,19 @@ fn branch(branch: Branch) -> &'static str {
 /// measurement is read off.
 ///
 /// **`matched` is what makes the number interpretable.** A match returns on the first hit, so
-/// only `matched=no` is the full 8,000-derivation window — the worst case, and the one the owed
-/// measurement is about. `window` is the constant rather than a count of what was walked, which
-/// is why the two fields have to be read together.
+/// only `matched=no` is the full [`SEARCH_WINDOW`] — the worst case, and the one the owed
+/// measurement is about. `window` is that constant rather than a count of what was walked, which
+/// is why the two fields have to be read together. It comes from core, because how many
+/// derivations a search performs is a fact about the search and not arithmetic for a shell to
+/// redo over three of core's constants.
 ///
 /// Nothing secret rides here: a count, a duration and a verdict the user is already looking at
 /// (01-boot-layer.md §9 — fixed strings and typed names, never formatted program state).
-fn timing(matched: bool, elapsed: &Instant) -> String {
+fn timing(matched: bool, started: &Instant) -> String {
     format!(
-        "AOBS_SEARCH window={} matched={} elapsed-ms={}",
-        SEARCH_INDICES as usize
-            * aobs_core::derive::Family::ALL.len()
-            * aobs_core::derive::Branch::ALL.len(),
+        "AOBS_SEARCH window={SEARCH_WINDOW} matched={} elapsed-ms={}",
         if matched { "yes" } else { "no" },
-        elapsed.elapsed().as_millis(),
+        started.elapsed().as_millis(),
     )
 }
 
@@ -132,12 +141,7 @@ impl Verify {
         ui.set_verify_path(identity::notation(&found.path).into());
         ui.set_verify_branch(branch(found.branch).into());
         ui.set_verify_index(found.index.to_string().into());
-        ui.set_verify_groups(crate::review::groups(
-            format::address_groups(&found.address.to_string())
-                .into_iter()
-                .map(str::to_owned)
-                .collect(),
-        ));
+        ui.set_verify_groups(crate::review::address(&found.address));
         ui.set_screen(Screen::Verified);
     }
 }
@@ -146,7 +150,7 @@ impl Verify {
 mod tests {
     use super::{branch, searched, timing};
     use aobs_core::bip39::Mnemonic;
-    use aobs_core::derive::{Branch, Family, Network, Wallet, SEARCH_INDICES};
+    use aobs_core::derive::{Branch, Family, Network, Wallet, SEARCH_INDICES, SEARCH_WINDOW};
     use aobs_core::secret::{Entropy, Passphrase};
     use std::time::Instant;
 
@@ -163,7 +167,7 @@ mod tests {
     /// §12: *a subordinate line naming precisely what was searched — account path, both
     /// branches, indices 0–999.* All three, and the paths are the loaded network's.
     #[test]
-    fn the_negative_verdict_names_all_four_accounts_both_branches_and_the_window() {
+    fn the_negative_verdict_names_every_account_both_branches_and_the_window() {
         let sentence = searched(&wallet(Network::Mainnet));
 
         for family in Family::ALL {
@@ -173,6 +177,9 @@ mod tests {
         assert!(sentence.contains("receive"), "{sentence}");
         assert!(sentence.contains("change"), "{sentence}");
         assert!(sentence.contains("0 to 999"), "{sentence}");
+        // The count is shown by listing rather than claimed in words, so a fifth family could
+        // never make this sentence say the wrong number.
+        assert!(!sentence.contains("four"), "{sentence}");
     }
 
     /// The window in the sentence is the window the search walked, not a literal typed twice.
@@ -214,6 +221,7 @@ mod tests {
     fn the_timing_line_carries_the_window_and_whether_it_was_walked() {
         let started = Instant::now();
         let missed = timing(false, &started);
+        assert_eq!(SEARCH_WINDOW, 8_000);
         assert!(missed.starts_with("AOBS_SEARCH window=8000 matched=no elapsed-ms="));
         assert!(timing(true, &started).contains(" matched=yes "));
     }

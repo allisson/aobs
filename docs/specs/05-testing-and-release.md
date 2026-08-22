@@ -137,10 +137,15 @@ Three we write, one we skip, one deliberate exception.
 4. **Skipped: Bytewords and CBOR encode/decode** — `ur` fuzzes those three targets upstream.
    Recorded so a later reviewer does not read the gap as an oversight.
 5. **Deliberate exception: the address-verification path gets no fuzz target.** Its "parser" is a
-   prefix strip, a truncate and two comparisons — all total, allocation-free and non-indexing. A fuzz
-   target would be exercising `str::eq`. What earns its place instead is corpus entries (§5), and
-   they exist as of [#83](https://github.com/allisson/aobs/issues/83) — `ADDRESS_CASES`, the third
-   table in `corpus_tests.rs`. **The exception was checked rather than assumed** while building it:
+   prefix strip, a truncate and two comparisons, and **nothing it does to the candidate allocates or
+   indexes past a bound** — the two normalization steps return slices of what they were handed, and
+   the comparison reads the candidate and nothing else about it. A fuzz target would be exercising
+   `str::eq`. (The comparison *does* allocate, once per candidate: rendering **our own** derived
+   address is what it compares against, which is material we produced and not the hostile string.
+   [#83](https://github.com/allisson/aobs/issues/83) narrowed this sentence from a flat
+   *allocation-free* to say which side of the compare the claim is about.) What earns its place
+   instead is corpus entries (§5), and they exist as of #83 — `ADDRESS_CASES`, the third table in
+   `corpus_tests.rs`. **The exception was checked rather than assumed** while building it:
    the one place the path indexes a hostile string is the eight-byte `bitcoin:` prefix test, and it
    reads *bytes* precisely so a candidate whose eighth byte is inside a multi-byte character cannot
    panic there. That is a unit test with multi-byte candidates in it, which is what a fuzz target
@@ -375,7 +380,7 @@ become measured. None of them blocks implementation.
 | Package count and installed size of the GUI floor, with `seatd` and `libseat1` gone (stale: 22 packages / 21 MiB, measured when both were present) | None; it is a claim in ADR-0002 and `01-boot-layer.md` §2, not a design input. |
 | RAM floor against the built image (provisional 2 GiB / 4 GiB) | Publish the real number. |
 | Argon2id wall clock on low-end amd64 (derived ~1.2–2.5 s) | None; the wait screen is already indeterminate. |
-| 8,000-derivation address search. **Instrumented rather than estimated** as of [#83](https://github.com/allisson/aobs/issues/83): the appliance prints `AOBS_SEARCH … elapsed-ms=…` on every search (§6.2), and the reading on a dev machine is **246 ms** (release, Apple silicon, `matched=no`). The number the gate wants is that line on target hardware, and it is a `docs/qa-checklist.md` row because QEMU cannot reach the screen that prints it (§6.3, no synthetic UVC device). | Narrow the index window, and say what was searched — which is **one constant**, `derive::SEARCH_INDICES`, read by the search and by the sentence the negative verdict states, so the copy narrows with it. |
+| 8,000-derivation address search. **Instrumented rather than estimated** as of [#83](https://github.com/allisson/aobs/issues/83): the appliance prints `AOBS_SEARCH … elapsed-ms=…` on every search (§6.2), and the reading on a dev machine is **246 ms** (release, Apple silicon, `matched=no`). The number the gate wants is that line on target hardware, and it is a `docs/qa-checklist.md` row because QEMU cannot reach the screen that prints it (§6.3, no synthetic UVC device). **This row decides a second thing now**: the search is synchronous on the event-loop thread and `04-screens.md` §12 specifies no wait, so the number is what says whether that is right or a freeze — named there as an open ticket rather than answered by guessing. | Narrow the index window, and say what was searched — which is **one constant**, `derive::SEARCH_INDICES`, read by the search and by the sentence the negative verdict states, so the copy narrows with it. |
 | The four-descriptor `crypto-account` payload fits one QR at ECC H | **Narrow what we export. Never animate it.** |
 | ~~Two columns of 12 words in the 800×600 **minimum canvas**~~ — **measured** ([#72](https://github.com/allisson/aobs/issues/72)): 440 px required against 458, as `AOBS_WORDS`. | Type size, not layout. |
 | ~~A 62-character P2TR payment address, 4-character grouped with §0's sub-cell gaps, on **one line** in the minimum canvas~~ — **measured** ([#81](https://github.com/allisson/aobs/issues/81)): 699 px required against 752, from the shipped font rather than from §0's arithmetic, as `AOBS_REVIEW`. | Wrap it, and drop the output bound to what still fits. Never truncate. |

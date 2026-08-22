@@ -2004,6 +2004,35 @@ component OutboundScreen inherits Rectangle {
     }
 }
 
+// A statement carrying **the weight of a refusal**: §0's `crit` border around whatever is put
+// inside it. One component, because two screens make that statement — 02-core.md §7's refusal
+// and §12's negative verdict — and the frame is the only thing they share. Two inline copies of
+// it would be two treatments free to drift, on the two screens where the treatment *is* the
+// signal that something was refused.
+//
+// It carries no text of its own: what goes inside differs (a reason and a code, or a headline and
+// the window that was searched), and a component that knew both would be a component with a
+// property that is empty on one of its two users.
+component CritPanel inherits Rectangle {
+    in property <length> spacing: 6px;
+
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Palette.crit;
+    background: Palette.panel;
+
+    HorizontalLayout {
+        padding: 16px;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: root.spacing;
+
+            @children
+        }
+    }
+}
+
 // 04-screens.md §12's positive verdict: **the full derivation path, the index, which branch it
 // came from, and the address in 4-character groups.**
 //
@@ -2090,35 +2119,23 @@ component NotYoursScreen inherits Rectangle {
         alignment: start;
         spacing: 18px;
 
-        // The refusal's weight, in the treatment RefusedScreen uses for the same reason —
-        // minus the code cell, which this screen has nothing to put in.
-        Rectangle {
-            border-radius: 4px;
-            border-width: 1px;
-            border-color: Palette.crit;
-            background: Palette.panel;
+        // The weight of a refusal, in the one component that carries it — minus the code cell,
+        // which this screen has nothing to put in (06-codes.md §4).
+        CritPanel {
+            spacing: 8px;
 
-            HorizontalLayout {
-                padding: 16px;
+            Text {
+                text: "This address is not yours.";
+                color: Palette.ink;
+                font-size: 26px;
+                font-weight: 600;
+            }
 
-                VerticalLayout {
-                    alignment: center;
-                    spacing: 8px;
-
-                    Text {
-                        text: "This address is not yours.";
-                        color: Palette.ink;
-                        font-size: 26px;
-                        font-weight: 600;
-                    }
-
-                    Text {
-                        text: root.searched;
-                        color: Palette.ink-mid;
-                        font-size: 15px;
-                        wrap: word-wrap;
-                    }
-                }
+            Text {
+                text: root.searched;
+                color: Palette.ink-mid;
+                font-size: 15px;
+                wrap: word-wrap;
             }
         }
 
@@ -2149,33 +2166,19 @@ component RefusedScreen inherits Rectangle {
             text: "This transaction was refused.";
         }
 
-        Rectangle {
-            border-radius: 4px;
-            border-width: 1px;
-            border-color: Palette.crit;
-            background: Palette.panel;
+        CritPanel {
+            Text {
+                text: root.reason;
+                color: Palette.ink;
+                font-size: 17px;
+                wrap: word-wrap;
+            }
 
-            HorizontalLayout {
-                padding: 16px;
-
-                VerticalLayout {
-                    alignment: center;
-                    spacing: 6px;
-
-                    Text {
-                        text: root.reason;
-                        color: Palette.ink;
-                        font-size: 17px;
-                        wrap: word-wrap;
-                    }
-
-                    Text {
-                        text: root.code;
-                        color: Palette.crit;
-                        font-family: "DejaVu Sans Mono";
-                        font-size: 13px;
-                    }
-                }
+            Text {
+                text: root.code;
+                color: Palette.crit;
+                font-family: "DejaVu Sans Mono";
+                font-size: 13px;
             }
         }
 
