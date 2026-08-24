@@ -57,15 +57,29 @@ takes the DIMMs.
 and passphrase on a laptop. Mitigated by UI discipline and explicit warnings, not by cryptography.
 Cameras in the room are not defended.
 
+**7. A malicious USB device impersonating a permitted class.** **Acknowledged, not defended.** The
+appliance permits exactly two USB class drivers and authorizes no new device once it is up (see
+*Permitted USB device classes* below), but a purpose-built device asserting that it is a keyboard
+or a camera is admitted **by design** — that is what permitting the class means. `uvcvideo` in
+particular parses descriptors and streaming payloads from the device, and the appliance does not
+claim to withstand an attack on the HID or UVC driver itself.
+
+Reaching this requires physically inserting hardware, which is why it sits here and not in Tier 3:
+unlike a malicious CPU there are real mitigations, and they are taken.
+
+Note the distinction this draws, which was previously blurred: the **watch-only wallet** sends
+hostile *bytes* and is Tier 1, defended. The **camera** could be hostile *hardware* and is Tier 2,
+not defended. Same QR channel, two different promises.
+
 ### Tier 3 — accepted risk, no defence
 
 Stated plainly, with no mitigations, because a mitigation note beside these reads as partial
 defence:
 
-7. A compromised build host.
-8. A malicious CPU, firmware, or management engine.
-9. Physical coercion of the user.
-10. Supply-chain compromise of embit or of Alpine packages.
+8. A compromised build host.
+9. A malicious CPU, firmware, or management engine.
+10. Physical coercion of the user.
+11. Supply-chain compromise of embit or of Alpine packages.
 
 **On coercion specifically:** the BIP39 passphrase makes decoy wallets possible, and this appliance
 **does not present that as a duress or plausible-deniability feature.** A user who bets their
@@ -145,16 +159,54 @@ Explicitly **not** promised: safety when every source is compromised simultaneou
 Testable: feed the mixing function adversarial constant inputs and assert the output still varies
 with the remaining source.
 
-## Permitted USB device classes — OPEN, not yet claimed
+## Permitted USB device classes
 
-This document does not yet state what USB device classes the appliance permits, and that is a
-known gap rather than an oversight: the glossary's old wording, *"USB is restricted to the HID
-class"*, turned out to be false once the webcam was priced — a webcam is USB **Video** Class.
+**The kernel contains exactly two USB class drivers: `usbhid` and `uvcvideo`.** No driver for mass
+storage, MTP, CDC/NCM/RNDIS networking, audio, printer, or USB-serial is compiled in, and no modules
+are loadable — a device of any such class enumerates and then sits inert, because nothing binds to
+it. **Once the appliance's own keyboard and camera have been enumerated, `authorized_default` is set
+to `0` on every root hub**, so any device inserted later in the session is not authorized and no
+driver probes it.
 
-Until [issue #14](https://github.com/allisson/aobs/issues/14) settles the permitted set, its
-enforcement mechanism, and the corrected wording, **no claim about USB device classes may be
-quoted from this project as settled.** Note that permitting UVC admits a considerably larger
-kernel surface than HID alone, reachable by Tier 1 input, so #14 may add or qualify a claim here.
+Two classes, not one, and each is load-bearing. HID is the only route for mnemonic and passphrase
+entry. UVC is the only route for inbound data at all: a PSBT is 1.2–1.6 KB of base64 across several
+fountain frames, so keyboard-only entry would mean a human transcribing it by hand, and every other
+inbound path — storage, network, serial — is excluded by the *no data path* and *offline* claims
+above. The camera is not a convenience.
+
+Three tests can contradict this claim:
+
+- the built-in driver list contains `usbhid` and `uvcvideo` and no other USB class driver, and module
+  loading is unavailable;
+- a USB mass-storage device inserted mid-session produces no block device and no driver bind;
+- `authorized_default` reads `0` on every root hub once the appliance is up.
+
+Three limits, stated because a careful reader finds them anyway:
+
+- **Hubs are permitted.** The keyboard and camera may arrive through one, so hubs cannot be refused.
+- **A device impersonating HID or UVC is admitted by design.** That is Tier 2 item 7, not a gap in
+  this claim — permitting a class means admitting anything that asserts it.
+- **The flip is not instantaneous.** Between power-on and the moment `authorized_default` is set to
+  `0`, an inserted device would be authorized. That window is seconds long and requires someone
+  physically inserting hardware during boot, but "no device is authorized after boot" must not be
+  read as "no device is ever authorized".
+
+The flip happens **after the appliance's own devices are enumerated and before the first secret is
+entered** — before the mnemonic or passphrase prompt, not merely before signing. The strongest thing
+a hostile HID device does is type, and what deserves protection from a typing attacker is the wallet
+being created or imported, not only the transaction being signed.
+
+Rejected alternatives, and why:
+
+- **udev rules.** The kernel binds a driver during enumeration, so a userspace rule generally acts
+  after the thing it is meant to prevent. A claim resting on udev would be close to decorative.
+- **Booting with `usbcore.authorized_default=0`** and authorizing our own two devices explicitly.
+  This closes the boot window, but it requires a userspace policy deciding *which* device is the real
+  keyboard — a harder problem than the one it solves, and it puts a trust decision where we cannot
+  test it.
+
+The kernel configuration that delivers this belongs to the boot-pipeline design; this document owns
+only the claim.
 
 ## No boot-time self-verification
 

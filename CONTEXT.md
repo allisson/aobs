@@ -40,17 +40,17 @@ statements, and the tier is what separates them.
 ## No data path
 
 The appliance's transport claim: **no block device, no filesystem, and no network interface is
-ever mounted or brought up; USB is restricted to an enumerated set of device classes.**
+ever mounted or brought up; USB is permitted for exactly two device classes, HID and UVC, and no
+device is authorized once the appliance is up.**
 
-The blanket phrasing "no USB" is wrong and must not be used — seed and passphrase entry is a USB
-keyboard, which the kernel enumerates and binds a driver to. Storage and networking classes are
-refused.
+The blanket phrasing "no USB" is wrong and must not be used — the keyboard is a USB device and so
+is the camera, and the kernel enumerates and binds a driver to both. Two classes, not one: HID
+carries mnemonic and passphrase entry, UVC is the QR channel's only inbound route. Storage,
+networking, audio, printer, and serial classes are refused.
 
-⚠️ **The USB half of this claim is under revision and must not be quoted as settled.** It read
-"USB is restricted to the HID class" until the webcam was priced: a webcam is USB *Video* Class,
-not HID, so the appliance needs at least two classes and the old wording was false. The permitted
-set, its enforcement, and the corrected wording are
-[issue #14](https://github.com/allisson/aobs/issues/14).
+"USB is restricted to the HID class" was the earlier wording and it was **false** — a webcam is
+USB *Video* Class. Do not reintroduce it. The mechanism, the tests, and the stated limits live in
+`docs/threat-model.md`; this entry defines only the term.
 
 ## QR channel
 
