@@ -96,6 +96,13 @@ the export. The words are run through Argon2id, but the stretching is defence-in
 protection: do not describe the KDF as what keeps the wallet safe. The QR never carries the
 Passphrase, so it is not by itself a complete backup.
 
+## Export password
+
+The eight EFF large-wordlist words that protect an Encrypted wallet QR. Always machine-generated at
+full entropy and never user-chosen — a self-chosen one is not a weaker Export password, it is not one.
+Distinct from the **Passphrase** in both what it protects and who picks it, and the two must never be
+used interchangeably.
+
 ## Proof rule
 
 The appliance shows an output as change only when it can **prove** it — by reproducing the output's
