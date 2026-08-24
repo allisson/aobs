@@ -154,6 +154,199 @@ static int findNominalFragmentLength(int messageLen, int minFragmentLen, int max
 So `seqLen = ceil(cborLen / 400)` at Normal density, `ceil(cborLen / 80)` at Low — where `cborLen`
 is the CBOR encoding of the `crypto-psbt` byte string, not the PSBT length itself.
 
+### Sparrow trap: BBQr and UR v1 are gated on the keystore's `WalletModel`
+
+`drongo/src/main/java/com/sparrowwallet/drongo/wallet/WalletModel.java:147-169` (drongo master, cloned 2026-08-24):
+
+```java
+public boolean showLegacyQR() { if(this == COBO_VAULT) return true; else return false; }
+public boolean showBbqr()     { if(this == COLDCARD || this == SPARROW || this == KRUX) return true; else return false; }
+public boolean selectBbqr()   { if(this == COLDCARD) return true; else return false; }
+```
+
+So for a keystore whose `WalletModel` is none of `COLDCARD`/`SPARROW`/`KRUX`, Sparrow offers
+**UR only** on the PSBT display — no BBQr button at all. Which `WalletModel` an aobs-exported
+keystore ends up with depends on the import pane the user chose
+(`control/FileImportPane.java:210`: `keystore.setWalletModel(importer.getWalletModel())`) —
+**UNCONFIRMED** for aobs, and not decidable from source: it depends on how aobs presents its xpub
+export and which entry the user picks in Sparrow's import list. `ScriptType.WITNESS_TYPES`
+(`drongo .../protocol/ScriptType.java:1497`) includes `P2TR`, so the non-witness-UTXO stripping
+applies to BIP86 as well as BIP84.
+
+## Blue Wallet
+
+Pinned to `BlueWallet/BlueWallet` **master @ `97f9d72`** (2026-08-21), `"version": "8.0.2"` in
+`package.json`. UR libraries (`package.json:98-99`):
+
+```json
+"@keystonehq/bc-ur-registry": "0.8.0",
+"@ngraveio/bc-ur": "1.1.13",
+```
+
+BBQr is Blue Wallet's own implementation, vendored at `blue_modules/bbqr/{split,join}.ts`. UR v1 is
+a vendored copy of the old `bc-ur` at `blue_modules/bc-ur/dist/`.
+
+### What Blue Wallet ACCEPTS (scans) — `screen/send/ScanQRCode.tsx`
+
+Dispatch is by **literal uppercased string prefix** (`ScanQRCode.tsx:165-201`):
+
+```js
+if (ret.data.toUpperCase().startsWith('UR:CRYPTO-ACCOUNT'))       return _onReadUniformResourceV2(ret.data);
+if (ret.data.toUpperCase().startsWith('UR:CRYPTO-PSBT'))          return _onReadUniformResourceV2(ret.data);
+if (ret.data.toUpperCase().startsWith('UR:CRYPTO-OUTPUT'))        return _onReadUniformResourceV2(ret.data);
+if (ret.data.toUpperCase().startsWith('UR:CRYPTO-HDKEY'))         return _onReadUniformResourceV2(ret.data);
+if (ret.data.toUpperCase().startsWith('UR:CRYPTO-MULTI-ACCOUNTS'))return _onReadUniformResourceV2(ret.data);
+if (ret.data.toUpperCase().startsWith('B$')) { useBBQRRef.current = true; return _onReadUniformResourceV2(ret.data); }
+if (ret.data.toUpperCase().startsWith('UR:BYTES')) {
+  const splitted = ret.data.split('/');
+  if (splitted.length === 3 && splitted[1].includes('-')) return _onReadUniformResourceV2(ret.data);
+}
+if (ret.data.toUpperCase().startsWith('UR')) return _onReadUniformResource(ret.data);   // deprecated UR v1
+```
+
+So Blue Wallet accepts, for a signed PSBT:
+
+- **`ur:crypto-psbt`** (UR v2, fountain) — via `BlueURDecoder extends URDecoder`
+  (`blue_modules/ur/index.js`), whose `toString()` handles `decoded.type === 'crypto-psbt'` and
+  returns base64.
+- **`ur:bytes`** — v2 when the fragment has three `/`-separated parts and a `-` in the sequence
+  component; otherwise treated as UR v1.
+- **UR v1** — `_onReadUniformResource`, explicitly annotated
+  `@deprecated remove when we get rid of URv1 support` (`ScanQRCode.tsx:124-125`). It sniffs the
+  decoded payload with `startsWith('psbt')` and re-encodes to base64.
+- **BBQr** — any `B$…` fragment; `BlueURDecoder.receivePart` diverts it, and `joinQRs` with
+  `fileType === 'P'` returns base64.
+- **Base43** (Electrum) single QR — `Base43.decode` then `bitcoin.Psbt.fromHex`
+  (`ScanQRCode.tsx:203-206`).
+- **Anything else** falls through verbatim to `onBarScanned(ret.data, …)`.
+
+**Trap — `ur:psbt` is NOT supported.** The prefix list has no `UR:PSBT` entry, so `ur:psbt/…`
+matches only the final `startsWith('UR')` and is routed to the **UR v1** decoder, which fails on a
+v2 fragment. And even if it reached v2, `BlueURDecoder.toString()` only special-cases
+`crypto-psbt`, `bytes`, `crypto-account`, `crypto-output`, `crypto-hdkey` and
+`crypto-multi-accounts`; anything else falls through to `return decoded.cbor.toString('hex')`.
+Confirmed by reading `blue_modules/ur/index.js` in full — `'psbt'` never appears as a UR type.
+
+**Plain base64 in a single QR — works, but by accident.** The fall-through hands the raw string to
+`screen/send/psbtWithHardwareWallet.tsx:76-88`:
+
+```js
+if (data.toUpperCase().startsWith('UR')) presentAlert({ message: 'BC-UR not decoded. This should never happen' });
+if (data.indexOf('+') === -1 && data.indexOf('=') === -1 && data.indexOf('=') === -1) {
+  // this looks like NOT base64, so maybe its transaction's hex
+  setTxHex(data); return;
+}
+```
+
+A base64 PSBT that happens to contain no `+` and no `=` is misread as a transaction hex. A PSBT
+whose length is a multiple of 3 has no `=` padding, and `+` appears only when the byte stream
+produces that sextet — so this is a **real, if uncommon, failure mode** for single-QR base64. Not
+device-tested; the code path is read in full.
+
+### What Blue Wallet PRODUCES (displays) — `components/DynamicQRCode.tsx` + `blue_modules/ur/index.js`
+
+`screen/send/psbtWithHardwareWallet.tsx:259`:
+
+```jsx
+{psbt && <DynamicQRCode value={psbt.toHex()} ref={dynamicQRCode} walletID={walletID} />}
+```
+
+`DynamicQRCode.tsx:49-51` — `const { value, capacity = 175, … } = this.props;` then
+`this.fragments = encodeUR(value, capacity, walletID ?? null);`. Three protocol paths in
+`encodeUR` (`blue_modules/ur/index.js`):
+
+| condition | output |
+|---|---|
+| `forceProtocol === 'BBQR'` or `walletID` in `USE_BBQR_WALLET_IDS` | BBQr, `splitQRs(bytes, 'P', {minSplit})` |
+| `useURv1` (AsyncStorage key `USE_UR_V1`) | UR v1 via the vendored `origEncodeUR` |
+| default | **UR v2 `ur:crypto-psbt`** via `new CryptoPSBT(data).toUREncoder(len)` |
+
+- Default is **`ur:crypto-psbt`** — never `ur:psbt`.
+- UR v1 is a **user-facing settings toggle**: `setUseURv1()` is called from
+  `components/Context/SettingsProvider.tsx:285`, read back by `isURv1Enabled()` at line 173.
+- BBQr is **auto-learned per wallet**: `components/Context/StorageProvider.tsx:474-479` — if the
+  scan that imported the wallet was BBQr (`getScanWasBBQR()`), the wallet's ID is recorded via
+  `setWalletIdMustUseBBQR(w.getID())` and that wallet thereafter displays BBQr. There are also
+  explicit `'BBQR'` and `'URv2'` force buttons on the QR component
+  (`DynamicQRCode.tsx:86`, `:102`).
+- Frame rate: `setInterval(this.moveToNextFragment, 1000)` (`DynamicQRCode.tsx:116`) — **1 fps**,
+  five times slower than Sparrow.
+- Fragment size: **175 bytes** default capacity.
+- Unlike Sparrow, Blue Wallet does **not** strip `PSBT_IN_NON_WITNESS_UTXO`: it displays
+  `psbt.toHex()` of whatever it built.
+
+## Blockstream App / Green
+
+Pinned to `Blockstream/green_android` **master @ `49096a4`** (2026-07-22). Green does not implement
+UR itself: it calls GDK's `bcur_encode` / `bcur_decode`. GDK pinned to `Blockstream/gdk`
+**master @ `8af8abd`** (2026-08-20), `CHANGELOG.md` head = **Release 0.77.9 (26-08-20)**. GDK in
+turn wraps the C++ `bc-ur` library plus `ur-c` (`src/bcur_auth_handlers.cpp`).
+
+### What Green ACCEPTS (scans)
+
+`compose/.../models/abstract/AbstractScannerViewModel.kt:62`:
+
+```kotlin
+if ((isDecodeContinuous && scannedText.startsWith(prefix = "ur:", ignoreCase = true)) || bcurPartEmitter != null) {
+```
+
+Any `ur:`-prefixed fragment is fed to `session.bcurDecode(BcurDecodeParams(part = scannedText))`.
+The PSBT screen launches the scanner with `isDecodeContinuous = true`
+(`compose/.../screens/jade/JadeQRScreen.kt:279`).
+
+GDK decides the types — `gdk/src/bcur_auth_handlers.cpp:277-295`:
+
+```cpp
+auto ur_type = boost::algorithm::to_lower_copy(ur.type());
+if (ur_type == "crypto-psbt" || ur_type == "psbt") {
+} else if (ur_type == "crypto-output") {
+} else if (ur_type == "crypto-account") {
+} else if (ur_type == "jade-bip8539-reply") {
+} else if (ur_type == "jade-pin") {
+} else {
+    return_raw_data = true; // bytes or an unknown type, return raw
+}
+```
+
+- **`ur:crypto-psbt` and `ur:psbt` are both accepted** — Green is the only one of the three that
+  takes the new spelling. The decoded PSBT is surfaced as base64
+  (`bcur_auth_handlers.cpp:47`: `{ "psbt", base64_from_bytes(...) }`).
+- **UR v2 only.** The decoder is `ur::URDecoder` from the C++ `bc-ur` library
+  (`bcur_auth_handlers.cpp:253`). No UR v1 / `pNofM` path exists in GDK's bcur handler or in
+  Green's scanner. **UR v1 is not supported.**
+- **No BBQr.** `grep -rn 'bbqr\|B\$'` over `green_android` (Kotlin) and `gdk` (C++) returns nothing.
+- **Plain single-QR base64 appears to work, by pass-through.** A non-`ur:` scan becomes
+  `ScanResult(result = <raw text>)`; `JadeQRViewModel.setScanResult` for `JadeQrOperation.Psbt`
+  posts it as `SideEffects.Success(scanResult.result)` (`JadeQRViewModel.kt:446-449`);
+  `screens/send/SendConfirmScreen.kt:110-115` turns that into
+  `BroadcastPsbtTransaction(psbt = it.result)` → `BroadcastTransactionParams(psbt = …)`, and GDK's
+  broadcast takes a **base64** PSBT string. Every hop is read, but this is
+  **inferred from the code path and not device-tested**.
+
+### What Green PRODUCES (displays)
+
+`data/.../gdk/GdkSession.kt:2573-2580`:
+
+```kotlin
+suspend fun jadePsbtRequest(psbt: String): BcurEncodedData {
+    val params = BcurEncodeParams(urType = "crypto-psbt", data = psbt)
+    return bcurEncode(params)
+}
+```
+
+- **`ur:crypto-psbt` only.** No BBQr, no UR v1, no raw/base64 display option on this path. GDK
+  normalises anyway: `prepare_psbt_ur` returns `{ "crypto-psbt", { cbor, cbor + cbor_len } }`
+  (`bcur_auth_handlers.cpp:191`), so even `ur_type: "psbt"` comes out labelled `crypto-psbt`
+  (`bcur_auth_handlers.cpp:222`).
+- **Fragment size 50 bytes.** `BcurEncodeParams.maxFragmentLen` defaults to `50`
+  (`data/.../gdk/params/BcurEncodeParams.kt:23`) and `jadePsbtRequest` does not override it — 8×
+  smaller than Sparrow's Normal density, 3.5× smaller than Blue Wallet's.
+- **Frame rate 2 fps.** `JadeQRViewModel.kt:242` — `delay(500L)` between parts. Green cycles
+  `parts` in order (not a fountain stream) and flips `_isValid` once half the parts have been shown
+  (`JadeQRViewModel.kt:237-239`).
+- The PSBT reaching this path is whatever GDK produced (`it.psbt` in
+  `CreateTransactionViewModel.kt:471`); there is no QR-specific field stripping.
+
 ## Findings
 
 _(populated below as each item lands)_
