@@ -145,6 +145,17 @@ Explicitly **not** promised: safety when every source is compromised simultaneou
 Testable: feed the mixing function adversarial constant inputs and assert the output still varies
 with the remaining source.
 
+## Permitted USB device classes — OPEN, not yet claimed
+
+This document does not yet state what USB device classes the appliance permits, and that is a
+known gap rather than an oversight: the glossary's old wording, *"USB is restricted to the HID
+class"*, turned out to be false once the webcam was priced — a webcam is USB **Video** Class.
+
+Until [issue #14](https://github.com/allisson/aobs/issues/14) settles the permitted set, its
+enforcement mechanism, and the corrected wording, **no claim about USB device classes may be
+quoted from this project as settled.** Note that permitting UVC admits a considerably larger
+kernel surface than HID alone, reachable by Tier 1 input, so #14 may add or qualify a claim here.
+
 ## No boot-time self-verification
 
 The appliance performs **no self-attestation at boot**, and displays no integrity indicator.

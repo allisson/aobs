@@ -39,13 +39,18 @@ statements, and the tier is what separates them.
 
 ## No data path
 
-The appliance's transport claim, stated precisely: **no block device, no filesystem, and no
-network interface is ever mounted or brought up; USB is restricted to the HID class.**
+The appliance's transport claim: **no block device, no filesystem, and no network interface is
+ever mounted or brought up; USB is restricted to an enumerated set of device classes.**
 
 The blanket phrasing "no USB" is wrong and must not be used — seed and passphrase entry is a USB
-keyboard, which the kernel enumerates and binds a driver to. HID input is the one permitted USB
-class; storage, networking, and everything else are refused. Stated this way the claim is
-testable, which the blanket version is not.
+keyboard, which the kernel enumerates and binds a driver to. Storage and networking classes are
+refused.
+
+⚠️ **The USB half of this claim is under revision and must not be quoted as settled.** It read
+"USB is restricted to the HID class" until the webcam was priced: a webcam is USB *Video* Class,
+not HID, so the appliance needs at least two classes and the old wording was false. The permitted
+set, its enforcement, and the corrected wording are
+[issue #14](https://github.com/allisson/aobs/issues/14).
 
 ## QR channel
 
