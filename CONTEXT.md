@@ -16,9 +16,26 @@ Wallet exists for exactly one Session and no state crosses the boundary between 
 
 ## Amnesic
 
-The property that no Session leaves anything behind. What "anything" and "behind" precisely mean
-is the subject of the amnesia guarantee (see the map) — the term is defined here so that loose
-uses can be caught, not so the guarantee can be assumed.
+The property that no Session leaves anything behind. Never a single guarantee: the word covers
+three separate ones — nothing written to a persistent medium, nothing recoverable from RAM after
+power-off, and nothing recoverable from RAM during the Session by another process. They hold at
+different strengths, so a sentence using "amnesic" without saying which one it means is not yet a
+claim. `docs/threat-model.md` states each.
+
+## Offline
+
+The appliance's network property: no network stack and no network drivers exist in the running
+kernel. Weaker readings — an interface merely never brought up — and stronger ones — radio
+hardware unpowered — are both *not* what the word means here, and neither may be substituted for
+it.
+
+## Adversary tier
+
+The rank an adversary holds in `docs/threat-model.md`, and the unit in which this project promises
+anything. **Tier 1** is defended with a testable defence, **Tier 2** is acknowledged with stated
+limits and explicitly not defended, **Tier 3** is accepted risk with no defence implied. Naming an
+adversary without its tier says nothing: "we considered it" and "we stop it" are different
+statements, and the tier is what separates them.
 
 ## No data path
 
