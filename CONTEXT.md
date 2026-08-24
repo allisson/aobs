@@ -89,7 +89,10 @@ never the same thing — do not let either term stand in for the other.
 ## Encrypted wallet QR
 
 A Wallet exported as a single QR code, encrypted under an export password. The export password
-is eight words drawn from the EFF large wordlist, stretched with Argon2id.
+is eight words drawn from the EFF large wordlist — about 103 bits, which is what actually protects
+the export. The words are run through Argon2id, but the stretching is defence-in-depth, not the
+protection: do not describe the KDF as what keeps the wallet safe. The QR never carries the
+Passphrase, so it is not by itself a complete backup.
 
 ## Proof rule
 
