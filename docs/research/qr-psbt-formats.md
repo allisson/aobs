@@ -14,14 +14,15 @@ marked **UNCONFIRMED** with the check that would settle it.
 
 ## Status of this document
 
-**IN PROGRESS** — captured incrementally as each item is settled. Items not yet marked settled
-carry no weight.
+- [x] 1. What each wallet ACCEPTS (scans) — signed PSBT, device → wallet
+- [x] 2. What each wallet PRODUCES (displays) — unsigned PSBT, wallet → device
+- [x] 3. The intersection, and the minimum set the appliance must implement
+- [x] 4. Fragment sizing and frame counts
+- [x] 5. Version / compatibility traps
+- [x] 6. Python implementation on Alpine/musl, and embit's coverage (ticket item 3)
 
-- [ ] 1. What each wallet ACCEPTS (scans) — signed PSBT, device → wallet
-- [ ] 2. What each wallet PRODUCES (displays) — unsigned PSBT, wallet → device
-- [ ] 3. The intersection, and the minimum set the appliance must implement
-- [ ] 4. Fragment sizing and frame counts
-- [ ] 5. Version / compatibility traps
+Every source-code claim below was read at the pinned commit. Nothing here was tested against a
+running wallet — see **What is NOT settled here**.
 
 ## Candidate formats (the vocabulary this document uses)
 
@@ -347,10 +348,269 @@ suspend fun jadePsbtRequest(psbt: String): BcurEncodedData {
 - The PSBT reaching this path is whatever GDK produced (`it.psbt` in
   `CreateTransactionViewModel.kt:471`); there is no QR-specific field stripping.
 
-## Findings
+## 1 + 2. Accept / produce matrix
 
-_(populated below as each item lands)_
+Signed PSBT **into** the wallet (device → wallet) = ACCEPT. Unsigned PSBT **out of** the wallet
+(wallet → device) = PRODUCE.
+
+| format | Sparrow 2.5.4 | Blue Wallet 8.0.2 | Green (GDK 0.77.9) |
+|---|---|---|---|
+| `ur:crypto-psbt` (UR v2) | accept ✔ / **produce ✔ (default)** | accept ✔ / **produce ✔ (default)** | accept ✔ / **produce ✔ (only)** |
+| `ur:psbt` (UR v2, registry-preferred) | accept ✔ / produce ✘ | **accept ✘** / produce ✘ | accept ✔ / produce ✘ (normalised to `crypto-psbt`) |
+| `ur:bytes` (UR v2) | accept ✔ (sniffed as PSBT) / produce ✘ on this path | accept ✔ / produce ✘ | accept ✔ (returned raw) / produce ✘ |
+| UR v1 (`ur:bytes/<crc>/<i>of<n>/…`) | accept ✔ / produce ✔ *(only if keystore model = `COBO_VAULT`)* | accept ✔ (deprecated path) / produce ✔ *(only if `USE_UR_V1` toggled)* | **accept ✘ / produce ✘** |
+| BBQr (`B$…`) | accept ✔ / produce ✔ *(only if keystore model ∈ {COLDCARD, SPARROW, KRUX})* | accept ✔ / produce ✔ *(only if the wallet was imported from a BBQr scan, or forced)* | **accept ✘ / produce ✘** |
+| plain base64, single QR | accept ✔ (`PSBT.fromString`) / produce ✘ | accept ~ (fall-through; **breaks if the base64 has no `+` and no `=`**) / produce ✘ | accept ~ (fall-through, **not device-tested**) / produce ✘ |
+| hex PSBT, single QR | accept ✔ / produce ✘ | accept ✘ (read as a raw tx hex) / produce ✘ | accept ✘ / produce ✘ |
+| raw binary QR payload | accept ✔ (`new PSBT(rawBytes)`) / produce ✘ | accept ✘ / produce ✘ | accept ✘ / produce ✘ |
+| Base43 (Electrum) | accept ✔ / produce ✘ | accept ✔ / produce ✘ | accept ✘ / produce ✘ |
+| Specter `p1of3` | accept ✘ / produce ✘ | accept ✘ / produce ✘ | accept ✘ / produce ✘ |
+
+Nothing proprietary turned up in any of the three for PSBT transport. Green's `jade-pin` and
+`jade-bip8539-request` UR types are proprietary but belong to Jade PIN unlock and BIP85, not to
+PSBT signing.
+
+## 3. The intersection
+
+**Yes — there is exactly one format all three both accept and produce: `ur:crypto-psbt`,
+UR v2, animated multi-part.** It is the default on the produce side of all three, and it is on the
+accept side of all three.
+
+**The minimum set the appliance must implement is therefore one format**, in both directions:
+
+- **Emit** `ur:crypto-psbt`, UR v2, multi-part.
+- **Accept** `ur:crypto-psbt` and, for robustness at no cost, `ur:psbt` and `ur:bytes` — since
+  Sparrow can emit `ur:bytes` on other paths and the registry pushes toward `psbt`.
+
+**Do NOT emit `ur:psbt`,** even though BCR-2020-006 marks `crypto-psbt` deprecated and says
+deprecated types "should only be read, not written". Blue Wallet cannot parse `ur:psbt` at all: its
+prefix dispatcher has no `UR:PSBT` case, so the fragment is routed to the UR **v1** decoder and
+fails. Blue Wallet is the outlier here, and following the registry would break it.
+
+**Outliers by direction:**
+
+- **Green is the outlier on breadth**: UR v2 only. No UR v1, no BBQr. If the appliance ever wanted
+  BBQr as a denser alternative, Green would be left out entirely.
+- **Blue Wallet is the outlier on spelling**: the only one of the three that rejects `ur:psbt`.
+- **Sparrow is the outlier on generosity**: it accepts everything, including single-QR base64,
+  hex, raw binary and base43. Sparrow will never be the constraint.
+
+BBQr is not a viable common denominator: Green has no BBQr code at all, and in both Sparrow and
+Blue Wallet BBQr is conditional on per-keystore/per-wallet state the appliance does not control.
+
+## 4. Fragment sizing and frame counts
+
+### Fragment size, animation period, and part-stream shape
+
+| wallet | UR fragment size (bytes) | frame period | parts emitted |
+|---|---|---|---|
+| Sparrow, Normal density | **400** (`QRDensity.NORMAL`) | **200 ms** (`ANIMATION_PERIOD_MILLIS`), scroll-adjustable 100–2000 ms | unbounded fountain stream (`UREncoder.nextPart()` in a `ScheduledService`) |
+| Sparrow, Low density | **80** (`QRDensity.LOW`) | same | same |
+| Blue Wallet | **175** (`DynamicQRCode` `capacity` default) | **1000 ms** (`setInterval(…, 1000)`) | exactly `encoder.fragmentsLength` parts, cycled |
+| Green | **50** (`BcurEncodeParams.maxFragmentLen`) | **500 ms** (`delay(500L)`) | **`3 × seqLen`** parts, cycled (`bcur_auth_handlers.cpp:230`) |
+
+Sparrow's min fragment length is 10 (`QRDisplayDialog.MIN_FRAGMENT_LENGTH`), and the fragment
+length actually used is `findNominalFragmentLength(messageLen, 10, maxUrFragmentLength)` — i.e. the
+message is divided into the smallest number of equal fragments that fit under the cap, so real
+fragments are usually smaller than the cap.
+
+GDK over-provisions: `const size_t num_parts = m_encoder->seq_len() == 1 ? 1 : 3 * m_encoder->seq_len();`
+(`gdk/src/bcur_auth_handlers.cpp:230`). Parts beyond `seqLen` are fountain-coded mixes
+(BCR-2020-005), so the extra 2× is redundancy, not new data.
+
+### Frame counts for a signed single-sig PSBT
+
+Sizes below are a **byte-by-byte accounting from BIP174/BIP371 field layouts**, not measured from a
+real wallet — the arithmetic is in this document's `Method` note. UR frame count is
+`ceil(cborLen / fragmentSize)` where `cborLen` is the CBOR byte-string encoding of the PSBT
+(1 + 3 header bytes for a 256–65535-byte payload; BCR-2020-006 requires the top-level object to be
+**untagged**, so `crypto-psbt` is a bare CBOR `bytes`).
+
+| case | PSBT bytes | CBOR bytes | Sparrow /400 | Sparrow /80 | Blue /175 | Green /50 |
+|---|---|---|---|---|---|---|
+| **BIP84 P2WPKH, 2-in/2-out, signed** | 633 | 636 | **2** | 8 | **4** | **13** |
+| **BIP86 P2TR, 2-in/2-out, signed** | 702 | 705 | **2** | 9 | **5** | **15** |
+| BIP84 P2WPKH, 4-in/2-out, signed | 1123 | 1126 | 3 | 15 | 7 | 23 |
+| BIP86 P2TR, 4-in/2-out, signed | 1202 | 1205 | 4 | 16 | 7 | 25 |
+
+Minimum transmission time (one pass over `seqLen` parts; in practice a receiver needs a few extra
+frames):
+
+| case | Sparrow @200 ms | Blue Wallet @1000 ms | Green @500 ms (one pass) | Green (full `3×seqLen` cycle) |
+|---|---|---|---|---|
+| BIP84 2-in/2-out | 0.4 s | 4.0 s | 6.5 s | 19.5 s |
+| BIP86 2-in/2-out | 0.4 s | 5.0 s | 7.5 s | 22.5 s |
+
+**On the taproot premise.** The ticket's framing — "a taproot PSBT needs all input UTXOs present" —
+is true but does **not** inflate the PSBT much. BIP341's sighash commits to the amounts and
+scriptPubKeys of *all* spent outputs, so every input needs a `PSBT_IN_WITNESS_UTXO` (32 bytes of
+scriptPubKey + 8 of value + framing ≈ 46 bytes/input), whereas a segwit-v0 sighash only needs the
+input's own. But a coordinator populates `witness_utxo` on every input anyway, so the 2-in taproot
+PSBT is only ~11% larger than the segwit-v0 one (702 vs 633 bytes): the taproot growth comes from
+`PSBT_IN_TAP_INTERNAL_KEY` and `PSBT_IN_TAP_BIP32_DERIVATION`, offset by the 64-byte Schnorr
+signature being smaller than a 72-byte DER one. **What would explode the size is
+`PSBT_IN_NON_WITNESS_UTXO`** — the full previous transaction per input, hundreds of bytes to
+kilobytes each. Sparrow strips it for witness script types before display
+(`HeadersController.java:1022`); Blue Wallet and Green do not, so a PSBT arriving from them may be
+much larger than the table above. **Unconfirmed:** whether Blue Wallet's and Green's coordinators
+ever populate `non_witness_utxo` for segwit/taproot inputs in practice. Confirming it would take
+capturing a real PSBT from each app.
+
+**Green is the frame-count problem.** At 50 bytes/fragment and 500 ms/frame, 13–15 fragments and a
+39–45-frame display cycle, Green's channel is roughly 30× slower than Sparrow's. The appliance's
+**scan** side must therefore tolerate long acquisitions — the 5 fps decode rate settled in
+[#6](https://github.com/allisson/aobs/issues/6) is ample against a 2 fps emitter, but the review
+UI must show progress over tens of seconds rather than assume a sub-second read.
+
+**The appliance's own emitter is unconstrained by these numbers.** Nothing in any of the three
+wallets caps the fragment size it will *scan* — the fragment size is a property of the sender.
+Sparrow's 400 bytes at Normal density is a reasonable model for what a phone camera decodes
+reliably; Green's 50 is conservative. Choosing the appliance's own fragment size is a separate
+question this ticket does not settle, and it should be validated against a real phone camera, not
+computed.
+
+## 5. Version and compatibility traps
+
+1. **`crypto-psbt` vs `psbt` — the registry and the deployed wallets disagree.** BCR-2020-006
+   (revised 2025-04-26) marks `crypto-psbt`/tag 310 deprecated in favour of `psbt`/tag 40310, and
+   says deprecated types "should only be read, not written". None of the three wallets writes
+   `psbt`, and **Blue Wallet cannot read it**. Following the registry's recommendation would break
+   Blue Wallet. Emit `crypto-psbt`; accept both.
+2. **UR v1 support is still required on the accept side of nothing — but is still *offered* on the
+   produce side of two.** The appliance does not need to *emit* UR v1: nothing requires it. But it
+   may *receive* UR v1 if the user toggles Blue Wallet's `USE_UR_V1` setting, or if a Sparrow
+   keystore is typed `COBO_VAULT`. Both are user-reachable states. **Decision-relevant, not
+   settled here:** whether the appliance's scanner implements UR v1 as a defensive measure or
+   refuses it with a clear message.
+3. **Blue Wallet's per-wallet BBQr latch is sticky.** If the wallet was imported into Blue Wallet
+   from a BBQr scan, that wallet's ID goes into `USE_BBQR_WALLET_IDS`
+   (`StorageProvider.tsx:474-479`) and it will thereafter *display* PSBTs as BBQr, not UR. Since
+   the appliance will never emit BBQr for the xpub export, this latch should never trip — but it
+   means "Blue Wallet produces UR v2" is true only conditional on how the wallet was imported.
+4. **Sparrow's BBQr and legacy buttons are keystore-model-dependent**, not global settings
+   (`WalletModel.java:147-169`). Which model an aobs keystore gets is **UNCONFIRMED** and depends
+   on the import path chosen in Sparrow's UI.
+5. **Blue Wallet's single-QR base64 heuristic** (`data.indexOf('+') === -1 && data.indexOf('=') === -1`)
+   makes a padding-free, `+`-free base64 PSBT be read as a transaction hex. This is a reason to
+   never rely on single-QR base64 as a fallback for Blue Wallet.
+6. **Networks.** Nothing network-specific was found in any of the three QR/UR code paths: the
+   transport carries the BIP174 blob and the network is inferred downstream from the wallet's own
+   descriptor. So mainnet / testnet4 / signet / regtest do not change the transport question.
+   **Whether each app supports testnet4/signet/regtest at all is a different question and is not
+   settled here.**
+7. **Versions move.** All three repos are on `master`, not a release tag: Sparrow `2.5.4`
+   (`build.gradle:24`), Blue Wallet `8.0.2` (`package.json`), GDK `0.77.9` (`CHANGELOG.md`). Any
+   claim above should be re-checked against the version a user actually runs.
+
+## 6. A Python UR v2 implementation on Alpine/musl, and what embit covers
+
+**embit covers none of it.** `diybitcoinhardware/embit` @ `eb6104f` (2026-08-08): a grep of the
+entire `src/` tree for `bytewords`, `fountain`, `cbor`, `crypto-psbt` or "uniform resource" returns
+**nothing**. `src/embit/` is `base58 bech32 bip32 bip39 bip85 compact descriptor ec finalizer
+hashes liquid misc networks psbt psbtview script slip39 transaction util wordlists` — PSBT
+serialization yes (including `psbtview.py`, a streaming parser), UR transport no. The QR layer is
+entirely the appliance's to add.
+
+**A pure-Python UR v2 implementation exists and is field-proven: SeedSigner's vendored `ur2`.**
+`SeedSigner/seedsigner` @ `d70b322` (2026-08-22), `src/seedsigner/helpers/ur2/` —
+**1642 lines across 15 modules**, BSD-2-Clause-Plus-Patent:
+
+```
+bytewords.py  cbor_lite.py  constants.py  crc32.py  fountain_decoder.py
+fountain_encoder.py  fountain_utils.py  random_sampler.py  ur.py
+ur_decoder.py  ur_encoder.py  utils.py  xoshiro256.py
+```
+
+The only non-local imports across the whole package are `math`, `sys` and `time`. It carries its
+own CBOR (`cbor_lite.py`), CRC-32 (`crc32.py`), Bytewords codec and Xoshiro256 PRNG — so **no
+native extension, no C dependency, nothing musl-sensitive**. Both directions are present:
+`UREncoder` (fountain) and `URDecoder`.
+
+The registry layer is the separate `urtypes` package — SeedSigner pins the selfcustody fork
+(`requirements.txt`: `urtypes @ git+https://github.com/selfcustody/urtypes.git@7fb280e`); PyPI
+`urtypes` 1.0.1 ships as `urtypes-1.0.1-py3-none-any.whl`, i.e. **pure Python, no wheels to build**.
+`urtypes.crypto.PSBT` is the `crypto-psbt` type. For a single-sig appliance the needed surface is
+small enough that vendoring only what is used is a live option — **not a decision for this ticket**.
+
+SeedSigner also pins `embit==0.8.0`, the same embit line the appliance targets, so the two compose
+in production today.
+
+For calibration, SeedSigner's own UR fragment sizes (`models/encode_qr.py:295-300`) are
+`LOW: 10, MEDIUM: 30, HIGH: 120` bytes — far below Sparrow's 400, because it renders on a small
+screen. Its legacy `pXofY` encoder (`encode_qr.py:243-252`) uses `40 / 65 / 90`, and its docstring
+says it exists only "for compatibility with much older versions of Specter Desktop. Can probably
+eventually be removed" — corroborating that `pNofM` is dead for the three wallets in scope.
+
+**Unconfirmed:** whether the `ur2` package is packaged for Alpine or on PyPI under a maintained
+name — SeedSigner vendors it into its own tree rather than depending on a published package, so
+the realistic path is vendoring it (or `urtypes`' own UR implementation) into the appliance.
+Confirming a packaged alternative would mean searching the Alpine `APKINDEX` and PyPI, which this
+pass did not do.
+
+## Method note for the frame-count arithmetic
+
+The PSBT sizes in item 4 were computed, not measured. Each record is
+`compactsize(keylen) + key + compactsize(vallen) + value` per BIP174, with all compact sizes
+1 byte at these magnitudes. Fields counted, per signed-not-finalized single-sig PSBT:
+
+- global: `PSBT_GLOBAL_UNSIGNED_TX` (0x00) holding a segwit-stripped 2-in/2-out tx, + separator.
+- per input, BIP84: `PSBT_IN_WITNESS_UTXO` (0x01, 31-byte txout), `PSBT_IN_PARTIAL_SIG` (0x02,
+  33-byte key + 72-byte DER sig + sighash byte), `PSBT_IN_BIP32_DERIVATION` (0x06, 33-byte key +
+  4-byte fingerprint + 5×4-byte path), + separator.
+- per input, BIP86 (BIP371): `PSBT_IN_WITNESS_UTXO` (43-byte txout), `PSBT_IN_TAP_KEY_SIG` (0x13,
+  64 bytes — default sighash, no trailing byte), `PSBT_IN_TAP_BIP32_DERIVATION` (0x16, 32-byte
+  x-only key + zero leaf hashes + fingerprint + path), `PSBT_IN_TAP_INTERNAL_KEY` (0x17, 32 bytes),
+  + separator.
+- one change output carries its derivation fields; the other output is empty (a separator only).
+- no `PSBT_GLOBAL_XPUB`, no `PSBT_IN_SIGHASH_TYPE`, no `PSBT_IN_NON_WITNESS_UTXO`.
+
+Real PSBTs will differ by tens of bytes (DER signatures are 71 or 72 bytes; some coordinators emit
+`PSBT_IN_SIGHASH_TYPE` and `PSBT_GLOBAL_XPUB`). At Sparrow's 400-byte fragments that noise does not
+change the frame count; at Green's 50-byte fragments each ±50 bytes is ±1 frame. **These numbers are
+computed from the specs and have not been checked against a PSBT produced by any of the three
+apps** — doing so is the confirmation step, and it needs the apps.
 
 ## Evidence index
 
-_(populated below)_
+Repositories cloned 2026-08-24, `--depth 1`:
+
+| repo | commit | version marker |
+|---|---|---|
+| `sparrowwallet/sparrow` | `70f9c844b78bb07a3bbaa2307ead4a07508f4b21` (2026-08-24) | `build.gradle:24` → `2.5.4` |
+| `sparrowwallet/hummingbird` | `6f06b2cd6120fe397f31b2231532d303e628c4dd` (2024-10-22) | `build.gradle:10` → `1.7.4` |
+| `sparrowwallet/drongo` | master (cloned 2026-08-24) | — |
+| `BlueWallet/BlueWallet` | `97f9d7277504b6acf93f80bcf920384587eca401` (2026-08-21) | `package.json` → `8.0.2` |
+| `Blockstream/green_android` | `49096a4ea3a985f7ef05c953b434d8418e2a8f6b` (2026-07-22) | — |
+| `Blockstream/gdk` | `8af8abd6fb0659bc97f4afef08ad6953c3752b0e` (2026-08-20) | `CHANGELOG.md` → `0.77.9` |
+| `diybitcoinhardware/embit` | `eb6104fd85d3becabba628756cd5e1b75619f3a1` (2026-08-08) | — |
+| `SeedSigner/seedsigner` | `d70b322f1efde01d509b9672b982b5eb43eb8afa` (2026-08-22) | `requirements.txt` → `embit==0.8.0` |
+
+Specs:
+
+- **BIP174** — PSBT field types and `<keylen><key><vallen><value>` record layout.
+- **BIP371** — taproot PSBT fields (`PSBT_IN_TAP_KEY_SIG` 0x13, `PSBT_IN_TAP_BIP32_DERIVATION`
+  0x16, `PSBT_IN_TAP_INTERNAL_KEY` 0x17, `PSBT_OUT_TAP_INTERNAL_KEY` 0x05,
+  `PSBT_OUT_TAP_BIP32_DERIVATION` 0x07).
+- **BCR-2020-005** (UR, v2.1.0, revised 2023-08-21) — `ur:<type>/<seqNum>-<seqLen>/<fragment>`;
+  parts with `seqNum <= seqLen` are plain fixed-rate fragments, parts beyond that are fountain
+  mixes.
+- **BCR-2020-006** (UR type registry, revised 2025-04-26) — `40310 ~~310~~ | psbt ~~crypto-psbt~~`;
+  deprecated types "should only be read, not written"; a top-level UR object "MUST NOT be tagged",
+  so `crypto-psbt` is a bare CBOR byte string wrapping the BIP174 blob.
+- **BCR-2024-001** (Multipart UR implementation guide, 2024-01-09) — part structure
+  `[uint32 seqNum, uint seqLen, uint messageLen, uint32 checksum, bytes data]`.
+
+## What is NOT settled here
+
+- Which `WalletModel` a Sparrow keystore imported from aobs receives, and therefore whether
+  Sparrow even offers BBQr for it.
+- Whether a single-QR base64 PSBT is actually accepted by Green on a device (code path read, not
+  run).
+- Whether Blue Wallet's and Green's coordinators populate `PSBT_IN_NON_WITNESS_UTXO` for
+  segwit/taproot inputs, which would change the frame counts substantially.
+- The PSBT byte sizes against real PSBTs from the three apps.
+- Whether a maintained *packaged* pure-Python UR v2 library exists (Alpine `APKINDEX` / PyPI not
+  searched); SeedSigner vendors its own, so vendoring is the confirmed-available path.
+- Testnet4 / signet / regtest support in each app (orthogonal to the transport, but it gates the
+  test plan).
+- The appliance's own fragment size — needs a real camera, not arithmetic.
