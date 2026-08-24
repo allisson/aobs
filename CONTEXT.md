@@ -91,6 +91,26 @@ never the same thing — do not let either term stand in for the other.
 A Wallet exported as a single QR code, encrypted under an export password. The export password
 is eight words drawn from the EFF large wordlist, stretched with Argon2id.
 
+## Proof rule
+
+The appliance shows an output as change only when it can **prove** it — by reproducing the output's
+script from its own key at a path it recognises. A derivation field in the PSBT is input to that
+check, never the answer. Everything unproven is money leaving. Say "proven change", never just
+"change", whenever the distinction could matter.
+
+## Output category
+
+One of exactly three verdicts the appliance reaches about an output of a PSBT: **payment** (not
+ours), **proven change** (script reproduced from our own key), or **not proven** (claims to be ours,
+could not be reproduced). Two categories is the change-address attack; the third exists so that
+"we could not prove it" never gets rounded to "change".
+
+## Not proven
+
+The third Output category, and the one with a rule attached: it is displayed and counted as a
+**payment**, with a warning. It must never be described as change in prose, in code, or on screen —
+the whole point of the term is that it degrades in the safe direction.
+
 ## Watch-only wallet
 
 The untrusted counterparty across the QR channel: Sparrow, Blockstream App/Green, or Blue Wallet,
