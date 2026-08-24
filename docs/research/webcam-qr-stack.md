@@ -148,6 +148,9 @@ Alpine builds it `-DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_READERS=ON -DBUILD_PYTHO
 ./configure … --disable-video --with-python=python3 --with-gtk=gtk3 --with-gir …
 ```
 
+Upstream `configure.ac` (tag 0.23.93) documents that flag as *"exclude video scanner features"*, and
+the V4L2 probing block (`linux/videodev2.h`, `libv4l2.h`, `AM_CONDITIONAL([HAVE_VIDEO], …)`) is
+skipped entirely when it is set.
 So zbar's own V4L2 capture (`zbarcam`, `zbar.Processor`) **is not available** in Alpine. zbar can
 only be handed frames the application captured itself. This removes "let zbar own the camera" as an
 option and makes item 1 (capture) independent of the decoder either way.
@@ -344,11 +347,20 @@ What it requires from the kernel config (relevant to the boot-pipeline ticket):
 
 - `CONFIG_FB=y` plus a driver. Alpine's `lts.x86_64.config` has `CONFIG_FB=y`, `CONFIG_FB_EFI=y`,
   `CONFIG_DRM_SIMPLEDRM=y`, `CONFIG_SYSFB_SIMPLEFB=y`, `CONFIG_FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER=y`.
-- For a real KMS driver, `/dev/fb0` exists only through `CONFIG_DRM_FBDEV_EMULATION`
+- **`CONFIG_FB_DEVICE` is the switch that creates the device node at all.**
+  `drivers/video/fbdev/core/Kconfig:13` — *"Provide legacy `/dev/fb*` device … It is only required
+  if you have userspace programs that depend on fbdev for graphics output. This does not affect the
+  framebuffer console. If unsure, say N."* It `depends on FB_CORE` and is `default FB`. A kernel can
+  therefore have a perfectly working text console and **no `/dev/fb0`** — this config must be
+  asserted deliberately by the boot pipeline, not assumed.
+- The console and the device are independent: `CONFIG_FRAMEBUFFER_CONSOLE`
+  (`drivers/video/console/Kconfig:73`) `depends on FB_CORE && !UML`, `default DRM_FBDEV_EMULATION`,
+  and selects `FONT_SUPPORT` — so text screens and the `/dev/fb0` preview are separately gated.
+- For a real KMS driver, the fbdev interface exists only through `CONFIG_DRM_FBDEV_EMULATION`
   (`drivers/gpu/drm/clients/Kconfig`, `default FB`, help text: "this support also provides the linux
   console support on top of your modesetting driver").
-- **UNCONFIRMED:** I could not verify `CONFIG_FB_DEVICE`, `CONFIG_VT`, `CONFIG_FRAMEBUFFER_CONSOLE`
-  or `CONFIG_DRM_FBDEV_EMULATION` from Alpine's shipped config, because
+- **UNCONFIRMED:** I could not verify the *values* of `CONFIG_FB_DEVICE`, `CONFIG_VT`,
+  `CONFIG_FRAMEBUFFER_CONSOLE` or `CONFIG_DRM_FBDEV_EMULATION` in Alpine's shipped kernel, because
   `main/linux-lts/lts.x86_64.config` is a **minimised** config (3163 `CONFIG_` lines, only 57
   "is not set" entries) where defaults are omitted. Since the appliance builds its own kernel, the
   Kconfig requirements above are what matters, not Alpine's defaults — but the ISO must assert them
