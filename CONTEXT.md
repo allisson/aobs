@@ -23,7 +23,9 @@ different strengths, so a sentence using "amnesic" without saying which one it m
 claim. `docs/threat-model.md` states each.
 
 The first of the three is the strongest and is unconditional: no block device exists on the running
-appliance, and the Boot medium can be removed once it is up.
+appliance, and the Boot medium can be removed once it is up. The third is structural rather than
+promised: exactly one userspace process exists, so there is no other process to read from. Only the
+second — after power-off — is best-effort, and none of the three is byte-zeroing.
 
 ## Boot medium
 

@@ -27,15 +27,22 @@ is the one check a stranger can perform in three seconds without trusting us or 
 
 4. **Shutdown is a forced power-off**, not a reboot. The machine ends powered down. *(#10)*
 
+5. **Exactly one userspace process exists.** `ls -d /proc/[0-9]*` shows a single PID — the app. This is
+   what makes claim (iii) structural rather than a promise. *(#15)*
+
+6. **No core file can be produced.** `ulimit -c` reads `0`, and killing the app with `SIGSEGV` leaves no
+   core file anywhere in the tmpfs — which it cannot, because `CONFIG_COREDUMP=n` means no dumper
+   exists. *(#15)*
+
 ## USB
 
-5. **`authorized_default` reads `0`** on every root hub once the appliance is up, and it already reads
+7. **`authorized_default` reads `0`** on every root hub once the appliance is up, and it already reads
    `0` **before the mnemonic or passphrase prompt** — not merely before signing. *(#14's sequencing.)*
 
-6. **A mass-storage device inserted mid-session binds nothing.** No block device appears, no driver
+8. **A mass-storage device inserted mid-session binds nothing.** No block device appears, no driver
    binds, nothing is mounted.
 
-7. **The built-in driver list contains `usbhid` and `uvcvideo` and no other USB class driver**, with
+9. **The built-in driver list contains `usbhid` and `uvcvideo` and no other USB class driver**, with
    module loading unavailable. *(Also asserted at build time; this confirms the shipped image.)*
 
 **Stated limit, verified rather than hidden:** between power-on and the `authorized_default` flip there
@@ -44,43 +51,43 @@ boot" must not be read as "no device is ever authorized".
 
 ## Console and input
 
-8. **`fbcon` gives at least 85 columns × 43 rows** — the size #3 fixed for a 77×77-module QR. Check on
-   **both** firmware paths: UEFI via `efifb`/`simpledrm`, and legacy BIOS with `vga=791`. A BIOS box
-   falling back to 80×25 text cannot display a QR at all. *(#12)*
+10. **`fbcon` gives at least 85 columns × 43 rows** — the size #3 fixed for a 77×77-module QR. Check on
+    **both** firmware paths: UEFI via `efifb`/`simpledrm`, and legacy BIOS with `vga=791`. A BIOS box
+    falling back to 80×25 text cannot display a QR at all. *(#12)*
 
-9. **The keymap picker echoes keys as typed**, before any secret is entered, and a non-US layout
-   selected there produces the characters printed on the physical keys. *(#12 — a passphrase typed
-   through the wrong map is an unopenable wallet that reports no error.)*
+11. **The keymap picker echoes keys as typed**, before any secret is entered, and a non-US layout
+    selected there produces the characters printed on the physical keys. *(#12 — a passphrase typed
+    through the wrong map is an unopenable wallet that reports no error.)*
 
 ## Camera
 
-10. **Real webcam decode holds 5 fps**, the rate #6 measured as required (Sparrow's
+12. **Real webcam decode holds 5 fps**, the rate #6 measured as required (Sparrow's
     `ANIMATION_PERIOD_MILLIS = 200`), with 10 fps as the worst case.
 
-11. **A multi-frame PSBT scans end to end from a real screen**, with decode progress advancing — the
+13. **A multi-frame PSBT scans end to end from a real screen**, with decode progress advancing — the
     feedback #3 chose over a viewfinder.
 
 ## Refusals and failure
 
-12. **The RAM-floor refusal fires.** Boot with less than 512 MiB available and the appliance stops with
+14. **The RAM-floor refusal fires.** Boot with less than 512 MiB available and the appliance stops with
     a clear message rather than starting and dying mid-session with a wallet loaded. *(#10, #12)*
 
-13. **There is no path from the running app to a prompt.** No getty, no VT with a login, no VT
+15. **There is no path from the running app to a prompt.** No getty, no VT with a login, no VT
     switching; Ctrl+Alt+Del does nothing; SysRq does nothing.
 
     **Not defended, and confirm it behaves as documented rather than pretending otherwise:**
     `init=/bin/sh` typed at the bootloader does give a shell. That is stated, not defended — a fresh
     boot holds no secrets. *(#12)*
 
-14. **A failure shows a screen naming it**, waits for a keypress, then powers off. The outcome to check
+16. **A failure shows a screen naming it**, waits for a keypress, then powers off. The outcome to check
     for is the one that must never happen: a silent power-off with no explanation. *(#12)*
 
-15. **No date or time is displayed anywhere**, and an `nLockTime` is shown raw with no judgement about
+17. **No date or time is displayed anywhere**, and an `nLockTime` is shown raw with no judgement about
     whether it has passed — there is no clock to make that judgement with. *(#12)*
 
 ## Interop
 
-16. **A full round trip with each target watch-only wallet**, on mainnet: export the descriptor, have
+18. **A full round trip with each target watch-only wallet**, on mainnet: export the descriptor, have
     the wallet build a PSBT, scan it, sign, scan the result back, broadcast.
 
     **This is the check with the fewest substitutes.** #5 found that Green cannot receive taproot over

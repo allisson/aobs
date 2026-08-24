@@ -158,15 +158,26 @@ while making the appliance look like it defends something it does not.
 
 ### (iii) Nothing is recoverable from RAM during the session by another process — promised structurally
 
-The basis is that there is no other process worth the name: a single workload, no network, no shell
-on the console, no untrusted code loaded. The limit, stated: anything running as root can read the
-address space, so the claim is **"no other program is present"**, not "the memory is protected from
-one".
+**Seed material exists only inside the single userspace process on the appliance — there is no
+second process to read it, no core dumper in the kernel to write it out, and the process dies at
+power-off.**
 
-**This claim is about process lifetime, not about zeroing bytes.** CPython copies `bytes` freely and
-cannot reliably scrub them, so *"seed material is wiped from memory as soon as it is used"* is a
-claim the appliance cannot keep and must never make. *"Seed material exists only inside a process
-that is never dumped and dies at power-off"* is one it can.
+This wording is **stronger than the one first published here**, and deliberately so: it was written
+before the boot pipeline was settled, and #12 changed the facts. The appliance runs exactly one
+userspace process, PID 1, which is the application. The earlier hedge — "no other process *worth the
+name*" — described a judgement; this describes a structure, and a stranger can check it by eye with
+`ls -d /proc/[0-9]*`.
+
+Each clause is separately testable: `CONFIG_COREDUMP=n` and `CONFIG_PROC_KCORE=n` are asserted at
+build time, and the single-process fact is visible on the running appliance. The limit stays what it
+was: anything running as root could read the address space, so the claim is **"no other program is
+present"**, not "the memory is protected from one".
+
+**None of that is byte-zeroing, and strengthening the sentence above must not be allowed to blur
+it.** CPython copies `bytes` freely and cannot reliably scrub them, so *"seed material is wiped from
+memory as soon as it is used"* is a claim the appliance cannot keep and must never make. The copies
+are uncounted; what is promised is the process boundary and the process lifetime. `docs/secret-hygiene.md`
+states what follows from that.
 
 ## What "offline" promises
 
