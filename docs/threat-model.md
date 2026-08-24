@@ -95,17 +95,66 @@ collapsing them is how a reader ends up trusting the weakest one.
 
 ### (i) Nothing is written to any persistent medium — promised unconditionally
 
-The core of the term. Testable, all four assertable on a running appliance:
+The core of the term, and it is promised in its strongest form: **no block device exists on the
+running appliance at all, and the boot medium can be physically removed once the appliance is up.**
 
-- no block device is mounted at any point in the session;
-- the only writable filesystems are tmpfs;
-- no swap and no hibernation are configured;
-- the boot medium is mounted read-only or copied to RAM and released.
+The mechanism is that the entire system ships inside the initramfs, which the firmware loads before
+Linux starts. The kernel therefore contains **no block or storage drivers and no loadable modules**,
+so after handoff the medium is never read again, and there is no `usb-storage`, `sr_mod`, or loop
+device for anything to be mounted from. There is also no modloop: an all-built-in kernel has no
+modules to load from a squashfs.
+
+This wording is a correction. It previously read "no block device is mounted at any point in the
+session", which was **false** for a stock Alpine LiveCD: Alpine has no `copytoram` boot option, and
+its `modloop` service loop-mounts the kernel modules squashfs from the boot medium and keeps it
+mounted for the whole session. The claim was written from how it ought to work rather than how it
+does.
+
+How to check it, in ascending order of trust required:
+
+1. **Remove the medium.** Boot, pull the stick out, then complete a full sign. This requires
+   trusting nothing and no tooling, and it belongs in the published README.
+2. **Image the medium and diff it.** `dd` the stick before booting, run a full session, power off,
+   image again: the two must be byte-identical. This is the direct proof that nothing was written.
+3. **On the running appliance:** `/proc/mounts` shows only tmpfs, proc, sys, dev, devpts and shm —
+   nothing block-backed; `/proc/swaps` is empty; and no `/dev/sd*`, `/dev/sr*` or `/dev/loop*` node
+   exists, because no driver exists to create one.
+4. **Kernel config inspection** for the negative claims: no swap, no block drivers, no modules.
+
+**The fallback, named so it cannot be shipped silently.** The cost of this architecture is that the
+firmware must load an initramfs containing the whole system. If the measured image turns out too
+large for common firmware, the fallback is to keep a storage driver for boot, copy to RAM, unmount
+and eject — and that weakens the claim to *"no block device is mounted after boot completes"*. Taking
+the fallback **requires rewording this section downward**; the boot pipeline may not adopt it while
+these words stand.
+
+**Minimum RAM.** The floor is the unpacked rootfs in tmpfs, plus the kernel, plus the app's working
+set (a PSBT, camera frames, the Python heap). The only measured inputs so far are `python3` at
+34.79 MiB and the capture/decode stack at +1.35 MiB; the floor itself is **unmeasured** and is pinned
+by the boot-pipeline work, not asserted here. The appliance **checks available RAM at boot and
+refuses to start with a clear message below the floor**, rather than failing mid-session with a
+wallet loaded.
+
+Note that `modloop_verify`, Alpine's signature check on the modules squashfs, verifies against a
+public key on the same medium — exactly the meaningless self-check rejected under *No boot-time
+self-verification*. It does not exist under this architecture, and it must not be presented as
+integrity verification if the fallback is ever taken.
 
 ### (ii) Nothing is recoverable from RAM after power-off — best-effort, not guaranteed
 
 See Tier 2 item 5. The appliance does the cheap things and states, in the same breath, that an
 attacker holding the DIMMs is not stopped.
+
+What it does at shutdown, and nothing more: **forces power-off rather than reboot**, so there is no
+warm handoff to another OS that could read RAM; runs with **no swap and no hibernation**, so nothing
+was ever paged out; and makes a **best-effort wipe of the derived key material the app itself
+holds** — labelled best-effort, never as "RAM is cleared".
+
+**A full RAM overwrite is rejected as theatre.** It would take a long and visible time on a
+multi-gigabyte machine, it cannot reach page cache, freed allocations, or tmpfs pages, and CPython
+cannot scrub its own copies anyway — which is why claim (iii) is worded as process lifetime rather
+than byte-zeroing. It would buy almost nothing over the concession already made in Tier 2 item 5,
+while making the appliance look like it defends something it does not.
 
 ### (iii) Nothing is recoverable from RAM during the session by another process — promised structurally
 

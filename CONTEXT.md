@@ -22,6 +22,16 @@ power-off, and nothing recoverable from RAM during the Session by another proces
 different strengths, so a sentence using "amnesic" without saying which one it means is not yet a
 claim. `docs/threat-model.md` states each.
 
+The first of the three is the strongest and is unconditional: no block device exists on the running
+appliance, and the Boot medium can be removed once it is up.
+
+## Boot medium
+
+The USB stick or disc the appliance is booted from. It is **not** a data path: it is read by
+firmware before Linux starts and never read again, so it can be physically removed for the rest of
+the Session. Do not call it storage — nothing is ever written to it, which is what makes pulling it
+out the cheapest check of the amnesia guarantee.
+
 ## Offline
 
 The appliance's network property: no network stack and no network drivers exist in the running
