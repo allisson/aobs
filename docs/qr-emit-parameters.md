@@ -66,7 +66,7 @@ and it is why the design carries a recovery path rather than a promise.
 
 ### The step-down ladder
 
-Fragment size is **one named constant**, and the QR screen offers a key that steps it down a short
+Fragment size is **one named constant**, and the QR screen offers **`F9`** to step it down a short
 fixed ladder:
 
 **340 → 200 → 120 → 50 bytes**, with the frame rate stepping **2 → 1 fps** alongside it.
@@ -74,6 +74,47 @@ fixed ladder:
 This is a recovery path a user reaches for when a wallet will not read the code — not a configuration
 menu they must understand in advance. Boot-checklist item 18, the real round trip with each wallet, is
 what promotes the default from assumed to known.
+
+### `F9`, and why not a letter
+
+**A function key, because the keymap is whatever the user chose on the first screen.** #28's picker
+exists precisely because a passphrase typed through the wrong layout is the worst failure this
+appliance has. A letter key or `-` inherits that risk for nothing; `F9` is in the same physical place
+on every Latin layout, which is the same argument `docs/failure-states.md` makes for `F12`.
+
+**Beside `F10`, deliberately.** `F10` is the one accept key the appliance teaches, and **on the emit
+screen it is bound to nothing at all** — so a slip in that direction does nothing, which is the
+property being bought. `tests/test_emit_screen.py` asserts the inertness rather than assuming it,
+because it is load-bearing here and a later ticket could bind `F10` on this screen without noticing.
+On a full-size PC function row the keys are also grouped in threes, which puts a physical gap to
+`F9`'s left; that is a bonus on the keyboards that have it and not something the choice rests on.
+
+**Not `F11`**, which is the tempting alternative and is strictly worse: it sits between `F10` and
+`F12`, so a slip one key right ends the session. **Not an arrow key** either, despite *`↓` smaller*
+reading well: `↑` `↓` `PgUp` `PgDn` are already the appliance's navigation keys on the keymap, home
+and review screens, where they move a selection or a viewport and act on nothing. Giving an arrow a
+state change on one screen breaks that, and a user pressing `↓` here to check whether there is more
+content below would step the ladder without meaning to.
+
+### `esc` on this screen says *done*
+
+The emit screen is the only one where backing out means *the wallet has read it*, so the word beside
+`esc` is **`done`** rather than `back` or `discard`.
+
+**The key is what is invariant, not the word.** The review says `esc discard` and the confirm says
+`esc back to the review`; each names what leaving *that* screen costs, which is the honest thing to
+print. `docs/failure-states.md` reserves the key's *meaning* — back out without acting — and `done`
+is that meaning on a screen where there is nothing left to undo.
+
+**And leaving is reversible**, which is what keeps `done` from being a commit in disguise. The
+confirm reaches this screen with `switch_screen`, so emit replaces the confirm and sits on the
+review — which still holds its scroll position and its open lock. A user who presses `esc` before
+the wallet has finished reading lands back on the review, and `F10` then `y` signs the same bytes
+again and emits again. Nothing is lost and the screen is re-reachable.
+
+**The whole of that walk is asserted**, in `tests/test_emit_screen.py`, down to the second emission
+being byte-identical to the first — so the claim is checked rather than reasoned about, including the
+signature determinism it depends on.
 
 ## Frame rate: 2 fps
 

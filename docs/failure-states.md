@@ -128,6 +128,42 @@ while confused**, and they are exactly where a key that behaves differently gets
 mnemonic — and a power-off that needs a menu is one people avoid, which leaves wallets loaded on
 unattended machines.
 
+### Per-screen keys are named in their own screen's document
+
+**The inventory above stays three, and it is not the whole keyboard.** A screen may bind a key of its
+own beyond the confirm — and where it does, the key and the reasoning for it belong in that screen's
+document, not here. This document owns what is *identical everywhere*; a key that exists on one
+screen is a fact about that screen.
+
+Named here so the inventory is not silently incomplete, every key any screen binds today falls into
+one of three kinds:
+
+| kind | keys | screens |
+|---|---|---|
+| **Confirm** | `F10`, and `y` on the confirm | keymap, home, review, confirm |
+| **Navigation** | `↑` `↓` `PgUp` `PgDn` — move a selection or a viewport, act on nothing | keymap, home, review |
+| **Its own** | `F9` — *step the QR down one rung of the density ladder* (`docs/qr-emit-parameters.md`) | emit |
+
+**Only the third kind is new ground**, and there is one key in it: `F9` is the only key in the
+appliance that changes state without confirming anything and without being navigation. That is why
+it needed a ticket of its own, and why the next one will too.
+
+It chooses a **function key** for the same reason `F12` does: the keymap is whatever the user picked
+on the first screen, so a letter key is not in a known place and a function key is. A per-screen key
+that wants to be a letter is a per-screen key that needs re-arguing — the confirm's `y` is the one
+that carried that argument, and it carried it on the strength of being unreachable by momentum.
+
+### The word beside `esc` is per-screen; the key is not
+
+`esc` means *back out without acting* on every screen, and that is the part nothing may vary. **What
+each screen prints beside it does vary**, and should: the review says `esc discard`, the confirm says
+`esc back to the review`, the emit screen says `esc done`. Each names what leaving *that* screen
+costs, which is more use to the user than one word repeated.
+
+The rule this protects is unchanged — a user who has learned `esc` means *back* must never meet a
+screen where it means *proceed*. A screen whose honest label for `esc` would be a commit has a
+design problem, not a wording problem.
+
 ## There is no diagnostic export, on purpose
 
 **No log file, no diagnostic QR, no "copy error details".**

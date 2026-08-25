@@ -31,7 +31,7 @@ from aobs.core.wallet import Network, Wallet
 from aobs.ui import qrcodes
 from aobs.ui.app import SignerApp
 from aobs.ui.geometry import MAX_COLUMNS
-from aobs.ui.screens.emit import LAST_RUNG, STEP_DOWN_KEY, EmitScreen
+from aobs.ui.screens.emit import KEYS, LAST_RUNG, STEP_DOWN_KEY, EmitScreen
 
 from conftest import CORPUS, VECTOR_MNEMONIC
 
@@ -230,6 +230,66 @@ async def test_every_rung_stays_inside_version_15() -> None:
                 screen.advance()
             await pilot.press(STEP_DOWN_KEY)
             await pilot.pause()
+
+
+# --- The keys -------------------------------------------------------------------------------------
+
+
+def test_the_step_down_key_is_f9_and_the_screen_teaches_it() -> None:
+    """`docs/qr-emit-parameters.md` names the key. Asserted here so the document and the binding
+    cannot drift apart silently, and so a rename lands in both."""
+    assert STEP_DOWN_KEY == "f9"
+    assert KEYS.startswith("F9 ")
+    # Never `F11`: a slip from there lands on `F12` and ends the session.
+    assert "F11" not in KEYS
+
+
+async def test_f10_is_inert_on_this_screen_which_is_why_f9_sits_beside_it() -> None:
+    """The load-bearing half of the key choice: a slip from `F10` to `F9` is harmless because
+    `F10` does nothing here. A later ticket that binds it on this screen fails here."""
+    psbt = signed_psbt()
+    app = build()
+    async with app.run_test(size=CONSOLE) as pilot:
+        screen = await open_emit(app, pilot, psbt)
+        before = (screen.stream.parameters.rung, screen.part)
+        await pilot.press("f10")
+        await pilot.pause()
+        assert app.screen is screen, "F10 left the emit screen"
+        assert (screen.stream.parameters.rung, screen.part) == before
+
+
+async def test_esc_leaves_the_emit_screen_reversibly() -> None:
+    """What makes `esc done` honest rather than a commit.
+
+    The confirm reaches emit with `switch_screen`, so emit replaces the confirm and sits on the
+    review — which kept its scroll and its open lock. A user who presses `esc` before the wallet
+    has finished reading lands back there and can re-sign the same bytes and emit again.
+    """
+    from aobs.ui.screens.review import ReviewScreen
+
+    app = build()
+    app.wallet = Wallet.from_mnemonic(VECTOR_MNEMONIC, network=Network.SIGNET)
+    async with app.run_test(size=CONSOLE) as pilot:
+        await pilot.press("f10")  # accept the keymap
+        await pilot.pause()
+        app.open_review((CORPUS / "honest_p2wpkh.psbt").read_bytes())
+        await pilot.pause()
+        await pilot.press("f10", "y")
+        await pilot.pause()
+        assert isinstance(app.screen, EmitScreen)
+        emitted = app.screen.signed_psbt
+
+        await pilot.press("escape")
+        await pilot.pause()
+        review = app.screen
+        assert isinstance(review, ReviewScreen), "esc landed somewhere other than the review"
+        assert review.unlocked, "the review's lock closed behind the user"
+
+        # And the way back out is the same two keys, emitting the same bytes.
+        await pilot.press("f10", "y")
+        await pilot.pause()
+        assert isinstance(app.screen, EmitScreen)
+        assert app.screen.signed_psbt == emitted
 
 
 # --- What is not on the screen --------------------------------------------------------------------
