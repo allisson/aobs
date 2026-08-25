@@ -10,6 +10,8 @@ live wallet.
 
 from __future__ import annotations
 
+from collections import Counter
+
 import pytest
 from textual.widgets import Static
 
@@ -388,6 +390,83 @@ async def test_space_commits_a_prefix_word_as_itself(word: str) -> None:
         await pilot.press(*word, "space")
         await pilot.pause()
         assert grid.words[0] == word, "auto-resolution would have guessed the longer word"
+
+
+def _collides(first: str, second: str) -> bool:
+    """The collision #41 settled the commit rule on.
+
+    A word longer than four characters still has letters left over once its prefix has resolved,
+    and the next word may begin with exactly the letter that would have finished it — so a grid
+    that committed at four characters could not tell the `l` that starts `lounge` from the `l`
+    that ends `cruel`.
+    """
+    return len(first) > bip39.BIP39_PREFIX and second[0] == first[bip39.BIP39_PREFIX]
+
+
+#: The three adjacencies #31 hit in one generated seed. They are instances of the rule below, not
+#: an unlucky sample, and they are what the keystroke tests are driven on.
+COLLIDING_PAIRS = (("cruel", "lounge"), ("merit", "twelve"), ("gospel", "exchange"))
+
+
+def test_a_four_character_commit_would_mis_slot_more_than_half_of_all_seeds() -> None:
+    """#41's evidence, measured here rather than asserted in prose. The wordlist is frozen, so
+    these numbers are facts about BIP39 and will not drift."""
+    words = bip39.wordlist()
+    starts = Counter(word[0] for word in words)
+    colliding = sum(
+        starts[word[bip39.BIP39_PREFIX]] for word in words if len(word) > bip39.BIP39_PREFIX
+    )
+    rate = colliding / len(words) ** 2
+    assert round(rate, 4) == 0.0335, "3.35% of ordered word pairs collide"
+    # 23 adjacencies in a 24-word seed.
+    assert round(1 - (1 - rate) ** 23, 2) == 0.54
+    assert all(_collides(first, second) for first, second in COLLIDING_PAIRS)
+
+
+async def test_four_characters_resolve_for_display_and_commit_nothing() -> None:
+    """The whole of #41 in one screen: the cell shows `cruel` so the user can check it, and the
+    slot is still empty and the cursor has not moved. Resolution is display; the user commits."""
+    app = build()
+    async with app.run_test(size=CONSOLE) as pilot:
+        grid = await reach_seed_grid(pilot, app)
+        await pilot.press("c", "r", "u", "e")
+        await pilot.pause()
+        assert "cruel" in str(app.screen.query_one("#slot-0", Static).content)
+        assert grid.words[0] == "", "a resolved prefix is not yet a committed word"
+        assert grid.cursor == 0
+
+
+@pytest.mark.parametrize("first,second", COLLIDING_PAIRS, ids=lambda pair: pair)
+async def test_the_shortcut_survives_a_colliding_adjacency(first: str, second: str) -> None:
+    """Four characters, a separator, four characters. Under a four-character auto-commit the
+    second word's first letter would have been eaten as the tail of the first."""
+    app = build()
+    async with app.run_test(size=CONSOLE) as pilot:
+        await pilot.press("f10")  # the keymap picker, on to home
+        app.open_seed_grid(12)
+        await pilot.pause()
+        grid = app.screen.query_one(WordGrid)
+        await pilot.press(*first[:4], "space", *second[:4], "space")
+        await pilot.pause()
+        assert grid.words[:2] == (first, second)
+        assert grid.cursor == 2
+
+
+@pytest.mark.parametrize("first,second", COLLIDING_PAIRS, ids=lambda pair: pair)
+async def test_a_colliding_adjacency_typed_in_full_lands_in_its_own_slots(
+    first: str, second: str
+) -> None:
+    """The other half of #41: the surplus letters of a full-word typist. They finish the word they
+    belong to, because the slot is still open until the separator arrives."""
+    app = build()
+    async with app.run_test(size=CONSOLE) as pilot:
+        await pilot.press("f10")
+        app.open_seed_grid(12)
+        await pilot.pause()
+        grid = app.screen.query_one(WordGrid)
+        await pilot.press(*first, "space", *second, "space")
+        await pilot.pause()
+        assert grid.words[:2] == (first, second)
 
 
 async def test_numeric_index_entry_is_rejected() -> None:
