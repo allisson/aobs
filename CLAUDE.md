@@ -19,6 +19,29 @@ work that ticket — `/wayfinder https://github.com/allisson/aobs/issues/1` — 
 the map. A design decision made only inside a code diff is invisible to the next session, which
 then decides it differently.
 
+## Running the tests
+
+**Always in the container. Never `uv run pytest`.**
+
+```sh
+docker run --rm -v "$PWD:/src" -w /src aobs-test        # the loop — ~85 s, the whole suite
+docker build -f build/Dockerfile.test -t aobs-test .    # only when build/apk-versions.txt changes
+```
+
+The bind mount is what makes this the loop rather than a CI job: the image carries the pinned
+Alpine userland, the working tree comes from the host, and no rebuild is needed to run an edit.
+
+`uv run pytest` on the host is not a faster shortcut, it is a **slower and weaker** one, and #35
+retired it for both reasons. `embit` is vendored from git with no prebuilt binary (#34), so a host
+with no system `libsecp256k1` falls back to `py_secp256k1`: **measured at 15 minutes against the
+container's 85 seconds.** It also resolves libraries from PyPI on a non-Alpine Python, which is a
+configuration the appliance is never in — so a `zxing-cpp`, `cryptography` or `libsecp256k1` skew
+that would break the ISO passes there.
+
+A single file is `docker run --rm -v "$PWD:/src" -w /src aobs-test python3 -m pytest -q
+tests/test_review_screen.py`. The regtest suite needs a `bitcoind` and stays opt-in (`-m regtest`);
+`docs/boot-checklist.md` holds what only a real boot can check.
+
 ## Issue tracker
 
 GitHub issues on `allisson/aobs`, via `gh`. Wayfinding operations (map, child tickets, native

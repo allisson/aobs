@@ -559,6 +559,66 @@ def many_inputs() -> None:
     )
 
 
+def many_outputs() -> None:
+    """Nine outputs, which is more than the review screen can show at once.
+
+    The scroll-to-end lock is behaviour, and behaviour needs a transaction whose outputs actually
+    overflow: `many_inputs` is twenty *inputs* and two outputs, so it fits on first paint and
+    proves the opposite of what the lock is for (`docs/review-screen.md`). The proven change is
+    last on purpose, so reaching the end is the only way to have seen it.
+    """
+    w = wallet()
+    other = stranger()
+    psbt = build(
+        wallet=w,
+        inputs=[
+            {"script_type": ScriptType.P2WPKH, "chain": RECEIVE_CHAIN, "index": 0,
+             "sats": 2_000_000},
+        ],
+        outputs=[
+            *(
+                {"sats": 200_000,
+                 "script": other.script_pubkey(ScriptType.P2WPKH, RECEIVE_CHAIN, i)}
+                for i in range(8)
+            ),
+            {
+                "sats": 395_000,
+                "script": w.script_pubkey(ScriptType.P2WPKH, CHANGE_CHAIN, 0),
+                "claim": {"script_type": ScriptType.P2WPKH, "chain": CHANGE_CHAIN, "index": 0},
+            },
+        ],
+    )
+    write(
+        "many_outputs",
+        psbt.serialize(),
+        {
+            "description": (
+                "Eight payments and one proven change output. More outputs than fit on a screen, "
+                "which is what the scroll-to-end lock exists for."
+            ),
+            "traces_to": "docs/review-screen.md — the scroll-to-end lock",
+            "network": "signet",
+            "expected": {
+                "refusal": None,
+                "outputs": [
+                    *(
+                        {"index": i, "category": "payment", "sats": 200_000}
+                        for i in range(8)
+                    ),
+                    {"index": 8, "category": "change_proven", "sats": 395_000,
+                     "proven_path": "m/84h/1h/0h/1/0"},
+                ],
+                "headline": {
+                    "payments_sats": 1_600_000,
+                    "fee_sats": 5_000,
+                    "total_leaving_sats": 1_605_000,
+                },
+                "transaction_warnings": [],
+            },
+        },
+    )
+
+
 def malformed() -> None:
     """Structurally malformed bytes: a dead end, never a guess."""
     w = wallet()
@@ -709,6 +769,7 @@ FIXTURES = [
     foreign_input,
     ansi_escape_label,
     many_inputs,
+    many_outputs,
     malformed,
     fee_absurd,
     input_past_the_ceiling,

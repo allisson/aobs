@@ -66,6 +66,7 @@ class SignerApp(App[None]):
         keymap: Keymap,
         network: Network = Network.MAINNET,
         scan_frame_interval: float | None = 1 / INBOUND_FRAME_RATE,
+        emit_animated: bool = True,
     ) -> None:
         super().__init__()
         self.frames = frames
@@ -76,6 +77,10 @@ class SignerApp(App[None]):
         #: suite drives frames itself: pacing twenty-seven frames in real time would cost the suite
         #: seven seconds to assert something that is not Textual's clock.
         self.scan_frame_interval = scan_frame_interval
+        #: Whether the emit screen runs its own 2 fps timer. `False` is how the suite steps the
+        #: animation itself: pacing 47 frames in real time would cost it 23 seconds to assert
+        #: something that is not Textual's clock.
+        self.emit_animated = emit_animated
 
         # --- session state ---
         self.wallet: Wallet | None = None
@@ -157,6 +162,16 @@ class SignerApp(App[None]):
         self.notice = None
         self.scanned = None
         self.push_screen(ScanScreen(target))
+
+    def open_review(self, psbt_bytes: bytes) -> None:
+        """The scan screen has a whole PSBT. Review it, and show whichever screen applies.
+
+        The app holds no opinion about a PSBT — `Review.signable` alone chooses between the review
+        screen and the refusal, and that choice lives beside the screens that render it.
+        """
+        from aobs.ui.screens.review import open_review
+
+        open_review(self, psbt_bytes)
 
     def camera_lost(self) -> None:
         """The camera stopped answering. It cannot come back this session, and the screen says so.

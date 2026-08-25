@@ -165,6 +165,38 @@ class ScanScreen(Screen):
             self.app.scanned = event.payload  # type: ignore[attr-defined]
             self._finished = True
             self._stop()
+            self._hand_off(event.payload)
+
+    def _hand_off(self, payload: bytes) -> None:
+        """Where the inbound spec ends and the next one begins.
+
+        Only the transaction path has a screen to hand to today; the restore and
+        address-verification paths open theirs with their own specs, and until then the bytes stop
+        here exactly as they did before.
+        """
+        if self.target is ScanTarget.TRANSACTION and self.app.wallet is not None:  # type: ignore[attr-defined]
+            self.app.open_review(payload)  # type: ignore[attr-defined]
+
+    def on_screen_resume(self) -> None:
+        """A screen pushed on top of a finished scan has been backed out of: scan again.
+
+        A refused transaction lands back here with the wallet still loaded, and what the user does
+        next is scan a different one. Leaving a spent scan screen on the stack would make *back*
+        a dead end, which is the one thing `esc` must never be.
+        """
+        if self._finished:
+            self._restart()
+
+    def _restart(self) -> None:
+        self.controller = ScanController(self.target)
+        self.payload = None
+        self._ticks = 0
+        self._finished = False
+        self._frames = self.app.frames.frames()  # type: ignore[attr-defined]
+        self.refresh(recompose=True)
+        interval = self.app.scan_frame_interval  # type: ignore[attr-defined]
+        if interval is not None and self._timer is None:
+            self._timer = self.set_interval(interval, self.scan_once)
 
     # --- drawing ------------------------------------------------------------------------------
 

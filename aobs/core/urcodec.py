@@ -128,6 +128,17 @@ class PsbtStream:
         is the moment the step-down key earns its place."""
         return self._emitted // self.seq_len if self.seq_len else 0
 
+    @property
+    def frame_in_cycle(self) -> int:
+        """*frame 2 of 3* — 1-based, and 0 before the first part has been asked for.
+
+        The screen holds a rung index and nothing else, so the position in the cycle is the
+        stream's to state rather than a counter a screen keeps beside it.
+        """
+        if not self._emitted or not self.seq_len:
+            return 0
+        return (self._emitted - 1) % self.seq_len + 1
+
     def next_part(self) -> str:
         """The next frame, uppercased for QR alphanumeric mode. Never stops."""
         part = self._encoder.next_part()

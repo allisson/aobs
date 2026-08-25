@@ -25,14 +25,21 @@ from aobs.adapters.fake import (
     RecordingPower,
 )
 from aobs.core.failure import FAILURE_MESSAGE
+from aobs.core.wallet import Network, Wallet
 from aobs.ports.frame_source import Frame
 from aobs.ui.app import SignerApp
 from aobs.ui.geometry import MAX_COLUMNS, MIN_COLUMNS, MIN_ROWS
+from aobs.ui.screens.confirm import ConfirmScreen
 from aobs.ui.screens.console_too_small import ConsoleTooSmallScreen
 from aobs.ui.screens.camera_lost import CameraLostScreen
+from aobs.ui.screens.emit import EmitScreen
+from aobs.ui.screens.refusal import RefusalScreen
+from aobs.ui.screens.review import ReviewScreen
 from aobs.ui.screens.home import NO_CAMERA, PATHS, HomeScreen
 from aobs.ui.screens.keymap import KeymapScreen
 from aobs.ui.screens.scan import ScanScreen
+
+from conftest import CORPUS, VECTOR_MNEMONIC
 
 ROOT = Path(__file__).parent.parent
 
@@ -183,6 +190,29 @@ async def test_f12_powers_off_from_every_screen_the_app_can_reach() -> None:
         await pilot.press("f12")
         await pilot.pause()
         assert lost.power.powered_off
+
+    # The money path. Each screen gets its own session, because `F12` ends the one it is pressed
+    # in — which is the whole thing being asserted.
+    for name, walk, expected in (
+        ("network_mismatch", (), RefusalScreen),
+        ("honest_p2wpkh", (), ReviewScreen),
+        ("honest_p2wpkh", ("f10",), ConfirmScreen),
+        ("honest_p2wpkh", ("f10", "y"), EmitScreen),
+    ):
+        money = build(power=RecordingPower(), network=Network.SIGNET, emit_animated=False)
+        money.wallet = Wallet.from_mnemonic(VECTOR_MNEMONIC, network=Network.SIGNET)
+        async with money.run_test(size=CONSOLE) as pilot:
+            await reach_home(money, pilot)
+            money.open_review((CORPUS / f"{name}.psbt").read_bytes())
+            await pilot.pause()
+            for key in walk:
+                await pilot.press(key)
+            await pilot.pause()
+            assert isinstance(money.screen, expected), type(money.screen).__name__
+            reached.append(type(money.screen))
+            await pilot.press("f12")
+            await pilot.pause()
+            assert money.power.powered_off, f"F12 did not power off {expected.__name__}"
 
     # Every screen in the tree, not just the ones this walk happened to visit: a later ticket
     # that adds a screen and no route to it fails here.
