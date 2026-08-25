@@ -5,7 +5,7 @@
 # than on the appliance.
 #
 #     docker build -f build/Dockerfile.test -t aobs-test .     # only when the pins change
-#     docker run --rm -v "$PWD:/src" -w /src aobs-test         # the dev loop, ~20 s
+#     docker run --rm -v "$PWD:/src" -w /src aobs-test         # the dev loop, ~85 s
 #
 # The bind mount is what makes this a dev loop rather than a CI job: the image carries the pinned
 # userland, the working tree comes from the host, and no rebuild is needed to run an edit. CI runs

@@ -145,7 +145,7 @@ would choose them, which no generator discovers.
 the appliance.
 
     docker build -f build/Dockerfile.test -t aobs-test .     # only when the pins change
-    docker run --rm -v "$PWD:/src" -w /src aobs-test         # the dev loop, ~20 s
+    docker run --rm -v "$PWD:/src" -w /src aobs-test         # the dev loop, ~85 s
 
 The bind mount is what makes this the loop a developer lives in: the image carries the pinned
 userland, the working tree comes from the host, and **no rebuild is needed to run an edit** — only a
@@ -155,8 +155,10 @@ what it judges is the tree as pushed.
 **This used to be two tiers, and the second one was `uv` on the host Python — "the loop a developer
 lives in".** It was retired in #35 when it stopped being the fast one. `embit` is vendored from git
 and carries no prebuilt binary (#34), so a host with no system `libsecp256k1` falls back to
-`py_secp256k1`: measured at **5 m 45 s against the container's 20 s**, a tier 17x slower than the one
-it existed to be faster than. It also tested PyPI-resolved libraries on a non-Alpine Python — a
+`py_secp256k1`: measured at **5 m 45 s against the container's 20 s** when #35 closed it, and
+re-measured at **14 m 47 s against 85 s** once #30 landed the money path's suite — a tier an order of
+magnitude slower than the one it existed to be faster than, on two different machines and two
+different suite sizes. It also tested PyPI-resolved libraries on a non-Alpine Python — a
 configuration the appliance is never in.
 
 `uv run --extra test pytest` still works and is still useful for a debugger or an IDE test runner.
