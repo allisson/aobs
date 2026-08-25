@@ -31,7 +31,7 @@ One rule carries weight and a test enforces it: **`core/` may not import any ada
 
 ## Running the tests
 
-Two tiers.
+Two tiers, and `.github/workflows/tests.yml` runs both on every pull request.
 
 **Fast local** — the loop a developer lives in:
 

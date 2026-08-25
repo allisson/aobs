@@ -1,0 +1,57 @@
+# Both tiers `docs/test-harness.md` names, on every push and every pull request.
+#
+# The two are not redundant. The fast tier is the loop a developer lives in, on the host Python.
+# The authoritative tier installs **the exact apk versions the ISO installs**, so a skew in
+# `zxing-cpp` or `cryptography` fails here rather than on the appliance — and that is the failure
+# the fast tier structurally cannot catch, because it is testing a different set of libraries.
+#
+# The regtest suite is deliberately absent: it needs a `bitcoind` and stays opt-in, so a
+# contributor with no node still gets the full default suite. `docs/boot-checklist.md` holds what
+# only a boot can check, and no runner can check any of it.
+#
+# Every action is pinned to a commit SHA, not a tag. A tag is a movable pointer, and a repository
+# whose entire selling point is that every input is pinned cannot make an exception for the thing
+# that builds it.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fast:
+    name: fast local tier
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        # Pinned, and installed with pip rather than through an action: one fewer third party in
+        # the path between a commit and the tests that judge it.
+        run: pipx install uv==0.10.11
+
+      - name: Run the suite
+        # `--frozen` so CI resolves nothing: what runs here is what `uv.lock` pins, which is what
+        # a developer's `uv run pytest` gets.
+        run: uv run --frozen --extra test pytest -q
+
+  authoritative:
+    name: authoritative tier (alpine, pinned apks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build the container
+        run: docker build -f build/Dockerfile.test -t aobs-test .
+
+      - name: Run the suite
+        run: docker run --rm aobs-test
