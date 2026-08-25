@@ -1,4 +1,4 @@
-# The exact apk versions the authoritative test tier installs, from Alpine v3.24, x86_64.
+# The exact apk versions the test tier installs, from Alpine v3.24, x86_64.
 #
 # `docs/test-harness.md` requires the tier to install *the exact versions the ISO installs*, so a
 # `zxing-cpp` or `cryptography` skew fails in CI rather than on the appliance. The ISO build does
@@ -10,10 +10,8 @@
 #   curl -s https://dl-cdn.alpinelinux.org/alpine/v3.24/{main,community}/x86_64/APKINDEX.tar.gz
 #
 # Two dependencies are deliberately absent, and `docs/boot-pipeline.md` says why: Alpine packages
-# neither `embit` nor a UR library. `ur2` is vendored in the app tree (`aobs/core/vendor/`), and
-# `embit` is installed from PyPI in the container only — vendoring it into the app tree belongs to
-# the boot-pipeline spec, and until then the container's `embit` is the one deviation from
-# "apk only" and is marked as such in `build/Dockerfile.test`.
+# neither `embit` nor a UR library. Both are vendored in the app tree (`aobs/core/vendor/`), so
+# nothing here needs to install them.
 
 # The appliance's own dependencies.
 python3=3.14.7-r1
@@ -24,6 +22,11 @@ py3-qrcode=8.2-r2
 py3-textual=8.2.7-r0
 py3-rich=15.0.0-r0
 py3-pillow=12.2.0-r0
+# Every EC operation on the appliance — derivation, ECDSA, Schnorr, address proof — runs here and
+# never in embit's pure-Python fallback (#34, `docs/boot-pipeline.md`). Built from the upstream
+# `bitcoin-core/secp256k1` release with `--enable-module-schnorrsig --enable-module-extrakeys`,
+# which is what BIP86 needs. `-dev` is not wanted: ctypes loads `libsecp256k1.so.2` at runtime.
+libsecp256k1=0.5.0-r1
 
 # The harness. Not installed on the appliance — the ISO carries no test runner.
 py3-pytest=9.0.3-r0

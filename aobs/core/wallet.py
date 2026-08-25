@@ -9,8 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from embit import bip32, bip39, script
-from embit.networks import NETWORKS
+from .vendor.embit import bip32, bip39, script
+from .vendor.embit.networks import NETWORKS
 
 #: The bech32 data charset (BIP173). Read to take a witness version off an address; the encoding
 #: itself is embit's.

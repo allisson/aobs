@@ -121,13 +121,61 @@ pip, no virtualenv, no wheel fetched at build time.**
 
 | source | packages |
 |---|---|
-| apk | `python3`, `py3-zxing-cpp`, `py3-textual`, `py3-rich`, `py3-cryptography`, `py3-argon2-cffi`, `py3-qrcode` |
+| apk | `python3`, `py3-zxing-cpp`, `py3-textual`, `py3-rich`, `py3-cryptography`, `py3-argon2-cffi`, `py3-qrcode`, `libsecp256k1` |
 | vendored | **`embit`** (not packaged in Alpine), **`ur2`** (SeedSigner's stdlib-only implementation, #4) |
 
 Vendoring exactly two pure-Python libraries, checked in where they can be read, beats introducing pip
 and a dependency resolver into a build whose entire selling point is that every input is pinned.
 
 `py3-segno` does not exist in Alpine, which is why `py3-qrcode` is the encoder.
+
+### The elliptic curve implementation
+
+**Every EC operation on the appliance — key derivation, ECDSA signing, Schnorr signing, address
+proof — is performed by Alpine's `libsecp256k1`, and never by embit's pure-Python fallback.** This is
+recorded here because it was previously unstated, and because embit does not have one EC
+implementation: `embit/util/secp256k1.py` picks between a ctypes binding and `py_secp256k1` inside a
+bare `except:`, with no message either way.
+
+Two things make that pick go the right way, and both are load-bearing:
+
+- **The apk, not embit's prebuilt.** embit's wheel ships a `libsecp256k1_linux_x86_64.so` that is
+  glibc-linked; on musl it cannot relocate (`__memcpy_chk` is a `_FORTIFY_SOURCE` symbol musl lacks)
+  and the bare `except:` silently selects the Python fallback. `gcompat` does not fix this — it does
+  not export that symbol either. Alpine's `libsecp256k1` is built from the upstream
+  `bitcoin-core/secp256k1` release with `--enable-module-schnorrsig --enable-module-extrakeys`
+  (plus `ecdh` and `recovery`), which is what BIP86 needs.
+- **`embit` is vendored from a tagged git commit, pinned by full SHA — not from the PyPI wheel.** The
+  prebuilt blob exists in no commit of embit's repository: `MANIFEST.in` prunes
+  `src/embit/util/prebuilt`, and the `.so` is produced at wheel-build time. Vendoring from source
+  means `util/prebuilt/` never enters the app tree at all, rather than entering it and being deleted
+  — and it makes this document's "checked in where they can be read" true of embit without
+  exception. It matters that the directory stay absent: `_find_library()` returns the prebuilt path
+  whenever the file merely *exists*, and does not fall through when *loading* it fails.
+
+**The pin has an upper bound, and it is not cosmetic.** embit binds the schnorr module through the
+deprecated alias `secp256k1_schnorrsig_sign`, which upstream renamed to `secp256k1_schnorrsig_sign32`
+in 0.5.0's line and **removed outright in 0.8.0**. Against a 0.8.0 or newer library, embit's
+`except: pass` binds nothing, the backend still reports as native, and BIP86 signing fails at the
+moment a user tries to sign a taproot input. Alpine v3.24's `0.5.0-r1` still carries the alias.
+**A routine Alpine bump past 0.8.0 therefore breaks taproot signing silently**, and the signature
+assertion below is the only thing that catches it. This was observed, not reasoned about: a
+Homebrew `libsecp256k1` 0.8.0 on the dev host reproduces exactly this.
+
+**`PublicKey.schnorr_verify` must never be called.** embit binds `secp256k1_schnorrsig_verify` with
+four arguments; since 0.3.0 the C function takes five, the fourth being `msglen`. embit passes the
+x-only pubkey pointer where C reads a length, and the library then dereferences whatever follows —
+a **segfault**, not an exception, which no `except:` can catch. The appliance only ever signs, so
+nothing calls it today; it is written down here because the failure is a crash of the whole
+appliance rather than an error anyone can handle. Signing is unaffected and was checked
+independently: a signature made through the ctypes path against Alpine's `libsecp256k1` verifies,
+it merely picks a different BIP340-legal nonce than embit's own bundled blob picks.
+
+**This is not a constant-time claim.** `py_secp256k1` is not constant-time, but the appliance runs
+exactly one userspace process (#15) and has no network, so there is no local observer and no remote
+peer to measure. The realistic observer is physical, which is Tier 2/3 territory where this appliance
+already promises nothing. The audited library is preferred on supply-chain and correctness grounds;
+nothing here should be read as a defence against a timing adversary.
 
 ## Size, and the RAM floor
 
@@ -190,6 +238,16 @@ line below is a published claim, checked before an image exists.
 - **Import-check every module the app needs against the built kernel.** `CONFIG_NET=n` removes
   `AF_UNIX` as well as `AF_INET`, so `multiprocessing` and anything socket-backed is unavailable —
   that must fail at build time, not mid-session with a wallet loaded.
+- **`embit/util/prebuilt/` does not exist in the vendored tree**, and the live EC backend is
+  `embit.util.ctypes_secp256k1`.
+- **Sign once with each scheme and compare the bytes:** one BIP84 ECDSA signature and one BIP86
+  Schnorr signature over a published BIP39 test vector, executed in the built rootfs, matching
+  expected output. A name check on the backend module is **not** sufficient and must not be
+  substituted for this: embit binds the `schnorrsig`/`xonly`/`keypair` symbols inside their own bare
+  `try:`/`except: pass`, so a `libsecp256k1` compiled without those modules imports cleanly, reports
+  the native backend, and then fails at taproot signing — mid-session, with a wallet loaded, on
+  BIP86 only. A signature that verifies proves the symbols bound, the modules were compiled in, and
+  the ABI matches; a symbol check only approximates all three.
 - Emit measured initramfs and rootfs sizes into the build log.
 
 ## The artifact

@@ -1,9 +1,13 @@
-# Both tiers `docs/test-harness.md` names, on every push and every pull request.
+# The one tier `docs/test-harness.md` names, on every push and every pull request: an `alpine:3.24`
+# container installing **the exact apk versions the ISO installs**, so a skew in `zxing-cpp`,
+# `cryptography` or `libsecp256k1` fails here rather than on the appliance.
 #
-# The two are not redundant. The fast tier is the loop a developer lives in, on the host Python.
-# The authoritative tier installs **the exact apk versions the ISO installs**, so a skew in
-# `zxing-cpp` or `cryptography` fails here rather than on the appliance — and that is the failure
-# the fast tier structurally cannot catch, because it is testing a different set of libraries.
+# There used to be a second `fast` job running `uv` on the host Python. #35 retired it. It never
+# caught anything this job cannot — the claim ran the other way — and once `embit` was vendored
+# without its prebuilt binary (#34) a runner with no system `libsecp256k1` fell back to
+# `py_secp256k1`, which took that job from ~17 s to ~6 minutes. A tier 17x slower than the
+# authoritative one, testing PyPI-resolved libraries on a non-Alpine Python, is not a dev loop and
+# is not a signal.
 #
 # The regtest suite is deliberately absent: it needs a `bitcoind` and stays opt-in, so a
 # contributor with no node still gets the full default suite. `docs/boot-checklist.md` holds what
@@ -28,22 +32,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  fast:
-    name: fast local tier
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install uv
-        # Pinned, and installed with pip rather than through an action: one fewer third party in
-        # the path between a commit and the tests that judge it.
-        run: pipx install uv==0.10.11
-
-      - name: Run the suite
-        # `--frozen` so CI resolves nothing: what runs here is what `uv.lock` pins, which is what
-        # a developer's `uv run pytest` gets.
-        run: uv run --frozen --extra test pytest -q
-
   authoritative:
     name: authoritative tier (alpine, pinned apks)
     runs-on: ubuntu-latest
@@ -54,4 +42,6 @@ jobs:
         run: docker build -f build/Dockerfile.test -t aobs-test .
 
       - name: Run the suite
+        # No bind mount here, unlike the dev loop: what CI judges is the tree as pushed, which is
+        # the copy baked into the image.
         run: docker run --rm aobs-test

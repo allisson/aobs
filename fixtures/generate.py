@@ -25,9 +25,9 @@ import hashlib
 import json
 from pathlib import Path
 
-from embit import script
-from embit.psbt import SIGHASH, PSBT, DerivationPath
-from embit.transaction import Transaction, TransactionInput, TransactionOutput
+from aobs.core.vendor.embit import script
+from aobs.core.vendor.embit.psbt import SIGHASH, PSBT, DerivationPath
+from aobs.core.vendor.embit.transaction import Transaction, TransactionInput, TransactionOutput
 
 from aobs.core.wallet import CHANGE_CHAIN, RECEIVE_CHAIN, Network, ScriptType, Wallet
 

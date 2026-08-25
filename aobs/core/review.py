@@ -14,7 +14,7 @@ import math
 from dataclasses import dataclass, field
 from enum import Enum
 
-from embit.psbt import SIGHASH, PSBT
+from .vendor.embit.psbt import SIGHASH, PSBT
 
 from .constants import (
     CHANGE_WINDOW_CEILING,

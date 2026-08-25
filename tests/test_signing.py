@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 import pytest
-from embit.psbt import PSBT
+from aobs.core.vendor.embit.psbt import PSBT
 
 from aobs.core.review import RefusalReason, review
 from aobs.core.signing import SigningRefused, sign
