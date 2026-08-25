@@ -170,12 +170,14 @@ class ScanScreen(Screen):
     def _hand_off(self, payload: bytes) -> None:
         """Where the inbound spec ends and the next one begins.
 
-        Only the transaction path has a screen to hand to today; the restore and
-        address-verification paths open theirs with their own specs, and until then the bytes stop
-        here exactly as they did before.
+        The transaction path reviews; a wallet backup goes to the eight words that open it. The
+        address-verification path opens its own screen with its own spec, and until then the bytes
+        stop here exactly as they did before.
         """
         if self.target is ScanTarget.TRANSACTION and self.app.wallet is not None:  # type: ignore[attr-defined]
             self.app.open_review(payload)  # type: ignore[attr-defined]
+        elif self.target is ScanTarget.WALLET_BACKUP:
+            self.app.open_export_password(payload)  # type: ignore[attr-defined]
 
     def on_screen_resume(self) -> None:
         """A screen pushed on top of a finished scan has been backed out of: scan again.

@@ -15,6 +15,10 @@ from __future__ import annotations
 from textual.app import App
 from textual.binding import Binding
 
+from aobs.core import mnemonic as bip39_words
+from aobs.core.constants import ENTROPY_OUTPUT_BYTES
+from aobs.core.entropy import Entropy, MixingReport, mix
+from aobs.core.entropy import report as mixing_report
 from aobs.core.failure import describe
 from aobs.core.wallet import Network, Wallet
 from aobs.ports.entropy_source import EntropySource
@@ -84,6 +88,15 @@ class SignerApp(App[None]):
 
         # --- session state ---
         self.wallet: Wallet | None = None
+        #: The words behind `self.wallet`. Held for the session so *show recovery words* can be an
+        #: explicit action rather than a promise the appliance cannot keep — `docs/seed-entry.md`
+        #: allows this: the words are in RAM regardless, and a user who cannot check their paper
+        #: against the appliance either trusts a backup they never verified or writes a second
+        #: guess. It is not a second copy of anything; it is the copy the wallet came from.
+        self.mnemonic: str | None = None
+        #: What `core.mix()` reported, for a wallet generated here. `None` for one typed in or
+        #: restored, because there was no mixing to report.
+        self.mixing: MixingReport | None = None
         #: Not settled by any document in `docs/`. This spec proceeds on the parent's stated
         #: assumption — chosen on the wallet screen before the wallet is constructed, defaulting
         #: to mainnet, shown in the header of every screen that shows money. If the assumption is
@@ -99,6 +112,13 @@ class SignerApp(App[None]):
         #: One sentence for the screen the user lands on next — how far an abandoned scan got.
         #: Nothing here is attacker-controlled: the appliance writes it about its own state.
         self.notice: str | None = None
+        #: The words a wallet-entry path has settled on, waiting for the passphrase. The wallet is
+        #: not constructed until then, because `Wallet.from_mnemonic` takes the passphrase and
+        #: there is no such thing as adding one afterwards.
+        self._pending_mnemonic: str | None = None
+        #: The mixing behind those words, when they were generated here. Its presence is also what
+        #: tells the fingerprint screen there is nothing to compare against.
+        self._pending_entropy: Entropy | None = None
 
     # --- startup -----------------------------------------------------------------------------
 
@@ -172,6 +192,109 @@ class SignerApp(App[None]):
         from aobs.ui.screens.review import open_review
 
         open_review(self, psbt_bytes)
+
+    # --- getting a wallet in ------------------------------------------------------------------
+    #
+    # Three peer paths — generate, type words, scan an encrypted QR — and one shared tail: the
+    # passphrase, then the fingerprint. They are peers on the home screen rather than three items
+    # under an *import* submenu, because burying the encrypted QR would hide the path two tickets
+    # were spent making safe (`docs/seed-entry.md`).
+
+    def open_generate(self) -> None:
+        """The dice screen first, and it is the only thing offered before generation.
+
+        Optional in the only sense that matters: `F10` with no rolls at all goes straight on, and
+        nothing on the way out says the wallet is worse for it.
+        """
+        from aobs.ui.screens.dice import DiceScreen
+
+        self.push_screen(DiceScreen())
+
+    def generate_wallet(self, dice_rolls: str) -> None:
+        """One draw from the `EntropySource`, mixed with whatever was rolled. Always 24 words.
+
+        The UI computes no entropy of its own and makes no estimate — `mix()` is handed what the
+        screens collected and nothing else, and the kernel CSPRNG is a required argument to it, so
+        there is no reachable path in which dice substitute for it.
+        """
+        from aobs.ui.screens.recovery_words import RecoveryWordsScreen
+
+        entropy = mix(self.entropy.random_bytes(ENTROPY_OUTPUT_BYTES), dice_rolls=dice_rolls)
+        self._pending_entropy = entropy
+        self.push_screen(
+            RecoveryWordsScreen(bip39_words.from_entropy(entropy.value), read_back=True)
+        )
+
+    def open_read_back(self, mnemonic: str) -> None:
+        """All 24 words, typed back from the paper — the only check that paper will ever get."""
+        from aobs.ui.screens.seed_entry import SeedEntryScreen
+
+        self.push_screen(SeedEntryScreen(len(mnemonic.split()), expected=mnemonic))
+
+    def open_seed_entry(self) -> None:
+        """The word count first, asked and never detected."""
+        from aobs.ui.screens.word_count import WordCountScreen
+
+        self.push_screen(WordCountScreen())
+
+    def open_seed_grid(self, words: int) -> None:
+        from aobs.ui.screens.seed_entry import SeedEntryScreen
+
+        self.push_screen(SeedEntryScreen(words))
+
+    def open_export_password(self, container: bytes) -> None:
+        """A scanned wallet backup, waiting on its eight words."""
+        from aobs.ui.screens.export_password import ExportPasswordScreen
+
+        self.push_screen(ExportPasswordScreen(container))
+
+    def open_recovery_words(self) -> None:
+        """*Show recovery words*: an explicit action, never a step on the way to anything else."""
+        from aobs.ui.screens.recovery_words import RecoveryWordsScreen
+
+        if self.mnemonic is None:
+            return
+        self.push_screen(RecoveryWordsScreen(self.mnemonic, read_back=False))
+
+    def begin_passphrase(self, mnemonic: str) -> None:
+        """The words are settled, whichever path settled them. Ask for the passphrase once."""
+        from aobs.ui.screens.passphrase import PassphraseScreen
+
+        self._pending_mnemonic = mnemonic
+        self.push_screen(PassphraseScreen())
+
+    def finish_wallet(self, passphrase: str) -> None:
+        """Construct the wallet and show its fingerprint. The network was chosen before this.
+
+        Entered once, and never held twice: the passphrase reaches `Wallet.from_mnemonic` and
+        nothing else, and the confirmation the user gets is the fingerprint rather than a second
+        typing (`docs/secret-hygiene.md`).
+        """
+        from aobs.ui.screens.fingerprint import FingerprintScreen
+
+        mnemonic = self._pending_mnemonic
+        if mnemonic is None:  # pragma: no cover - no path reaches the screen without one
+            return
+        entropy = self._pending_entropy
+        self._pending_mnemonic = None
+        self._pending_entropy = None
+
+        wallet = Wallet.from_mnemonic(mnemonic, network=self.network, passphrase=passphrase)
+        self.wallet = wallet
+        self.mnemonic = mnemonic
+        self.mixing = mixing_report(entropy, wallet) if entropy is not None else None
+        self.switch_screen(
+            FingerprintScreen(
+                wallet.fingerprint_hex,
+                created_here=entropy is not None,
+                report=self.mixing,
+            )
+        )
+
+    def return_home(self) -> None:
+        """Back to the home screen from wherever a path ended, without walking it backwards."""
+        while len(self.screen_stack) > 2:
+            self.pop_screen()
 
     def camera_lost(self) -> None:
         """The camera stopped answering. It cannot come back this session, and the screen says so.

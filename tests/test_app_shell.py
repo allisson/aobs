@@ -26,20 +26,28 @@ from aobs.adapters.fake import (
 )
 from aobs.core.failure import FAILURE_MESSAGE
 from aobs.core.wallet import Network, Wallet
+from aobs.core.wallet_qr import export_wallet
 from aobs.ports.frame_source import Frame
 from aobs.ui.app import SignerApp
 from aobs.ui.geometry import MAX_COLUMNS, MIN_COLUMNS, MIN_ROWS
 from aobs.ui.screens.confirm import ConfirmScreen
 from aobs.ui.screens.console_too_small import ConsoleTooSmallScreen
 from aobs.ui.screens.camera_lost import CameraLostScreen
+from aobs.ui.screens.dice import DiceScreen
 from aobs.ui.screens.emit import EmitScreen
+from aobs.ui.screens.export_password import ExportPasswordScreen
+from aobs.ui.screens.fingerprint import FingerprintScreen
+from aobs.ui.screens.passphrase import PassphraseScreen
+from aobs.ui.screens.recovery_words import RecoveryWordsScreen
+from aobs.ui.screens.seed_entry import SeedEntryScreen
+from aobs.ui.screens.word_count import WordCountScreen
 from aobs.ui.screens.refusal import RefusalScreen
 from aobs.ui.screens.review import ReviewScreen
 from aobs.ui.screens.home import NO_CAMERA, PATHS, HomeScreen
 from aobs.ui.screens.keymap import KeymapScreen
 from aobs.ui.screens.scan import ScanScreen
 
-from conftest import CORPUS, VECTOR_MNEMONIC
+from conftest import CORPUS, VECTOR_MNEMONIC, fixed_bytes
 
 ROOT = Path(__file__).parent.parent
 
@@ -213,6 +221,57 @@ async def test_f12_powers_off_from_every_screen_the_app_can_reach() -> None:
             await pilot.press("f12")
             await pilot.pause()
             assert money.power.powered_off, f"F12 did not power off {expected.__name__}"
+
+    # The wallet paths. Home starts on *generate*, so the walk down the three peer choices is the
+    # walk through the screens that get a wallet in.
+    for walk, expected in (
+        (("f10",), DiceScreen),
+        (("f10", "f10"), RecoveryWordsScreen),
+        (("f10", "f10", "f10"), SeedEntryScreen),
+        (("down", "f10"), WordCountScreen),
+    ):
+        entry = build(power=RecordingPower())
+        async with entry.run_test(size=CONSOLE) as pilot:
+            await reach_home(entry, pilot)
+            for key in walk:
+                await pilot.press(key)
+            await pilot.pause()
+            assert isinstance(entry.screen, expected), type(entry.screen).__name__
+            reached.append(type(entry.screen))
+            await pilot.press("f12")
+            await pilot.pause()
+            assert entry.power.powered_off, f"F12 did not power off {expected.__name__}"
+
+    # The tail every path shares, and the one screen a scanned backup opens. Driven through the
+    # app the way the money path above is: the keystrokes that reach them are their own tests.
+    exported = export_wallet(bytes(16), fixed_bytes())
+    for reach, expected in (
+        (lambda app: app.begin_passphrase(VECTOR_MNEMONIC), PassphraseScreen),
+        (lambda app: app.open_export_password(exported.container), ExportPasswordScreen),
+    ):
+        entry = build(power=RecordingPower())
+        async with entry.run_test(size=CONSOLE) as pilot:
+            await reach_home(entry, pilot)
+            reach(entry)
+            await pilot.pause()
+            assert isinstance(entry.screen, expected), type(entry.screen).__name__
+            reached.append(type(entry.screen))
+            await pilot.press("f12")
+            await pilot.pause()
+            assert entry.power.powered_off, f"F12 did not power off {expected.__name__}"
+
+    loaded = build(power=RecordingPower())
+    async with loaded.run_test(size=CONSOLE) as pilot:
+        await reach_home(loaded, pilot)
+        loaded.begin_passphrase(VECTOR_MNEMONIC)
+        await pilot.pause()
+        await pilot.press("f10")
+        await pilot.pause()
+        assert isinstance(loaded.screen, FingerprintScreen)
+        reached.append(type(loaded.screen))
+        await pilot.press("f12")
+        await pilot.pause()
+        assert loaded.power.powered_off
 
     # Every screen in the tree, not just the ones this walk happened to visit: a later ticket
     # that adds a screen and no route to it fails here.

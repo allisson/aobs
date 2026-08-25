@@ -64,3 +64,12 @@ def is_valid(mnemonic: str) -> bool:
     except Exception:
         return False
     return True
+
+
+def from_entropy(entropy: bytes) -> str:
+    """The mnemonic BIP39 entropy spells.
+
+    Here rather than in the screens so that nothing in `aobs/ui/` imports the vendored library:
+    the generate path and the restore path both hold entropy and both need the words.
+    """
+    return bip39.mnemonic_from_bytes(entropy)
