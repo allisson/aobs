@@ -107,7 +107,9 @@ failure lets off the appliance.
 The three keys reserved identically on every screen: `esc` backs out without acting, `F12` powers
 off, and the confirm key is per-screen and never `enter` and never `esc`. Reserved means no screen
 may redefine them — a user who learned `esc` means *back* must never meet a screen where it means
-*proceed*.
+*proceed*. A screen may bind keys of its own beyond these; those are **per-screen keys**, and they
+are settled in that screen's document rather than globally. What each screen prints beside `esc`
+varies with what leaving it costs; the key's meaning does not.
 
 ## Wallet
 

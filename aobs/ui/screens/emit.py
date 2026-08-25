@@ -29,13 +29,17 @@ from textual.widgets import Static
 from aobs.core.urcodec import PsbtStream
 from aobs.ui import qrcodes
 
-#: The step-down key. A function key rather than a letter, for the same reason the appliance's
-#: three reserved keys are: the keymap is whatever the user chose on the first screen, and `F9`
-#: is in the same place on every Latin layout. It sits beside `F10`, and a slip in that direction
-#: does something harmless — the code gets less dense.
+#: The step-down key, settled in `docs/qr-emit-parameters.md` along with the reasoning: a function
+#: key because the keymap is whatever the user chose on the first screen, `F9` because it sits at
+#: the edge of its group beside an `F10` that does nothing here, so both slip directions are inert.
+#: `docs/failure-states.md` lists it as the appliance's one key that is neither a confirm nor
+#: navigation — the only one that changes state without confirming anything.
 STEP_DOWN_KEY = "f9"
 
 INSTRUCTION = "Show this to your wallet until it has read the whole code."
+#: `esc done` rather than `back` or `discard`: the key's meaning is global, the word is per-screen
+#: and names what leaving costs. Nothing is lost here — this screen replaced the confirm, so `esc`
+#: lands on the still-unlocked review and `F10`, `y` signs the same bytes again and emits again.
 KEYS = "F9 smaller code  ·  esc done  ·  F12 power off"
 #: What the last rung says instead of offering a step that does not exist.
 LAST_RUNG = "This is the least dense code the appliance can show."
