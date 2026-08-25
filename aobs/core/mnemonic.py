@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from embit import bip39
+from .vendor.embit import bip39
 
 #: The number of characters BIP39 guarantees to be unique. A property test asserts it.
 BIP39_PREFIX = 4

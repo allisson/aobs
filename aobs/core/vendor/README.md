@@ -1,5 +1,47 @@
 # Vendored code
 
+## `embit/`
+
+[`embit`](https://github.com/diybitcoinhardware/embit) — tag `v0.8.2`, commit
+`eb6104fd85d3becabba628756cd5e1b75619f3a1` (2026-08-08). MIT; the upstream `LICENSE` is kept in
+the directory. **Upstream byte-for-byte, with no changes at all** — embit uses relative imports
+throughout its own tree (112 of them, and not one absolute self-import), so unlike `ur2` it needed
+no edit to move. A reviewer diffs `src/embit` at that commit against this directory and expects
+nothing.
+
+It is vendored rather than depended on for the reason `docs/boot-pipeline.md` gives — Alpine
+packages no `embit`, and the appliance introduces no pip — and it is taken **from git rather than
+from the PyPI wheel**, which is the part that matters (#34).
+
+embit's wheel ships `util/prebuilt/libsecp256k1_*.so`, a glibc-linked binary that exists in no
+commit of the repository: `MANIFEST.in` prunes `src/embit/util/prebuilt`, and the `.so` is built
+at wheel-build time by a toolchain nobody records. Vendoring from source means that blob never
+enters this tree at all, rather than entering it and being deleted by a step someone can skip.
+
+It has to stay gone. `embit/util/secp256k1.py` picks its EC implementation inside a bare
+`except:`, and `_find_library()` returns the prebuilt path whenever the file merely *exists* —
+it does not fall through when *loading* it fails. On musl the glibc-linked blob cannot relocate,
+so its presence alone is enough to silently select `py_secp256k1`, embit's pure-Python elliptic
+curve arithmetic. That is how the authoritative test tier signed in pure Python for its entire
+life, at ~48x, with nothing anywhere saying so.
+
+Two upstream bugs in this ctypes binding are worth knowing before you touch the EC path, both
+documented at length in `docs/boot-pipeline.md`:
+
+- **`PublicKey.schnorr_verify` segfaults** against any `libsecp256k1` ≥ 0.3.0. embit binds
+  `secp256k1_schnorrsig_verify` with four arguments where the C function takes five, the fourth
+  being `msglen`. It is a crash, not an exception. The appliance only signs, so nothing calls it.
+- **`libsecp256k1` ≥ 0.8.0 cannot be used**, because upstream removed the deprecated
+  `secp256k1_schnorrsig_sign` alias that embit binds. embit's own `except: pass` hides this until
+  taproot signing.
+
+Signing itself is correct against Alpine's `libsecp256k1` and was checked independently — the
+signature verifies; it merely uses a different BIP340-legal nonce than the bundled blob does.
+
+`tests/test_structure.py` holds all three checks: no binary in this tree, a byte-exact ECDSA vector
+plus a Schnorr signature verified by the pure-Python implementation, and — in the authoritative
+tier only — the live backend being `ctypes_secp256k1`.
+
 ## `ur2/`
 
 Foundation Devices' [`foundation-ur-py`](https://github.com/Foundation-Devices/foundation-ur-py),

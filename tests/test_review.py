@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from embit.psbt import PSBT
+from aobs.core.vendor.embit.psbt import PSBT
 
 from aobs.core.constants import CHANGE_WINDOW_CEILING, CHANGE_WINDOW_LOOKAHEAD
 from aobs.core.review import OutputCategory, RefusalReason, review

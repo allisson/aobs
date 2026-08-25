@@ -3,8 +3,10 @@ name = "aobs"
 version = "0.1.0"
 description = "Amnesic Offline Bitcoin Signer — pure core and test harness"
 requires-python = ">=3.12"
+# `embit` is absent on purpose: `docs/boot-pipeline.md` vendors it into the app tree, pinned by
+# git SHA, so the prebuilt `libsecp256k1` blob that only exists in the PyPI wheel never enters
+# the repository (#34). See `aobs/core/vendor/README.md`.
 dependencies = [
-    "embit>=0.8.0",
     "cryptography>=44",
     "argon2-cffi>=23.1",
 ]

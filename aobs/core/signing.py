@@ -10,7 +10,7 @@ the input's script. A `PSBT_IN_BIP32_DERIVATION` field is never what decides whi
 
 from __future__ import annotations
 
-from embit.psbt import SIGHASH, PSBT
+from .vendor.embit.psbt import SIGHASH, PSBT
 
 from .review import Refusal, RefusalReason, review
 from .wallet import ScriptType, Wallet
