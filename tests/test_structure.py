@@ -187,6 +187,27 @@ def test_the_module_closure_installs_no_logging_handler_that_writes_to_a_stream(
     assert _closure_probe()["streaming"] == []
 
 
+# --- The library underneath ---------------------------------------------------------------------
+
+
+def test_embit_signs_with_the_native_secp256k1_and_not_its_python_fallback() -> None:
+    """embit falls back to pure-Python EC arithmetic silently, and `rm -f` fails silently too.
+
+    Its prebuilt `libsecp256k1` is glibc-linked, so on musl it cannot relocate and a bare `except:`
+    inside embit turns that into `py_secp256k1` with no message anywhere. The authoritative tier
+    ran that way and nothing said so — the only symptom was 50x on every derivation-heavy test.
+
+    The fix lives in `build/Dockerfile.test`, and it is a `rm -f` over a glob: it succeeds whether
+    or not it matched anything. So the fix cannot be its own check, and this is the check.
+    """
+    from embit.util import secp256k1
+
+    backend = secp256k1.ec_pubkey_create.__module__
+    assert backend.endswith("ctypes_secp256k1"), (
+        f"embit is using {backend}: signing is pure-Python here, and not constant-time"
+    )
+
+
 # --- The fixtures -------------------------------------------------------------------------------
 
 

@@ -23,6 +23,28 @@ RUN apk add --no-cache $(grep -v '^#' /tmp/apk-versions.txt | grep -v '^$' | tr 
 # visible rather than assumed. `urtypes` is test-only: an independent decoder for our own CBOR.
 RUN pip install --break-system-packages --no-cache-dir embit==0.8.0 urtypes==1.0.1
 
+# embit ships a prebuilt `libsecp256k1` that is glibc-linked — `__memcpy_chk` is a glibc fortify
+# symbol musl does not have — so on Alpine it fails to relocate and embit's bare `except:` falls
+# back to `py_secp256k1`, its pure-Python elliptic curve implementation. Silently, and at a cost
+# this tier measured at 50x on every derivation-heavy test.
+#
+# Installing the apk is not enough on its own: embit's `_find_library()` returns the prebuilt path
+# whenever the file exists and never falls through when *loading* it fails. The prebuilt has to go
+# as well, and then `ctypes.util.find_library` finds the system one.
+#
+# Making the prebuilt load instead was tested and does not work: `gcompat`, Alpine's official
+# glibc shim, does not export `__memcpy_chk` (nor does musl's loader), so the relocation fails
+# just the same. It would also be the wrong fix if it worked — it would mean signing with an
+# unpinned binary blob shipped inside a PyPI wheel, where the apk is distro-built and pinned like
+# every other input here.
+#
+# Pinned inline rather than added to `build/apk-versions.txt`, and deliberately: that file is read
+# by the ISO build too, so putting `libsecp256k1` in it would decide which secp256k1 the appliance
+# signs with. `docs/boot-pipeline.md` owns that and says nothing about it yet — it is a map
+# question, not a Dockerfile one.
+RUN apk add --no-cache libsecp256k1=0.5.0-r1 \
+ && rm -f /usr/lib/python3*/site-packages/embit/util/prebuilt/libsecp256k1_linux_x86_64.so
+
 WORKDIR /src
 COPY . /src
 
