@@ -1,0 +1,12 @@
+{
+  "name": "network_mismatch",
+  "description": "A mainnet PSBT \u2014 coin type 0h \u2014 reviewed by a signet wallet.",
+  "traces_to": "docs/psbt-review-model.md \u2014 what blocks signing",
+  "network": "signet",
+  "expected": {
+    "refusal": {
+      "reason": "network_mismatch",
+      "input_index": null
+    }
+  }
+}

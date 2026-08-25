@@ -1,0 +1,30 @@
+{
+  "name": "fee_absurd",
+  "description": "400 000 sats of fee on a 500 000 sat payment. A warning, not a refusal.",
+  "traces_to": "docs/psbt-review-model.md \u2014 what warns",
+  "network": "signet",
+  "expected": {
+    "refusal": null,
+    "outputs": [
+      {
+        "index": 0,
+        "category": "payment",
+        "sats": 500000
+      },
+      {
+        "index": 1,
+        "category": "change_proven",
+        "sats": 100000,
+        "proven_path": "m/84h/1h/0h/1/0"
+      }
+    ],
+    "headline": {
+      "payments_sats": 500000,
+      "fee_sats": 400000,
+      "total_leaving_sats": 900000
+    },
+    "transaction_warnings": [
+      "fee_above_threshold"
+    ]
+  }
+}

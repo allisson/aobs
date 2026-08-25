@@ -1,0 +1,12 @@
+{
+  "name": "taproot_missing_witness_utxo",
+  "description": "One taproot input has no witness_utxo. The sighash commits to every input's amount and script, so this cannot be signed and the fee is unknown.",
+  "traces_to": "docs/psbt-review-model.md \u2014 what blocks signing, taproot",
+  "network": "signet",
+  "expected": {
+    "refusal": {
+      "reason": "missing_utxo",
+      "input_index": 1
+    }
+  }
+}

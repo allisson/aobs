@@ -1,0 +1,24 @@
+{
+  "name": "input_past_the_ceiling",
+  "description": "One input at m/84h/1h/0h/0/500, past the window's ceiling of 200.",
+  "traces_to": "docs/psbt-review-model.md \u2014 the derivation window, what blocks signing",
+  "network": "signet",
+  "expected": {
+    "refusal": null,
+    "outputs": [
+      {
+        "index": 0,
+        "category": "payment",
+        "sats": 895000
+      }
+    ],
+    "headline": {
+      "payments_sats": 895000,
+      "fee_sats": 5000,
+      "total_leaving_sats": 900000
+    },
+    "transaction_warnings": [
+      "whole_balance_spend"
+    ]
+  }
+}

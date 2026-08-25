@@ -1,0 +1,35 @@
+{
+  "name": "change_address_attack",
+  "description": "PSBT_OUT_BIP32_DERIVATION claims m/84h/1h/0h/1/0 on an output whose script is a stranger's. The claim must not be the answer.",
+  "traces_to": "docs/psbt-review-model.md \u2014 the proof rule, output categories",
+  "network": "signet",
+  "expected": {
+    "refusal": null,
+    "outputs": [
+      {
+        "index": 0,
+        "category": "payment",
+        "sats": 200000
+      },
+      {
+        "index": 1,
+        "category": "not_proven",
+        "sats": 995000,
+        "claimed_path": "m/84h/1h/0h/1/0"
+      }
+    ],
+    "headline": {
+      "payments_sats": 1195000,
+      "fee_sats": 5000,
+      "total_leaving_sats": 1200000
+    },
+    "output_warnings": {
+      "1": [
+        "output_not_proven"
+      ]
+    },
+    "transaction_warnings": [
+      "whole_balance_spend"
+    ]
+  }
+}

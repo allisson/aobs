@@ -1,0 +1,31 @@
+# The authoritative test tier.
+#
+# `docs/test-harness.md`: an `alpine:3.24` container installing **the exact apk versions the ISO
+# installs**, so a version skew in `zxing-cpp` or `cryptography` fails here rather than on the
+# appliance. The fast local tier is `uv` on the host Python — the loop a developer lives in — and
+# it does not catch this class of failure.
+#
+#     docker build -f build/Dockerfile.test -t aobs-test .
+#     docker run --rm aobs-test
+#
+# The pins below are apk packages, not PyPI wheels: what the appliance runs is what Alpine ships,
+# and installing from PyPI here would test a different set of libraries than the ISO carries.
+FROM alpine:3.24
+
+# The exact versions are pinned by `build/apk-versions.txt`, which the ISO build reads too — one
+# list, so the two cannot drift apart silently. `=~` would defeat the purpose.
+COPY build/apk-versions.txt /tmp/apk-versions.txt
+RUN apk add --no-cache $(grep -v '^#' /tmp/apk-versions.txt | grep -v '^$' | tr '\n' ' ')
+
+# The one deviation from "apk only", and it is deliberate: Alpine packages no `embit`, and
+# `docs/boot-pipeline.md` settles that the appliance vendors it into the app tree. Until that
+# spec lands, the container takes it from PyPI — pinned, and named here so the deviation is
+# visible rather than assumed. `urtypes` is test-only: an independent decoder for our own CBOR.
+RUN pip install --break-system-packages --no-cache-dir embit==0.8.0 urtypes==1.0.1
+
+WORKDIR /src
+COPY . /src
+
+# The package is put on the path rather than installed: what runs here is the tree as committed.
+ENV PYTHONPATH=/src
+CMD ["python3", "-m", "pytest", "-q"]

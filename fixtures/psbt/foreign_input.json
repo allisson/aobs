@@ -1,0 +1,12 @@
+{
+  "name": "foreign_input",
+  "description": "An input this appliance cannot sign. Sign nothing rather than partly.",
+  "traces_to": "docs/psbt-review-model.md \u2014 what blocks signing",
+  "network": "signet",
+  "expected": {
+    "refusal": {
+      "reason": "unsignable_input",
+      "input_index": 1
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "change_index_out_of_window",
+  "description": "Our own change at index 500, past the ceiling of 200.",
+  "traces_to": "docs/psbt-review-model.md \u2014 the derivation window",
+  "network": "signet",
+  "expected": {
+    "refusal": null,
+    "outputs": [
+      {
+        "index": 0,
+        "category": "payment",
+        "sats": 400000
+      },
+      {
+        "index": 1,
+        "category": "not_proven",
+        "sats": 599000,
+        "claimed_path": "m/84h/1h/0h/1/500"
+      }
+    ],
+    "headline": {
+      "payments_sats": 999000,
+      "fee_sats": 1000,
+      "total_leaving_sats": 1000000
+    },
+    "output_warnings": {
+      "1": [
+        "output_not_proven"
+      ]
+    },
+    "transaction_warnings": [
+      "whole_balance_spend"
+    ]
+  }
+}

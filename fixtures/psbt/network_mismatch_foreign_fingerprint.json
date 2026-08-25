@@ -1,0 +1,12 @@
+{
+  "name": "network_mismatch_foreign_fingerprint",
+  "description": "Coin type 0h under a fingerprint that is not ours, on a signet wallet.",
+  "traces_to": "docs/psbt-review-model.md \u2014 what blocks signing",
+  "network": "signet",
+  "expected": {
+    "refusal": {
+      "reason": "network_mismatch",
+      "input_index": null
+    }
+  }
+}
