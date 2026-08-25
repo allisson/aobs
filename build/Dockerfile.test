@@ -1,12 +1,15 @@
-# The authoritative test tier.
+# The test tier — the only one, since #35 retired the host-Python tier.
 #
 # `docs/test-harness.md`: an `alpine:3.24` container installing **the exact apk versions the ISO
 # installs**, so a version skew in `zxing-cpp`, `cryptography` or `libsecp256k1` fails here rather
-# than on the appliance. The fast local tier is `uv` on the host Python — the loop a developer
-# lives in — and it does not catch this class of failure.
+# than on the appliance.
 #
-#     docker build -f build/Dockerfile.test -t aobs-test .
-#     docker run --rm aobs-test
+#     docker build -f build/Dockerfile.test -t aobs-test .     # only when the pins change
+#     docker run --rm -v "$PWD:/src" -w /src aobs-test         # the dev loop, ~20 s
+#
+# The bind mount is what makes this a dev loop rather than a CI job: the image carries the pinned
+# userland, the working tree comes from the host, and no rebuild is needed to run an edit. CI runs
+# `docker run --rm aobs-test` with no mount, so what it judges is the copy baked in below.
 #
 # The pins below are apk packages, not PyPI wheels: what the appliance runs is what Alpine ships,
 # and installing from PyPI here would test a different set of libraries than the ISO carries.

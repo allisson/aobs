@@ -21,7 +21,7 @@ adapters and no ISO yet, and most screens are still later specs.
 | `aobs/adapters/fake/` | The harness half of each port. The real half is a later spec. |
 | `aobs/ui/` | The Textual application: global keys, the failure shape, the keymap picker. |
 | `fixtures/` | Every fixture, and the one script that generates them all. |
-| `build/` | The authoritative test tier. |
+| `build/` | The test tier, and the apk pins the ISO build will read. |
 
 The display is not a port. `SignerApp` **is** the display seam: tests drive the real application
 headless through Textual's `run_test()`, and the console adapter will run the very same object.
@@ -31,20 +31,22 @@ One rule carries weight and a test enforces it: **`core/` may not import any ada
 
 ## Running the tests
 
-Two tiers, and `.github/workflows/tests.yml` runs both on every pull request.
-
-**Fast local** — the loop a developer lives in:
-
-```sh
-uv run pytest
-```
-
-**Authoritative** — `alpine:3.24` with the exact apk versions pinned in `build/apk-versions.txt`,
-so a `zxing-cpp` or `cryptography` skew fails here rather than on the appliance:
+One tier, and `.github/workflows/tests.yml` runs it on every pull request: `alpine:3.24` with the
+exact apk versions pinned in `build/apk-versions.txt`, so a `zxing-cpp`, `cryptography` or
+`libsecp256k1` skew fails here rather than on the appliance.
 
 ```sh
-docker build -f build/Dockerfile.test -t aobs-test . && docker run --rm aobs-test
+docker build -f build/Dockerfile.test -t aobs-test .     # only when the pins change
+docker run --rm -v "$PWD:/src" -w /src aobs-test         # the dev loop, ~20 s
 ```
+
+The bind mount is what makes this the everyday loop: the image carries the pinned userland, the
+working tree comes from the host, and no rebuild is needed to run an edit.
+
+`uv run --extra test pytest` still works, for a debugger or an IDE test runner. It is not a tier —
+nothing in CI runs it, and it is roughly 17x slower, because `embit` is vendored without its
+prebuilt binary and most hosts have no system `libsecp256k1`. `docs/test-harness.md` explains why
+that trade is the right way round.
 
 **Regtest, opt-in** — the only instrument that catches a wrong taproot sighash, because a wrong
 sighash produces a well-formed signature every appliance-side check accepts. Needs a `bitcoind`

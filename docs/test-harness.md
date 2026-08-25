@@ -140,15 +140,48 @@ would choose them, which no generator discovers.
 
 ## Running it
 
-**Two tiers.**
+**One tier.** An `alpine:3.24` container installing **the exact apk versions the ISO installs**
+(#12), so a version skew in `zxing-cpp`, `cryptography` or `libsecp256k1` fails here rather than on
+the appliance.
 
-*Fast local*: `uv` on the host Python — the loop a developer lives in. The prototype already
-established `uv run --with` works for this.
+    docker build -f build/Dockerfile.test -t aobs-test .     # only when the pins change
+    docker run --rm -v "$PWD:/src" -w /src aobs-test         # the dev loop, ~20 s
 
-*Authoritative*: an `alpine:3.24` container installing **the exact apk versions the ISO installs**
-(#12), so a version skew in `zxing-cpp` or `cryptography` fails there rather than on the appliance.
+The bind mount is what makes this the loop a developer lives in: the image carries the pinned
+userland, the working tree comes from the host, and **no rebuild is needed to run an edit** — only a
+change to `build/apk-versions.txt` requires one. CI uses the `COPY` baked into the image instead, so
+what it judges is the tree as pushed.
 
-One local-tier test catches an ISO-only failure without an ISO. #12 noted that `CONFIG_NET=n`
+**This used to be two tiers, and the second one was `uv` on the host Python — "the loop a developer
+lives in".** It was retired in #35 when it stopped being the fast one. `embit` is vendored from git
+and carries no prebuilt binary (#34), so a host with no system `libsecp256k1` falls back to
+`py_secp256k1`: measured at **5 m 45 s against the container's 20 s**, a tier 17x slower than the one
+it existed to be faster than. It also tested PyPI-resolved libraries on a non-Alpine Python — a
+configuration the appliance is never in.
+
+`uv run --extra test pytest` still works and is still useful for a debugger or an IDE test runner.
+It is **not a tier**: nothing in CI runs it, and no claim about the appliance rests on it. The one
+assertion that would be wrong there — which library performs the EC — is guarded by
+`AOBS_AUTHORITATIVE_TIER=1`, which only `build/Dockerfile.test` sets, so the suite passes on a host
+without the library instead of failing for the wrong reason.
+
+Recovering the host speed is **harder than it sounds, and on macOS does not currently work at all**
+— recorded so nobody re-derives it:
+
+- `ctypes.util.find_library` on macOS searches `/usr/local/lib` and `/usr/lib`, **not**
+  `/opt/homebrew/lib`, so a `brew install secp256k1` is invisible to embit on Apple Silicon.
+  `DYLD_LIBRARY_PATH` does not rescue it either: SIP strips the variable before Python sees it.
+- Homebrew currently ships **0.8.0, which embit cannot use for taproot at all** — upstream removed
+  `secp256k1_schnorrsig_sign` there, and embit binds that name. A developer who did force it onto
+  the path would get a native backend with BIP86 signing broken.
+- On a Linux dev host a distro `libsecp256k1` in the **0.4–0.7** range works and is found normally.
+
+The reason that one assertion is guarded rather than simply always-on: which library performs the EC
+is a claim about the *appliance*, so it is checked where the appliance's environment is reproduced.
+Run off-container it would only ever have been testing whether a PyPI wheel shipped a prebuilt blob
+for that platform — the very blob #34 decided the appliance must not use.
+
+One test catches an ISO-only failure without an ISO. #12 noted that `CONFIG_NET=n`
 removes `AF_UNIX` as well as `AF_INET`; this is that check, runnable on a laptop — but it is **not**
 an import-graph assertion over the running app's module closure, which is what this document used to
 call for. That form cannot pass and never could: `asyncio`, which Textual *is*, imports `socket` and

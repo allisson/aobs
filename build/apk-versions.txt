@@ -1,4 +1,4 @@
-# The exact apk versions the authoritative test tier installs, from Alpine v3.24, x86_64.
+# The exact apk versions the test tier installs, from Alpine v3.24, x86_64.
 #
 # `docs/test-harness.md` requires the tier to install *the exact versions the ISO installs*, so a
 # `zxing-cpp` or `cryptography` skew fails in CI rather than on the appliance. The ISO build does

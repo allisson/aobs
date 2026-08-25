@@ -256,7 +256,7 @@ def test_both_signature_schemes_produce_the_expected_bytes() -> None:
     ABI matches; a symbol check only approximates all three.
 
     `docs/boot-pipeline.md` makes this a build-time assertion on the ISO. Here it is the same check
-    against the tree as committed, and it runs in both tiers because correctness must hold under
+    against the tree as committed, and it is not gated because correctness must hold under
     whichever backend is live.
     """
     import hashlib
@@ -292,17 +292,17 @@ def test_both_signature_schemes_produce_the_expected_bytes() -> None:
 
 @pytest.mark.skipif(
     os.environ.get("AOBS_AUTHORITATIVE_TIER") != "1",
-    reason="the fast tier runs on whatever the host provides; the appliance's backend is the "
-    "authoritative tier's business (#34)",
+    reason="off-container runs use whatever the host provides; which library performs the EC is a "
+    "claim about the appliance, checked where the appliance's environment is reproduced (#34)",
 )
 def test_the_authoritative_tier_signs_with_the_native_secp256k1() -> None:
     """Which library does the EC is a claim about the *appliance*, so it is checked where the
     appliance's environment is reproduced.
 
-    On a dev host this assertion would only have been testing whether a PyPI wheel shipped a
+    Off-container this assertion would only have been testing whether a PyPI wheel shipped a
     prebuilt blob for that platform — the very blob #34 decided the appliance must not use. The
-    fast tier keeps the correctness check above, which is what catches the schnorr gap; a system
-    `libsecp256k1` there is recommended for speed, not required for correctness.
+    correctness check above is not gated and runs everywhere, which is what catches the schnorr
+    gap; `uv run pytest` on a host with no system `libsecp256k1` is slow but not wrong (#35).
     """
     from aobs.core.vendor.embit.util import secp256k1
 
