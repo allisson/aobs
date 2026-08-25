@@ -129,6 +129,20 @@ The BIP39 passphrase, the optional 25th-word secret that turns one Mnemonic into
 Wallet. Distinct from the **export password**, which protects an Encrypted wallet QR and is
 never the same thing — do not let either term stand in for the other.
 
+## Read-back
+
+Typing a set of words back into the appliance from the paper just written, and being refused until
+they match. Performed on all of the words and never on a sample: sampling three of eight misses a
+single mistranscribed word most of the time. It checks **the paper**, not the words — the appliance
+already holds the correct ones — and nothing else in the session ever checks the paper.
+
+## Master fingerprint
+
+The four bytes BIP32 derives from a Wallet's root key, shown as eight hex characters. The
+appliance's confirmation that a Passphrase was typed as intended: the same Mnemonic with a
+different Passphrase gives a different fingerprint. On a wallet made here there is nothing to
+compare it against, which is a thing the appliance says rather than papers over.
+
 ## Encrypted wallet QR
 
 A Wallet exported as a single QR code, encrypted under an export password. The export password

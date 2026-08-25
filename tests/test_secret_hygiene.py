@@ -189,3 +189,97 @@ def test_the_sanitiser_removes_rather_than_escapes() -> None:
     assert inert(hostile) == "[31mPAY[0m HERE"
     assert is_inert(inert(hostile))
     assert not is_inert(hostile)
+
+
+# --- Widget teardown ----------------------------------------------------------------------------
+#
+# `docs/secret-hygiene.md` names this test by name: "after the widget is torn down, no attribute on
+# it and no reactive in the app holds the sentinel." It is the assertion behind the decision not to
+# put a secret in Textual's `Input` — reactives are watched, copied and retained by design, so the
+# check is not "did we remember to clear it" but "is there anywhere it could still be".
+
+#: Typeable through `pilot.press`, and unmistakable in a byte dump.
+TYPED_SENTINEL = "zzsentinelpassphrasezz"
+
+
+def _retains(obj: object, needle: str) -> list[str]:
+    """Every attribute of `obj` that still holds `needle` — reactives included.
+
+    Textual stores a reactive's value on the instance as `_reactive_<name>`, so sweeping
+    `vars()` covers reactives and plain attributes in one pass, which is what the rule is about:
+    not one field we remembered to clear, but the absence of anywhere it could be.
+    """
+    found = []
+    for name, value in list(vars(obj).items()):
+        if isinstance(value, str) and needle in value:
+            found.append(name)
+        elif isinstance(value, (bytes, bytearray)) and needle.encode() in bytes(value):
+            found.append(name)
+        elif isinstance(value, SecretBuffer) and needle.encode() in bytes(value._data):
+            found.append(name)
+    if needle in str(getattr(obj, "content", "")):
+        found.append("content")
+    return found
+
+
+async def test_the_passphrase_field_retains_nothing_after_it_is_torn_down() -> None:
+    """Revealed, then abandoned — the worst case, because a reveal is the one moment the secret is
+    handed to a renderer at all."""
+    from aobs.ui.app import SignerApp
+
+    app = SignerApp(
+        frames=ImageFileFrameSource([]),
+        entropy=FixedEntropySource(),
+        power=RecordingPower(),
+        keymap=RecordingKeymap(),
+    )
+    async with app.run_test(size=(128, 48)) as pilot:
+        await pilot.press("f10")  # the keymap picker, on to home
+        await pilot.pause()
+        app.begin_passphrase(VECTOR_MNEMONIC)
+        await pilot.pause()
+
+        field = app.screen.query_one("#passphrase-field")
+        await pilot.press(*list(TYPED_SENTINEL))
+        await pilot.press("f2")
+        await pilot.pause()
+        assert TYPED_SENTINEL in str(field.content), "the reveal really did render it"
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert _retains(field, TYPED_SENTINEL) == []
+        for widget in app.query("*"):
+            assert _retains(widget, TYPED_SENTINEL) == [], type(widget).__name__
+        for screen in app.screen_stack:
+            assert _retains(screen, TYPED_SENTINEL) == [], type(screen).__name__
+
+
+async def test_a_seed_grid_retains_nothing_after_it_is_torn_down() -> None:
+    """The same rule, applied to the words. They are shown as typed by design — that is what makes
+    a grid a grid — so what is asserted is dwell, not concealment."""
+    from aobs.ui.app import SignerApp
+    from aobs.ui.widgets.wordgrid import WordGrid
+
+    app = SignerApp(
+        frames=ImageFileFrameSource([]),
+        entropy=FixedEntropySource(),
+        power=RecordingPower(),
+        keymap=RecordingKeymap(),
+    )
+    async with app.run_test(size=(128, 48)) as pilot:
+        await pilot.press("f10")  # to home
+        await pilot.pause()
+        app.open_seed_grid(12)
+        await pilot.pause()
+
+        grid = app.screen.query_one(WordGrid)
+        for word in VECTOR_MNEMONIC.split():
+            await pilot.press(*list(word), "space")
+        await pilot.pause()
+        assert grid.words[0] == "abandon"
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert grid.words == ("",) * 12
+        assert _retains(grid, "abandon") == []
