@@ -16,8 +16,14 @@ test = [
     "pytest>=8",
     "hypothesis>=6",
     "zxing-cpp>=2.2",
-    "segno>=1.6",
+    # `qrcode`, not `segno`: `py3-qrcode` is what Alpine packages, and the authoritative tier
+    # installs the versions the ISO installs.
+    "qrcode>=8",
+    "pillow>=10",
     "textual>=0.80",
+    # An independent implementation of the UR registry types, used only to check our own
+    # `crypto-output` CBOR against something that is not us.
+    "urtypes>=1.0",
 ]
 
 [build-system]

@@ -1,0 +1,31 @@
+# The exact apk versions the authoritative test tier installs, from Alpine v3.24, x86_64.
+#
+# `docs/test-harness.md` requires the tier to install *the exact versions the ISO installs*, so a
+# `zxing-cpp` or `cryptography` skew fails in CI rather than on the appliance. The ISO build does
+# not exist yet — `docs/boot-pipeline.md` is a separate spec — so what this file pins today is
+# Alpine v3.24 as it stands, read from the published `APKINDEX`. When the ISO build lands it reads
+# this same file, so the two cannot drift apart silently.
+#
+# Regenerate with:
+#   curl -s https://dl-cdn.alpinelinux.org/alpine/v3.24/{main,community}/x86_64/APKINDEX.tar.gz
+#
+# Two dependencies are deliberately absent, and `docs/boot-pipeline.md` says why: Alpine packages
+# neither `embit` nor a UR library. `ur2` is vendored in the app tree (`aobs/core/vendor/`), and
+# `embit` is installed from PyPI in the container only — vendoring it into the app tree belongs to
+# the boot-pipeline spec, and until then the container's `embit` is the one deviation from
+# "apk only" and is marked as such in `build/Dockerfile.test`.
+
+# The appliance's own dependencies.
+python3=3.14.7-r1
+py3-cryptography=47.0.0-r0
+py3-argon2-cffi=25.1.0-r1
+py3-zxing-cpp=2.3.0-r3
+py3-qrcode=8.2-r2
+py3-textual=8.2.7-r0
+py3-rich=15.0.0-r0
+py3-pillow=12.2.0-r0
+
+# The harness. Not installed on the appliance — the ISO carries no test runner.
+py3-pytest=9.0.3-r0
+py3-hypothesis=6.151.12-r0
+py3-pip=26.1.2-r0
