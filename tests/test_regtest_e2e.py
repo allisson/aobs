@@ -13,6 +13,15 @@ blocks for it.
 
 It needs a `bitcoind` in regtest mode and `bitcoin-cli` on the path. A contributor with no node
 still gets the full default suite, which is the point of it being opt-in.
+
+`BITCOIN_CLI` and `BITCOIN_CLI_ARGS` say how to reach the node, so a container is a node too and
+nothing has to be installed on the host:
+
+    docker run -d --rm --name aobs-regtest bitcoin/bitcoin:latest \
+        -regtest -rpcuser=aobs -rpcpassword=aobs -fallbackfee=0.0002
+    BITCOIN_CLI=docker \
+    BITCOIN_CLI_ARGS="exec aobs-regtest bitcoin-cli -regtest -rpcuser=aobs -rpcpassword=aobs" \
+        uv run pytest -m regtest
 """
 
 from __future__ import annotations

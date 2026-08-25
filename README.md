@@ -50,6 +50,9 @@ in regtest mode:
 uv run pytest -m regtest
 ```
 
+`BITCOIN_CLI` and `BITCOIN_CLI_ARGS` say how to reach the node, so a container counts as one and
+nothing needs installing on the host — the invocation is in that module's docstring.
+
 Fixtures are generated artifacts, committed next to their generator so a reviewer regenerates and
 diffs rather than trusting a blob:
 
