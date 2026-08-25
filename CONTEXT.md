@@ -70,6 +70,14 @@ The only data path in or out of the appliance. Inbound is a webcam reading QR co
 QR codes rendered on the screen. Both directions may need multiple frames. A "QR channel" claim
 is about the *channel*, not about any one format carried over it.
 
+## Framing aid
+
+The coarse live image shown while the user points the camera at a QR code. It answers *is the code
+in frame*, and nothing else — the console's grey ramp and cell grid put it far below the module pitch
+of the codes being read, so it can never answer *is the code in focus*. Never call it a preview: the
+word promises focus feedback the appliance does not have, and a user who moves the phone to fix a
+blur that was never real is being misled by our vocabulary.
+
 ## Wallet
 
 A single-sig BIP32 keychain derived from a Mnemonic and an optional Passphrase, held in RAM for
