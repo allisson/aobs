@@ -26,7 +26,9 @@ from .constants import (
     UR_FRAGMENT_LADDER,
     UR_FRAME_RATE_LADDER,
 )
+from .vendor.ur2.bytewords import Bytewords, Bytewords_Style_minimal
 from .vendor.ur2.cbor_lite import CBORDecoder, CBOREncoder
+from .vendor.ur2.fountain_encoder import Part as FountainPart
 from .vendor.ur2.ur import UR
 from .vendor.ur2.ur_decoder import URDecoder
 from .vendor.ur2.ur_encoder import UREncoder
@@ -41,6 +43,19 @@ ACCEPTED_PSBT_UR_TYPES = ("crypto-psbt", "psbt")
 
 class URError(Exception):
     """A UR that did not decode. Carries no payload — the bytes may be a wallet's."""
+
+
+class DifferentMessage(URError):
+    """A well-formed part of a *different* message than the one being assembled.
+
+    Detected for free, and that is the whole reason it is a named condition rather than a silent
+    rejection: every UR part carries the message length and a CRC32 of the whole message, so a
+    user who starts scanning transaction B midway through A can be told so
+    (`docs/failure-states.md`) instead of watching a stream that can never complete.
+
+    The vendored decoder's own answer to this part is `False`, indistinguishable from a duplicate.
+    So the comparison is made here, before the part is handed over.
+    """
 
 
 @dataclass(frozen=True)
@@ -144,7 +159,7 @@ class PsbtCollector:
         """Take one scanned string. Returns True once the PSBT is complete.
 
         A part that does not belong — a foreign UR type, a corrupt string — is rejected rather
-        than absorbed.
+        than absorbed, and a part of a different message raises `DifferentMessage`.
         """
         text = part.strip().lower()
         if not text.startswith("ur:"):
@@ -152,21 +167,74 @@ class PsbtCollector:
         ur_type = text[3:].split("/", 1)[0]
         if ur_type not in ACCEPTED_PSBT_UR_TYPES:
             raise URError("not a PSBT UR")
+        self._reject_different_message(text)
         self._decoder.receive_part(text)
         return self._decoder.is_complete()
 
     @property
     def expected_part_count(self) -> int | None:
+        """How many parts the sender says there are, or `None` before the first one arrives.
+
+        The vendored decoder raises on the empty case rather than answering it, so the `None` in
+        the signature is produced here.
+        """
+        if self._decoder.fountain_decoder.expected_part_indexes is None:
+            return None
         return self._decoder.expected_part_count()
+
+    @property
+    def received_part_indexes(self) -> frozenset[int]:
+        """Which part indexes have arrived — the slot map's whole input.
+
+        A count cannot draw the map: the parts do not arrive in order, and *which* holes are
+        still open is the thing the user is being shown (`docs/scan-feedback.md`).
+        """
+        return frozenset(self._decoder.received_part_indexes())
 
     @property
     def received_part_count(self) -> int:
         return len(self._decoder.received_part_indexes())
 
+    def _reject_different_message(self, text: str) -> None:
+        """Compare this part against what the parts so far agreed on.
+
+        The three fields are the sender's own: sequence length, message length and the CRC32 of
+        the whole message. Two different transactions agreeing on all three is a CRC32 collision
+        between messages of identical length, which is not a case worth a fourth field.
+        """
+        fountain = self._decoder.fountain_decoder
+        if fountain.expected_part_indexes is None:
+            return
+        part = _fountain_part(text)
+        if part is None:
+            return
+        if (
+            len(fountain.expected_part_indexes) != part.seq_len
+            or fountain.expected_message_len != part.message_len
+            or fountain.expected_checksum != part.checksum
+        ):
+            raise DifferentMessage("this part belongs to a different message")
+
     def result(self) -> bytes:
         if not self._decoder.is_success():
             raise URError("the UR did not decode")
         return _cbor_to_bytes(self._decoder.result_message().cbor)
+
+
+def _fountain_part(text: str) -> FountainPart | None:
+    """The sender's own header for one multi-part UR part, or `None` for anything else.
+
+    `None` covers a single-part UR (no sequence component, so nothing to disagree about) and a
+    fragment that does not parse — which is the decoder's business to reject, not this rule's.
+    """
+    try:
+        _ur_type, components = URDecoder.parse(text)
+        if len(components) != 2:
+            return None
+        cbor = Bytewords.decode(Bytewords_Style_minimal, components[1])
+        return FountainPart.from_cbor(cbor)
+    except Exception:
+        return None
 
 
 def decode_psbt_parts(parts: list[str] | tuple[str, ...]) -> bytes:

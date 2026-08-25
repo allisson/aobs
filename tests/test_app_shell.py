@@ -29,8 +29,10 @@ from aobs.ports.frame_source import Frame
 from aobs.ui.app import SignerApp
 from aobs.ui.geometry import MAX_COLUMNS, MIN_COLUMNS, MIN_ROWS
 from aobs.ui.screens.console_too_small import ConsoleTooSmallScreen
+from aobs.ui.screens.camera_lost import CameraLostScreen
 from aobs.ui.screens.home import NO_CAMERA, PATHS, HomeScreen
 from aobs.ui.screens.keymap import KeymapScreen
+from aobs.ui.screens.scan import ScanScreen
 
 ROOT = Path(__file__).parent.parent
 
@@ -52,12 +54,33 @@ class _OneFrameSource:
         self.closed = True
 
 
+class _UnpluggedMidSession:
+    """A camera that answers once and then stops existing.
+
+    Once, because `_camera_present` asks for one frame before the first secret: a source that
+    raised immediately would be a session with no camera, which is a different screen.
+    """
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def frames(self) -> Iterator[Frame]:
+        yield Frame(width=4, height=4, data=bytes(16))
+        raise OSError("the camera was unplugged")
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def build(*, camera: bool = True, **overrides: object) -> SignerApp:
     ports = {
         "frames": _OneFrameSource() if camera else ImageFileFrameSource([]),
         "entropy": FixedEntropySource(),
         "power": RecordingPower(),
         "keymap": RecordingKeymap(),
+        # The scan screen's frames are pulled by the tests, never by a timer: see
+        # `tests/test_scan_screen.py`.
+        "scan_frame_interval": None,
     }
     ports.update(overrides)
     return SignerApp(**ports)  # type: ignore[arg-type]
@@ -127,7 +150,8 @@ async def test_the_echo_ignores_the_keys_that_are_doing_something_else() -> None
 async def test_f12_powers_off_from_every_screen_the_app_can_reach() -> None:
     """A sweep rather than a single case: a screen added later that shadows `F12` fails here."""
     reached: list[type[Screen]] = []
-    for walk in ([], ["f10"]):
+    #: The keymap picker, home, and the scan screen two paths down from it.
+    for walk in ([], ["f10"], ["f10", "down", "down", "f10"]):
         power = RecordingPower()
         app = build(power=power)
         async with app.run_test(size=CONSOLE) as pilot:
@@ -145,6 +169,20 @@ async def test_f12_powers_off_from_every_screen_the_app_can_reach() -> None:
         await pilot.press("f12")
         await pilot.pause()
         assert small.power.powered_off
+
+    # The camera-lost screen is reached by losing the camera, which no keystroke can do.
+    lost = build(frames=_UnpluggedMidSession(), power=RecordingPower())
+    async with lost.run_test(size=CONSOLE) as pilot:
+        await pilot.press("f10", "down", "down", "f10")
+        await pilot.pause()
+        assert isinstance(lost.screen, ScanScreen)
+        lost.screen.scan_once()  # the one frame
+        lost.screen.scan_once()  # and then the cable
+        await pilot.pause()
+        reached.append(type(lost.screen))
+        await pilot.press("f12")
+        await pilot.pause()
+        assert lost.power.powered_off
 
     # Every screen in the tree, not just the ones this walk happened to visit: a later ticket
     # that adds a screen and no route to it fails here.
@@ -289,6 +327,36 @@ async def test_a_camera_that_is_present_leaves_every_scan_path_available() -> No
         for index, path in enumerate(PATHS):
             widget = app.screen.query_one(f"#path-{index}", Static)
             assert ("path-unavailable" in widget.classes) == path.needs_wallet, path.name
+
+
+# --- Choosing a path -----------------------------------------------------------------------------
+
+
+async def test_the_selection_moves_with_the_arrows_and_wraps() -> None:
+    app = build()
+    async with app.run_test(size=CONSOLE) as pilot:
+        await reach_home(app, pilot)
+        assert app.screen.selected_path is PATHS[0]
+        await pilot.press("down", "down")
+        await pilot.pause()
+        assert app.screen.selected_path is PATHS[2]
+        await pilot.press("up", "up", "up")
+        await pilot.pause()
+        assert app.screen.selected_path is PATHS[-1], "the list wraps rather than stopping"
+
+
+async def test_the_accept_key_on_an_unavailable_path_does_nothing_at_all() -> None:
+    """Shown rather than hidden, and inert rather than explaining itself twice: the sentence
+    saying why is already on the screen."""
+    app = build(camera=False)
+    async with app.run_test(size=CONSOLE) as pilot:
+        await reach_home(app, pilot)
+        for _ in range(2):  # to "Restore from an encrypted wallet QR", which needs a camera
+            await pilot.press("down")
+        await pilot.press("f10")
+        await pilot.pause()
+        assert isinstance(app.screen, HomeScreen)
+        assert app.screen.selected_path.needs_camera is True
 
 
 # --- The failure shape ------------------------------------------------------------------------
