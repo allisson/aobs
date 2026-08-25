@@ -25,16 +25,36 @@ Checksum strength, which is load-bearing further down:
 
 ## Entering a word
 
-**Type up to four characters; the word resolves as soon as the prefix is unique. Space or enter
-commits the exact word when the buffer is itself a list word.**
+**Type up to four characters; the word resolves *on screen* as soon as the prefix is unique. Space or
+enter is what commits it — every word, short or long.**
 
-The second clause is not a nicety. **49 words are prefixes of other words**, so a user typing `add` has
-three live candidates; auto-resolution would have to guess or stall. The explicit commit is what makes
-short words enterable at all.
+**Resolution is display, not commitment**, and #41 settled that against the cheaper-looking rule.
+Auto-committing the moment four characters resolve would save one keystroke a word, but it has to know
+where the next word begins and there is no signal to know it from: once `crue` has become `cruel`, the
+`l` that starts `lounge` is indistinguishable from the `l` that would finish `cruel`.
+
+Measured against the list rather than argued:
+
+- **1,503 of the 2,048 words are longer than four characters**, so most words have a tail left over
+  once the prefix has resolved.
+- **3.35% of ordered word pairs collide** that way — the next word's first letter is exactly the
+  letter that would have continued the previous one.
+- Across the 23 adjacencies of a 24-word seed that is **a 54% chance of at least one**, 0.77 expected.
+  One generated seed held three: `cruel lounge`, `merit twelve`, `gospel exchange`.
+
+The failure is silent and it lands on exactly the user taking the shortcut: letters are absorbed into
+the wrong slot, and it surfaces several words later as a checksum failure that names no word. So there
+is no auto-commit and no mode that turns one on; `tests/test_wallet_entry.py` pins both the
+measurement and the three adjacencies as keystrokes.
+
+The explicit commit is also what makes short words enterable at all. **49 words are prefixes of other
+words**, so a user typing `add` has three live candidates, and a three-letter word never reaches four
+characters — auto-resolution would have to guess or stall.
 
 Full-word typing keeps working for anyone who prefers it — the four-character rule is a shortcut, not a
-mode. Numeric index entry (SeedSigner's approach) is rejected: it exists for devices with four buttons,
-and this appliance has a keyboard.
+mode, and a full-word typist's surplus letters simply finish the word they belong to, because the slot
+stays open until the separator arrives. Numeric index entry (SeedSigner's approach) is rejected: it
+exists for devices with four buttons, and this appliance has a keyboard.
 
 > **Do not unify this with the export-password widget.** #16 established that the EFF large list is
 > **not** prefix-unique — 5,502 of 7,776 words are still ambiguous at four characters. Same widget,
@@ -93,7 +113,9 @@ only copy.
 and applies harder: a partial check misses a single bad word most of the time, and here a single bad
 word is the whole wallet.
 
-Cost is 24 × 4 = **96 keystrokes**, the honest price of the only verification that exists. As in #16, a
+Cost is 24 × 5 = **120 keystrokes** — four characters and a separator per word, under the commit rule
+above — the honest price of the only verification that exists. #31's user story 10 said 96, which was
+reading 1's arithmetic; #41 overturned the reading and this is the corrected figure. As in #16, a
 failed read-back retries **the same words**, never freshly generated ones.
 
 ## The passphrase

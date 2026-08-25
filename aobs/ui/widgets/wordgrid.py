@@ -21,13 +21,15 @@ Beyond the rule, the shape is settled by `docs/seed-entry.md`:
 able to go to slot 17, change it and retry without retyping the sixteen they got right — a wizard
 forces that retype, and the retype is where a *second* error is introduced.
 
-**Space or enter commits the word.** Every word, not only the short ones, and the reason is a
-measured collision rather than a preference. Committing automatically the moment four characters
-resolve would have to guess where the next word begins, and it guesses wrong: after `crue` has
-resolved to `cruel`, the `l` that starts `lounge` is indistinguishable from the `l` that finishes
-`cruel`. One generated 24-word seed drawn at random held **three** such adjacencies — `cruel
-lounge`, `merit twelve`, `gospel exchange` — so auto-committing silently eats the first letters of
-the next word for exactly the user who is taking the shortcut. The separator costs one keystroke a
+**Space or enter commits the word**, and #41 settled it there rather than at the fourth character.
+Every word, not only the short ones, and the reason is a measured collision rather than a
+preference. Committing automatically the moment four characters resolve would have to guess where
+the next word begins, and it guesses wrong: after `crue` has resolved to `cruel`, the `l` that
+starts `lounge` is indistinguishable from the `l` that finishes `cruel`. **3.35% of ordered BIP39
+pairs collide that way — a 54% chance of at least one across a 24-word seed**, and one generated
+seed held three (`cruel lounge`, `merit twelve`, `gospel exchange`). So auto-committing silently
+eats the first letters of the next word for exactly the user who is taking the shortcut, and it
+surfaces words later as a checksum failure that names no slot. The separator costs one keystroke a
 word and removes the whole class.
 
 It is also what makes the 49 BIP39 words that are prefixes of other words enterable at all (`add`
