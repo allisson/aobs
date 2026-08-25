@@ -83,14 +83,36 @@ def test_the_ports_have_two_adapters_each() -> None:
     from aobs import ports
     from aobs.adapters import fake
 
-    assert set(ports.__all__) == {"EntropySource", "Frame", "FrameSource", "Power", "Screen"}
+    assert set(ports.__all__) == {
+        "DEFAULT_LAYOUT",
+        "EntropySource",
+        "Frame",
+        "FrameSource",
+        "Keymap",
+        "Power",
+    }
     # The harness half exists today; the real half is a later spec, named by the ports.
     assert set(fake.__all__) == {
         "FixedEntropySource",
         "ImageFileFrameSource",
+        "RecordingKeymap",
         "RecordingPower",
-        "TextualScreen",
     }
+
+
+def test_there_is_no_screen_port() -> None:
+    """The tree and `docs/test-harness.md` say the same thing, or neither is trustworthy.
+
+    `Screen`'s two adapters were "Textual on the console" and "Textual `run_test()`" — the same
+    application under two drivers, not two implementations of an interface. The app is the display
+    seam now, and the port table says so.
+    """
+    assert not (ROOT / "aobs" / "ports" / "screen.py").exists()
+    assert not (ROOT / "aobs" / "adapters" / "fake" / "screen.py").exists()
+
+    port_table = (ROOT / "docs" / "test-harness.md").read_text(encoding="utf-8")
+    assert "| `Screen` |" not in port_table
+    assert "| `Keymap` |" in port_table
 
 
 # --- The import closure ---------------------------------------------------------------------------
@@ -129,12 +151,35 @@ def _closure_probe() -> dict:
     return eval(result.stdout.strip())  # noqa: S307 - our own repr, in our own subprocess
 
 
-def test_the_module_closure_pulls_in_no_network_stack() -> None:
-    """`CONFIG_NET=n` removes `AF_UNIX` as well as `AF_INET`, taking `multiprocessing` with it.
+#: The four modules `docs/test-harness.md` names. `CONFIG_NET=n` removes `AF_UNIX` as well as
+#: `AF_INET`, taking `multiprocessing` with it.
+NETWORK_STACK = ("socket", "ssl", "multiprocessing", "urllib")
 
-    This is that failure, caught on a laptop rather than on the appliance.
-    """
+
+def test_the_core_module_closure_pulls_in_no_network_stack() -> None:
+    """That failure, caught on a laptop rather than on the appliance."""
     assert _closure_probe()["forbidden"] == []
+
+
+def test_no_module_in_the_app_tree_imports_the_network_stack() -> None:
+    """The app's closure cannot be asserted the way the core's can, and the reason is stdlib.
+
+    `asyncio` — which Textual *is* — imports `socket` and `ssl`; `pathlib` on 3.12 imports
+    `urllib.parse`. So an app-closure assertion would fail on every kernel and prove nothing about
+    this one. The rule that is both true and enforceable is this one: **no module we write reaches
+    for the network stack.** Its runtime counterpart, that a whole session constructs no socket at
+    all, is `tests/test_app_shell.py::test_the_running_app_opens_no_socket` — and that is the one
+    that actually checks the claim, because `import socket` succeeds on a `CONFIG_NET=n` kernel
+    and only `socket()` fails.
+    """
+    offenders = {
+        path.relative_to(ROOT): sorted(
+            name for name in _imports(path) if name.split(".")[0] in NETWORK_STACK
+        )
+        for path in sorted((ROOT / "aobs").rglob("*.py"))
+        if "vendor" not in path.parts
+    }
+    assert not {path: names for path, names in offenders.items() if names}
 
 
 def test_the_module_closure_installs_no_logging_handler_that_writes_to_a_stream() -> None:

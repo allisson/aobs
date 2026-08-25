@@ -78,6 +78,29 @@ of the codes being read, so it can never answer *is the code in focus*. Never ca
 word promises focus feedback the appliance does not have, and a user who moves the phone to fix a
 blur that was never real is being misled by our vocabulary.
 
+## Keymap picker
+
+The first screen of a Session, shown before any secret exists: choose the console's keyboard layout,
+and prove the choice is right by typing on it. It exists for the Passphrase and for nothing else —
+Mnemonic words and Export password words are `a-z` and survive almost any Latin layout, while a
+Passphrase is arbitrary text and a wrong layout turns it silently into a Wallet that cannot be
+reopened. The proof is the echo, not the list of names.
+
+## Failure screen
+
+The one shape every refusal, every wrong-QR message and every *not found* is drawn in: what
+happened, next steps carrying no default and no highlighted button, and a short stable **condition
+name**. The condition name is a name, not a code and not a stack location — it is what a user can
+carry into a bug report typed on a different machine, and it is deliberately the only thing a
+failure lets off the appliance.
+
+## Global keys
+
+The three keys reserved identically on every screen: `esc` backs out without acting, `F12` powers
+off, and the confirm key is per-screen and never `enter` and never `esc`. Reserved means no screen
+may redefine them — a user who learned `esc` means *back* must never meet a screen where it means
+*proceed*.
+
 ## Wallet
 
 A single-sig BIP32 keychain derived from a Mnemonic and an optional Passphrase, held in RAM for
