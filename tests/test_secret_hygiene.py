@@ -15,7 +15,12 @@ from pathlib import Path
 
 import pytest
 
-from aobs.adapters.fake import TextualScreen
+from aobs.adapters.fake import (
+    FixedEntropySource,
+    ImageFileFrameSource,
+    RecordingKeymap,
+    RecordingPower,
+)
 from aobs.adapters.failure_handler import excepthook
 from aobs.core.failure import describe
 from aobs.core.review import review
@@ -23,6 +28,7 @@ from aobs.core.secret import SecretBuffer
 from aobs.core.signing import SigningRefused, sign
 from aobs.core.text import inert, is_inert
 from aobs.core.wallet import Network, Wallet
+from aobs.ui.widgets.failure import Failure
 
 from conftest import VECTOR_MNEMONIC
 
@@ -54,15 +60,30 @@ def test_the_sentinel_reaches_no_stream_and_no_message() -> None:
     assert err.getvalue().startswith("ValueError.")
 
 
-def test_what_the_screen_is_given_never_holds_the_sentinel() -> None:
-    screen = TextualScreen()
-    try:
-        _raise_holding_the_sentinel()
-    except ValueError as failure:
-        screen.show(describe(failure))
+async def test_a_fault_inside_the_running_app_never_puts_the_sentinel_on_the_display() -> None:
+    """The real application, faulting for real.
 
-    assert SENTINEL not in "".join(screen.rendered)
-    assert SENTINEL not in "".join(str(view) for view in screen.shown)
+    Textual's own crash renderer is `Traceback(show_locals=True)` — it would print the local named
+    `seed` above, on the display the user is staring at. `SignerApp` replaces it, and this is the
+    assertion that the replacement holds.
+    """
+    from aobs.ui.app import SignerApp
+
+    app = SignerApp(
+        frames=ImageFileFrameSource([]),
+        entropy=FixedEntropySource(),
+        power=RecordingPower(),
+        keymap=RecordingKeymap(),
+    )
+    with pytest.raises(ValueError):
+        async with app.run_test(size=(128, 48)) as pilot:
+            app.call_next(_raise_holding_the_sentinel)
+            await pilot.pause()
+
+    assert app.fatal_message is not None
+    assert SENTINEL not in app.fatal_message
+    assert app.fatal_message.startswith("ValueError.")
+    assert "Traceback" not in app.fatal_message
 
 
 def test_the_described_failure_is_the_type_and_a_fixed_message() -> None:
@@ -152,10 +173,15 @@ def test_a_psbt_carrying_ansi_escapes_renders_inert() -> None:
         assert is_inert(output.script_pubkey_hex)
         assert is_inert(output.claimed_path or "")
 
-    screen = TextualScreen()
-    screen.show(" ".join(o.address or "" for o in result.outputs))
-    assert "\x1b" not in "".join(screen.rendered)
-    assert "\x07" not in "".join(screen.rendered)
+    # And the app-side boundary applies the same rule to text the core never touched. Every
+    # widget-bound string in `aobs/ui/` goes through a value object that calls `inert()` on
+    # construction, so a caller cannot forget to. The full end-to-end assertion — hostile bytes
+    # through the running review screen — lands with that screen.
+    hostile = "\x1b[2J\x07this is not a PSBT\x00"
+    failure = Failure(condition=hostile, happened=hostile, next_steps=(hostile,))
+    assert is_inert(failure.condition)
+    assert is_inert(failure.happened)
+    assert is_inert(failure.next_steps[0])
 
 
 def test_the_sanitiser_removes_rather_than_escapes() -> None:

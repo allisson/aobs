@@ -25,9 +25,22 @@ hypothetical ones:
 | port | real adapter | fake adapter |
 |---|---|---|
 | `FrameSource` | V4L2 `mmap` capture (#6) | frames from image files |
-| `Screen` | Textual on the console (#3) | Textual `run_test()` |
+| `Keymap` | `loadkeys` (#12) | records what was applied |
 | `EntropySource` | `getrandom`, camera, dice (#8) | fixed bytes |
 | `Power` | forced power-off (#10) | records the call |
+
+**The display is not one of them, and that is a correction.** A `Screen` port was declared here
+with two adapters — "Textual on the console" and "Textual `run_test()`" — and those are the *same*
+application under two drivers, not two implementations of an interface. The port sat between two
+halves of one thing, and its fake could only render `str(view)` through a throwaway one-widget app
+because there is no honest `next_key()` inside a running Textual event loop.
+
+So **`SignerApp` is the display seam**. Tests drive the real application headless through
+`run_test()`, pressing real keys against real screens; the console adapter runs the very same
+object. `Keymap` took the vacated fourth slot, and it is a port for the reason `Screen` was not:
+applying a keyboard layout genuinely has two implementations, and a test has to be able to watch
+which layout was applied — `docs/boot-pipeline.md` calls a passphrase typed through the wrong map
+the worst failure mode in the appliance.
 
 The deletion test passes: delete the core and the review logic reappears in every caller; delete a port
 and nothing vanishes, which is correct — ports are meant to be thin.
@@ -40,7 +53,9 @@ wallet. That is the part where a bug loses money, and it needs no camera, no scr
 
 `aobs/core/`, `aobs/ports/`, `aobs/adapters/`, `aobs/ui/`, `tests/`, `fixtures/`, `build/`.
 
-One rule carries weight and is enforced by a test: **`core/` may not import any adapter.** Left
+One rule carries weight and is enforced by a test: **`core/` may not import any adapter,
+`aobs.ui` or `aobs.ports`.** `aobs/ui/` is on the list the core is guarded *from*, not on the list
+that guards it. Left
 implicit, the first implementation session puts I/O inside the core and the seam is gone before anyone
 notices. Structure *inside* `core/` is an implementation-plan question and is deliberately not fixed
 here.
@@ -133,9 +148,21 @@ established `uv run --with` works for this.
 *Authoritative*: an `alpine:3.24` container installing **the exact apk versions the ISO installs**
 (#12), so a version skew in `zxing-cpp` or `cryptography` fails there rather than on the appliance.
 
-One local-tier test catches an ISO-only failure without an ISO: **an import-graph assertion that the
-app's module closure never pulls in `socket`, `ssl`, `multiprocessing` or `urllib`.** #12 noted that
-`CONFIG_NET=n` removes `AF_UNIX` as well as `AF_INET`; this is that check, runnable on a laptop.
+One local-tier test catches an ISO-only failure without an ISO. #12 noted that `CONFIG_NET=n`
+removes `AF_UNIX` as well as `AF_INET`; this is that check, runnable on a laptop — but it is **not**
+an import-graph assertion over the running app's module closure, which is what this document used to
+call for. That form cannot pass and never could: `asyncio`, which Textual *is*, imports `socket` and
+`ssl`, and `pathlib` on Python 3.12 imports `urllib.parse`. Asserting their absence would fail on
+every kernel while proving nothing about the one the appliance boots.
+
+Two assertions replace it, and between them they say the thing that was meant:
+
+- **The core's closure stays clean** — the core is pure and reaches for none of it, so the original
+  assertion still holds where it is true.
+- **No module in the app tree imports the network stack**, and **a whole session constructs no
+  socket**: the app is driven from the picker to the home screen and out through `F12` with
+  `socket.socket` patched to raise. That is the honest form of the claim, because `import socket`
+  succeeds on a `CONFIG_NET=n` kernel and only calling `socket()` fails.
 
 ## Regtest end-to-end
 

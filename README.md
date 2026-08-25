@@ -11,23 +11,27 @@ decision made only inside a code diff is invisible to the next session.
 
 ## What exists today
 
-`aobs/core/` — the pure core — and the harness around it. There are no screens, no real adapters
-and no ISO yet; those are later specs.
+`aobs/core/` — the pure core — the harness around it, and the application shell. There are no real
+adapters and no ISO yet, and most screens are still later specs.
 
 | | |
 |---|---|
 | `aobs/core/` | Bytes in, value objects out. No I/O, no clock, no ambient state. |
-| `aobs/ports/` | The four ports: `FrameSource`, `Screen`, `EntropySource`, `Power`. |
+| `aobs/ports/` | The four ports: `FrameSource`, `Keymap`, `EntropySource`, `Power`. |
 | `aobs/adapters/fake/` | The harness half of each port. The real half is a later spec. |
-| `aobs/ui/` | Empty. The screens are a later spec. |
+| `aobs/ui/` | The Textual application: global keys, the failure shape, the keymap picker. |
 | `fixtures/` | Every fixture, and the one script that generates them all. |
 | `build/` | The authoritative test tier. |
 
-One rule carries weight and a test enforces it: **`core/` may not import any adapter.**
+The display is not a port. `SignerApp` **is** the display seam: tests drive the real application
+headless through Textual's `run_test()`, and the console adapter will run the very same object.
+
+One rule carries weight and a test enforces it: **`core/` may not import any adapter,
+`aobs.ui` or `aobs.ports`.**
 
 ## Running the tests
 
-Two tiers.
+Two tiers, and `.github/workflows/tests.yml` runs both on every pull request.
 
 **Fast local** — the loop a developer lives in:
 

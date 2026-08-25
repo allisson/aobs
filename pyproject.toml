@@ -14,6 +14,9 @@ dependencies = [
 # appliance's own renderer and camera adapter land in a later spec.
 test = [
     "pytest>=8",
+    # `run_test()` is an async context manager, so the app suite is async. `asyncio_mode =
+    # "auto"` below is what keeps that from being a decorator on every test.
+    "pytest-asyncio>=1.3",
     "hypothesis>=6",
     "zxing-cpp>=2.2",
     # `qrcode`, not `segno`: `py3-qrcode` is what Alpine packages, and the authoritative tier
@@ -35,6 +38,7 @@ packages = ["aobs"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 # The regtest suite needs a bitcoind; it is opt-in and outside the default loop.
 addopts = "-m 'not regtest'"
 markers = [
