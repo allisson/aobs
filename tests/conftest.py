@@ -8,10 +8,12 @@ modules so that "the test seeds are published vectors" is one fact in one place.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import pytest
+import qrcode
+from qrcode.constants import ERROR_CORRECT_L
 
 from aobs.core.wallet import Network, Wallet
 
@@ -54,3 +56,27 @@ def fixed_bytes(seed: bytes = b"aobs-test") -> Callable[[int], bytes]:
         return out[:count]
 
     return draw
+
+
+#: Eight screen pixels per QR module, as in `tests/test_qr_loopback.py`: the appliance's console is
+#: 1024x768 for a 77x77 code, so this is the same order of magnitude a camera would see.
+SCALE = 8
+
+
+def render_qr(payload: str | bytes, directory: Path, index: int = 0) -> Path:
+    """One frame, as an image file — which is what the `FrameSource` fake reads.
+
+    Actual images, decoded by the same `zxing-cpp` the appliance uses. Handing the decoder a string
+    instead would skip the component most likely to surprise us, which is the whole reason the
+    `FrameSource` port carries frames and not payloads.
+    """
+    code = qrcode.QRCode(error_correction=ERROR_CORRECT_L, border=4, box_size=SCALE)
+    code.add_data(payload)
+    code.make(fit=True)
+    path = directory / f"frame-{index:03d}.png"
+    code.make_image().save(path)
+    return path
+
+
+def render_qrs(payloads: Sequence[str | bytes], directory: Path) -> list[Path]:
+    return [render_qr(payload, directory, index) for index, payload in enumerate(payloads)]

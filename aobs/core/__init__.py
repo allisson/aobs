@@ -36,13 +36,21 @@ from .review import (
 )
 from .secret import SecretBuffer
 from .signing import SigningRefused, sign
-from .urcodec import PsbtCollector, PsbtStream, decode_psbt_parts, emit_parameters
+from .urcodec import (
+    DifferentMessage,
+    PsbtCollector,
+    PsbtStream,
+    URError,
+    decode_psbt_parts,
+    emit_parameters,
+)
 from .wallet import Network, ScriptType, Wallet
 from .wallet_qr import AuthenticationFailed, ForeignContainer, decode, export_wallet
 
 __all__ = [
     "AddressCheck",
     "AuthenticationFailed",
+    "DifferentMessage",
     "Entropy",
     "MixingReport",
     "ExportPassword",
@@ -57,6 +65,7 @@ __all__ = [
     "ScriptType",
     "SecretBuffer",
     "SigningRefused",
+    "URError",
     "Verdict",
     "Wallet",
     "WarningCode",

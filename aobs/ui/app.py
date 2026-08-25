@@ -22,9 +22,12 @@ from aobs.ports.frame_source import FrameSource
 from aobs.ports.keymap import Keymap
 from aobs.ports.power import Power
 from aobs.ui.geometry import MAX_COLUMNS, fits
+from aobs.ui.scanning import ScanTarget
+from aobs.ui.screens.camera_lost import CameraLostScreen
 from aobs.ui.screens.console_too_small import ConsoleTooSmallScreen
 from aobs.ui.screens.home import HomeScreen
 from aobs.ui.screens.keymap import KeymapScreen
+from aobs.ui.screens.scan import INBOUND_FRAME_RATE, ScanScreen
 
 
 class SignerApp(App[None]):
@@ -62,12 +65,17 @@ class SignerApp(App[None]):
         power: Power,
         keymap: Keymap,
         network: Network = Network.MAINNET,
+        scan_frame_interval: float | None = 1 / INBOUND_FRAME_RATE,
     ) -> None:
         super().__init__()
         self.frames = frames
         self.entropy = entropy
         self.power = power
         self.keymap = keymap
+        #: How often the scan screen pulls a frame. `None` means no timer at all, which is how the
+        #: suite drives frames itself: pacing twenty-seven frames in real time would cost the suite
+        #: seven seconds to assert something that is not Textual's clock.
+        self.scan_frame_interval = scan_frame_interval
 
         # --- session state ---
         self.wallet: Wallet | None = None
@@ -80,6 +88,12 @@ class SignerApp(App[None]):
         self.camera_available = False
         #: What an unrecoverable fault said, for a test to read. Never a traceback.
         self.fatal_message: str | None = None
+        #: The bytes the last completed scan produced. This is where the inbound spec ends: what
+        #: happens to them is the review, restore and address-verification specs.
+        self.scanned: bytes | None = None
+        #: One sentence for the screen the user lands on next — how far an abandoned scan got.
+        #: Nothing here is attacker-controlled: the appliance writes it about its own state.
+        self.notice: str | None = None
 
     # --- startup -----------------------------------------------------------------------------
 
@@ -123,7 +137,36 @@ class SignerApp(App[None]):
         screen, so `esc` there does nothing.
         """
         if len(self.screen_stack) > 2:
+            # The screen being left says what leaving costs — how far an abandoned scan got —
+            # before the screen underneath is asked to redraw. Set after the pop, the notice
+            # would be one refresh too late to appear, which is a silence rather than a bug the
+            # next reader would notice.
+            leaving = getattr(self.screen, "leave_notice", None)
+            self.notice = leaving() if leaving is not None else None
             self.pop_screen()
+
+    # --- what the screens call ----------------------------------------------------------------
+
+    def open_scan(self, target: ScanTarget) -> None:
+        """Every inbound path goes through the one scan screen.
+
+        The notice and the bytes of the last scan are both dropped here rather than when they are
+        read: they describe a scan the user has walked away from, and a stale wallet backup sitting
+        in a session attribute is exactly the kind of thing `docs/secret-hygiene.md` is about.
+        """
+        self.notice = None
+        self.scanned = None
+        self.push_screen(ScanScreen(target))
+
+    def camera_lost(self) -> None:
+        """The camera stopped answering. It cannot come back this session, and the screen says so.
+
+        `authorized_default=0` is set before the first secret exists, so an unplugged and
+        replugged camera is not re-authorized. Backing out of the message lands on a home screen
+        with the scan paths disabled, which is the honest remainder of the session.
+        """
+        self.camera_available = False
+        self.switch_screen(CameraLostScreen())
 
     def action_power_off(self) -> None:
         """End the session, from anywhere, always.

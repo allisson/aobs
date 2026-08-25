@@ -78,6 +78,14 @@ of the codes being read, so it can never answer *is the code in focus*. Never ca
 word promises focus feedback the appliance does not have, and a user who moves the phone to fix a
 blur that was never real is being misled by our vocabulary.
 
+## Slot map
+
+How a scan in progress is shown: one cell per part of the incoming message, filled once that part
+has arrived and hollow while it has not. It is never a bar, and the reason is the encoding — the
+parts do not arrive in order, so a bar fills, stalls and jumps at exactly the moment the transfer is
+working, while holes filling in is what is actually happening. Above the point where one cell per
+part no longer fits a row, the fraction stands alone rather than one cell standing for a range.
+
 ## Keymap picker
 
 The first screen of a Session, shown before any secret exists: choose the console's keyboard layout,
