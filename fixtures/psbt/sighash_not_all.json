@@ -1,0 +1,12 @@
+{
+  "name": "sighash_not_all",
+  "description": "SIGHASH_SINGLE on the second of three inputs.",
+  "traces_to": "docs/psbt-review-model.md \u2014 what blocks signing",
+  "network": "signet",
+  "expected": {
+    "refusal": {
+      "reason": "sighash_not_all",
+      "input_index": 1
+    }
+  }
+}

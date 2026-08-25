@@ -1,0 +1,25 @@
+{
+  "name": "ansi_escape_label",
+  "description": "An output carrying ANSI escapes in a proprietary field. The core exposes no such field, and anything it does expose renders inert.",
+  "traces_to": "docs/test-harness.md \u2014 the escape-injection rule",
+  "network": "signet",
+  "expected": {
+    "refusal": null,
+    "outputs": [
+      {
+        "index": 0,
+        "category": "payment",
+        "sats": 495000
+      }
+    ],
+    "headline": {
+      "payments_sats": 495000,
+      "fee_sats": 5000,
+      "total_leaving_sats": 500000
+    },
+    "no_control_characters": true,
+    "transaction_warnings": [
+      "whole_balance_spend"
+    ]
+  }
+}
