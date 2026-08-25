@@ -46,6 +46,11 @@ def wordlist() -> tuple[str, ...]:
     return tuple(words)
 
 
+@lru_cache(maxsize=1)
+def _words() -> frozenset[str]:
+    return frozenset(wordlist())
+
+
 @dataclass(frozen=True)
 class ExportPassword:
     """Eight words, in order.
@@ -60,7 +65,7 @@ class ExportPassword:
         if len(self.words) != EXPORT_PASSWORD_WORDS:
             raise ValueError(f"an export password is {EXPORT_PASSWORD_WORDS} words")
         for word in self.words:
-            if word not in set(wordlist()):
+            if word not in _words():
                 raise ValueError("word is not in the EFF large wordlist")
 
     @property
@@ -113,7 +118,7 @@ def resolve(typed: str) -> str | None:
     `docs/export-password.md` is why: uniqueness arrives only at the full word.
     """
     word = typed.strip().lower()
-    return word if word in set(wordlist()) else None
+    return word if word in _words() else None
 
 
 def candidates(prefix: str) -> tuple[str, ...]:

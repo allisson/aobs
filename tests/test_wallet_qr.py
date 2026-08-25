@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-from collections.abc import Callable
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -33,24 +32,12 @@ from aobs.core.wallet_qr import (
     export_wallet,
 )
 
+from conftest import fixed_bytes
+
 #: Argon2id at 64 MiB is ~0.1 s a call, which a property test cannot afford hundreds of. The
 #: parameter *encoding* — the thing that broke Krux — is exercised over the whole admissible
 #: range below; the cipher round trip uses cheap parameters and one full-strength case.
 CHEAP = Argon2Params(memory_kib=64, time_cost=1, parallelism=1)
-
-
-def fixed_bytes(seed: bytes = b"aobs-test") -> Callable[[int], bytes]:
-    """A deterministic stand-in for the EntropySource port: a counter through SHA-256."""
-    state = {"n": 0}
-
-    def draw(count: int) -> bytes:
-        out = b""
-        while len(out) < count:
-            out += hashlib.sha256(seed + state["n"].to_bytes(4, "big")).digest()
-            state["n"] += 1
-        return out[:count]
-
-    return draw
 
 
 # --- The shape the format promises ---------------------------------------------------------------

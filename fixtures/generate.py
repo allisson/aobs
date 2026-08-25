@@ -307,7 +307,7 @@ def change_address_attack() -> None:
                     "fee_sats": 5_000,
                     "total_leaving_sats": 1_200_000,
                 },
-                "output_warnings": {"1": ["output_not_proven", "address_not_seen_before"]},
+                "output_warnings": {"1": ["output_not_proven"]},
                 "transaction_warnings": ["whole_balance_spend"],
             },
         },
@@ -352,7 +352,7 @@ def change_index_out_of_window() -> None:
                     "fee_sats": 1_000,
                     "total_leaving_sats": 1_000_000,
                 },
-                "output_warnings": {"1": ["output_not_proven", "address_not_seen_before"]},
+                "output_warnings": {"1": ["output_not_proven"]},
                 "transaction_warnings": ["whole_balance_spend"],
             },
         },
@@ -626,6 +626,77 @@ def fee_absurd() -> None:
     )
 
 
+def input_past_the_ceiling() -> None:
+    """A long-used wallet spending its own UTXO at index 500.
+
+    The derivation window bounds what may be believed to be *change*; an input is proven the same
+    way but without that bound, because refusing to recognise an honest wallet's own UTXO would be
+    a hard refusal on a legitimate transaction. The claim still proves nothing on its own — the
+    script is reproduced from the claimed path before the input counts as ours.
+    """
+    w = wallet()
+    psbt = build(
+        wallet=w,
+        inputs=[
+            {"script_type": ScriptType.P2WPKH, "chain": RECEIVE_CHAIN, "index": 500,
+             "sats": 900_000},
+        ],
+        outputs=[
+            {"sats": 895_000, "script": script.address_to_scriptpubkey(
+                "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx")},
+        ],
+    )
+    write(
+        "input_past_the_ceiling",
+        psbt.serialize(),
+        {
+            "description": "One input at m/84h/1h/0h/0/500, past the window's ceiling of 200.",
+            "traces_to": "docs/psbt-review-model.md — the derivation window, what blocks signing",
+            "network": "signet",
+            "expected": {
+                "refusal": None,
+                "outputs": [{"index": 0, "category": "payment", "sats": 895_000}],
+                "headline": {
+                    "payments_sats": 895_000,
+                    "fee_sats": 5_000,
+                    "total_leaving_sats": 900_000,
+                },
+                "transaction_warnings": ["whole_balance_spend"],
+            },
+        },
+    )
+
+
+def network_mismatch_foreign_fingerprint() -> None:
+    """A mainnet PSBT whose derivations belong to someone else's master key.
+
+    The network a PSBT was built for is stated by its coin type whoever signed the claim, so the
+    refusal does not depend on the attacker choosing to name our fingerprint.
+    """
+    other = stranger(Network.MAINNET)
+    psbt = build(
+        wallet=other,
+        inputs=[
+            {"script_type": ScriptType.P2WPKH, "chain": RECEIVE_CHAIN, "index": 0,
+             "sats": 1_000_000},
+        ],
+        outputs=[
+            {"sats": 999_000, "script": script.address_to_scriptpubkey(
+                "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")},
+        ],
+    )
+    write(
+        "network_mismatch_foreign_fingerprint",
+        psbt.serialize(),
+        {
+            "description": "Coin type 0h under a fingerprint that is not ours, on a signet wallet.",
+            "traces_to": "docs/psbt-review-model.md — what blocks signing",
+            "network": "signet",
+            "expected": {"refusal": {"reason": "network_mismatch", "input_index": None}},
+        },
+    )
+
+
 FIXTURES = [
     honest_p2wpkh,
     honest_p2tr,
@@ -640,6 +711,8 @@ FIXTURES = [
     many_inputs,
     malformed,
     fee_absurd,
+    input_past_the_ceiling,
+    network_mismatch_foreign_fingerprint,
 ]
 
 

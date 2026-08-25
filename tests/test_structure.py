@@ -25,7 +25,7 @@ CORPUS = ROOT / "fixtures" / "psbt"
 #: in a PSBT from their own wallet fails here rather than quietly committing a real xpub.
 ALLOWED_FINGERPRINTS = {
     "73c5da0a",  # abandon abandon … about
-    "b4e3f5cd",  # legal winner thank … yellow
+    "b8688df1",  # legal winner thank … yellow
 }
 
 
@@ -69,10 +69,12 @@ def test_core_imports_no_adapter() -> None:
 def test_core_reads_no_ambient_state() -> None:
     """Bytes in, value objects out: no clock, no environment, no randomness of its own.
 
-    `pathlib` is admitted for one thing only — reading the checked-in EFF wordlist, which is data
-    shipped inside the package rather than state the appliance is in.
+    `pathlib` is on the list too, and for a second reason: on Python 3.12 it imports
+    `urllib.parse`, which the module-closure assertion below forbids.
     """
-    forbidden = {"os", "time", "datetime", "random", "secrets", "socket", "subprocess"}
+    forbidden = {
+        "os", "pathlib", "time", "datetime", "random", "secrets", "socket", "subprocess",
+    }
     for path in _core_modules():
         assert not (_imports(path) & forbidden), path
 

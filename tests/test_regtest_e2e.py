@@ -39,12 +39,10 @@ from aobs.core.review import review
 from aobs.core.signing import sign
 from aobs.core.wallet import Network, ScriptType, Wallet
 
+from conftest import VECTOR_MNEMONIC
+
 pytestmark = pytest.mark.regtest
 
-VECTOR_MNEMONIC = (
-    "abandon abandon abandon abandon abandon abandon abandon abandon "
-    "abandon abandon abandon about"
-)
 
 CLI = os.environ.get("BITCOIN_CLI", "bitcoin-cli")
 CLI_ARGS = os.environ.get("BITCOIN_CLI_ARGS", "-regtest").split()

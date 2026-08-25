@@ -28,8 +28,6 @@ _TAG_KEYPATH = 304
 _TAG_COININFO = 305
 _SCRIPT_EXPRESSION_TAG = {ScriptType.P2WPKH: 404, ScriptType.P2TR: 409}
 
-_HARDENED = 0x80000000
-
 
 def output_descriptor_ur(
     wallet: Wallet, script_type: ScriptType, *, chain: int = RECEIVE_CHAIN
@@ -97,8 +95,3 @@ def _encode_hdkey(
 
     encoder.encodeUnsigned(8)  # parent fingerprint: the key one level up, m/purpose'/coin'
     encoder.encodeUnsigned(int.from_bytes(account.fingerprint, "big"))
-
-
-def descriptors(wallet: Wallet) -> dict[ScriptType, str]:
-    """Both text descriptors, which is what the browsable address list is checked against."""
-    return {script_type: wallet.descriptor(script_type) for script_type in ScriptType}

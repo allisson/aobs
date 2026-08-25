@@ -22,6 +22,7 @@ from .constants import (
     FEE_WARN_SAT_PER_VBYTE,
     FEE_WARN_SHARE_OF_SENT,
 )
+from .text import inert
 from .wallet import CHANGE_CHAIN, RECEIVE_CHAIN, ScriptType, Wallet
 
 
@@ -84,10 +85,6 @@ class DerivedPath:
     index: int
     path: str
 
-    @property
-    def is_change_chain(self) -> bool:
-        return self.chain == CHANGE_CHAIN
-
 
 @dataclass(frozen=True)
 class ReviewedInput:
@@ -117,6 +114,16 @@ class ReviewedOutput:
 
     @property
     def is_leaving(self) -> bool:
+        return self.category is not OutputCategory.CHANGE_PROVEN
+
+    @property
+    def address_needs_checking(self) -> bool:
+        """False on proven change — the data-side of de-emphasis.
+
+        Inviting someone to eye-verify a string the machine has already proven trains a habit
+        with no value, and habits with no value are what make the checks that matter get skipped.
+        The screens style it; the core says which case it is.
+        """
         return self.category is not OutputCategory.CHANGE_PROVEN
 
 
@@ -218,6 +225,54 @@ class _OwnScripts:
         return hit
 
 
+def _prove_input(inp, utxo, own: _OwnScripts, wallet: Wallet) -> DerivedPath | None:
+    """Prove that an input is ours, by reproducing its script from our own key.
+
+    Two ways, and both end in the same comparison. The window is tried first. Failing that, the
+    input's *claimed* path is derived — by us — and the resulting script compared to the input's
+    own `scriptPubKey`: a claim is input to a check here exactly as it is on an output.
+
+    An input is not the place the window has to bind. The window exists so that an attacker cannot
+    choose which paths are believed to be **change** (`docs/psbt-review-model.md`); an input whose
+    script we reproduce is one this appliance can spend, whatever its index, and refusing to
+    recognise a long-used wallet's own UTXO would be a hard refusal on an honest transaction.
+    """
+    hit = own.find(utxo.script_pubkey.data, CHANGE_WINDOW_CEILING)
+    if hit is not None:
+        return hit
+    claimed = _claimed_components(inp, wallet)
+    if claimed is None:
+        return None
+    script_type, chain, index = claimed
+    if wallet.script_pubkey(script_type, chain, index).data != utxo.script_pubkey.data:
+        return None
+    return DerivedPath(
+        script_type=script_type,
+        chain=chain,
+        index=index,
+        path=wallet.path(script_type, chain, index),
+    )
+
+
+def _claimed_components(scope, wallet: Wallet) -> tuple[ScriptType, int, int] | None:
+    """The `(script type, chain, index)` a scope claims under our fingerprint, if the claim is
+    shaped like one of ours at all. Shape only: nothing here decides anything."""
+    for path in _claimed_derivations_of(scope, wallet.fingerprint):
+        if len(path) != 5:
+            continue
+        purpose, coin, account, chain, index = path
+        if coin != (wallet.network.coin_type | _HARDENED):
+            continue
+        if account != (wallet.account | _HARDENED):
+            continue
+        if chain not in (RECEIVE_CHAIN, CHANGE_CHAIN) or index >= _HARDENED:
+            continue
+        for script_type in ScriptType:
+            if purpose == (script_type.purpose | _HARDENED):
+                return script_type, chain, index
+    return None
+
+
 def _script_types_in(psbt: PSBT) -> tuple[ScriptType, ...]:
     """Which of our two script types the PSBT could involve, from the witness versions its own
     scripts carry. Narrowing this halves the derivation work and can never widen what proves."""
@@ -240,19 +295,24 @@ def _script_types_in(psbt: PSBT) -> tuple[ScriptType, ...]:
 # --- Refusal checks ------------------------------------------------------------------------------
 
 
-def _claimed_derivations(psbt: PSBT, fingerprint: bytes):
-    """Every derivation the PSBT claims under our master fingerprint, inputs and outputs.
+def _claimed_derivations_of(scope, fingerprint: bytes | None):
+    """Every derivation one scope claims — under `fingerprint`, or under any if it is None.
 
-    These are claims. They are read for two purposes only: to notice a network mismatch, and to
-    tell a screen that a claim was checked. Neither makes them evidence.
+    These are claims. They are read to notice a network mismatch, to know which path an input's
+    script should be checked against, and to tell a screen that a claim was checked. None of
+    those makes them evidence: every one ends in a script comparison.
     """
+    for derivation in scope.bip32_derivations.values():
+        if fingerprint is None or derivation.fingerprint == fingerprint:
+            yield derivation.derivation
+    for _leaves, derivation in scope.taproot_bip32_derivations.values():
+        if fingerprint is None or derivation.fingerprint == fingerprint:
+            yield derivation.derivation
+
+
+def _claimed_derivations(psbt: PSBT, fingerprint: bytes | None):
     for scope in list(psbt.inputs) + list(psbt.outputs):
-        for derivation in scope.bip32_derivations.values():
-            if derivation.fingerprint == fingerprint:
-                yield derivation.derivation
-        for _leaves, derivation in scope.taproot_bip32_derivations.values():
-            if derivation.fingerprint == fingerprint:
-                yield derivation.derivation
+        yield from _claimed_derivations_of(scope, fingerprint)
 
 
 _HARDENED = 0x80000000
@@ -264,10 +324,20 @@ def _network_mismatch(psbt: PSBT, wallet: Wallet) -> bool:
     Scripts are network-agnostic, so this is the one place the PSBT itself says which network it
     was built for: BIP84/BIP86 coin type. A testnet wallet cannot be talked into a mainnet
     signature.
+
+    Read under **any** fingerprint, not only ours: a PSBT built for mainnet by a wallet we have
+    never seen is still a mainnet PSBT, and a refusal is the safe direction, so a claim that only
+    provokes one costs an attacker nothing to make and gains them nothing.
+
+    Two limits, both properties of the format rather than of this check. A PSBT whose derivations
+    are stripped says nothing about its network, and falls to the unsignable-input refusal instead
+    — the same refusal, a less specific message. And testnet4, signet and regtest share coin type
+    1', so no PSBT distinguishes them (`research/xpub-export-formats`, finding 6); mismatch among
+    those three is invisible here and shows up as inputs this appliance cannot reproduce.
     """
     ours = wallet.network.coin_type | _HARDENED
     purposes = {st.purpose | _HARDENED for st in ScriptType}
-    for path in _claimed_derivations(psbt, wallet.fingerprint):
+    for path in _claimed_derivations(psbt, None):
         if len(path) >= 2 and path[0] in purposes and path[1] != ours:
             return True
     return False
@@ -358,7 +428,7 @@ def review(psbt_bytes: bytes, wallet: Wallet) -> Review:
         # Taproot needs every input's witness_utxo, not only the one being signed: the sighash
         # commits to all input amounts and scripts. One rule, two reasons.
         missing = utxo is None or (any_taproot and inp.witness_utxo is None)
-        proven = None if missing else own.find(utxo.script_pubkey.data, CHANGE_WINDOW_CEILING)
+        proven = None if missing else _prove_input(inp, utxo, own, wallet)
         script_type = proven.script_type if proven else None
         input_types.append(script_type)
         if missing:
@@ -405,15 +475,18 @@ def review(psbt_bytes: bytes, wallet: Wallet) -> Review:
             address = script.address(wallet.network.embit)
         except Exception:
             address = None
+        # Every string leaving the core goes through `inert()`. An address and a hex script cannot
+        # hold a control character today; making that a property of the code rather than of the
+        # encoding is what stops the next field from being the one that does.
         draft.outputs.append(
             ReviewedOutput(
                 index=i,
                 amount_sats=out.value,
                 category=category,
-                address=address,
-                script_pubkey_hex=script.data.hex(),
+                address=inert(address) if address is not None else None,
+                script_pubkey_hex=inert(script.data.hex()),
                 proven=proven,
-                claimed_path=claimed,
+                claimed_path=inert(claimed) if claimed is not None else None,
             )
         )
         if category is OutputCategory.CHANGE_PROVEN:
@@ -424,7 +497,9 @@ def review(psbt_bytes: bytes, wallet: Wallet) -> Review:
             draft.warnings.append(
                 Warning(WarningCode.OUTPUT_NOT_PROVEN, WarningScope.OUTPUT, output_index=i)
             )
-        if category is not OutputCategory.CHANGE_PROVEN:
+        if category is OutputCategory.PAYMENT:
+            # Only on a payment. A NOT PROVEN output is also an address never seen before, but
+            # saying so beside the warning that matters adds nothing and dilutes it.
             draft.warnings.append(
                 Warning(
                     WarningCode.ADDRESS_NOT_SEEN_BEFORE, WarningScope.OUTPUT, output_index=i
@@ -476,12 +551,8 @@ def _claimed_path(out, wallet: Wallet) -> str | None:
     Read so a screen can say *the claim was checked and did not hold*. It is never the answer to
     whether the output is ours.
     """
-    for derivation in out.bip32_derivations.values():
-        if derivation.fingerprint == wallet.fingerprint:
-            return _path_text(derivation.derivation)
-    for _leaves, derivation in out.taproot_bip32_derivations.values():
-        if derivation.fingerprint == wallet.fingerprint:
-            return _path_text(derivation.derivation)
+    for path in _claimed_derivations_of(out, wallet.fingerprint):
+        return _path_text(path)
     return None
 
 

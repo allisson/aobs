@@ -20,9 +20,11 @@ The entry points, in the shape every core function follows:
 
 from .address import AddressCheck, Verdict, page, verify
 from .descriptor import output_descriptor_ur
-from .entropy import Entropy, mix
+from .entropy import Entropy, MixingReport, mix
+from .entropy import report as mixing_report
 from .export_password import ExportPassword, generate
 from .failure import describe
+from . import mnemonic
 from .review import (
     OutputCategory,
     Refusal,
@@ -42,6 +44,7 @@ __all__ = [
     "AddressCheck",
     "AuthenticationFailed",
     "Entropy",
+    "MixingReport",
     "ExportPassword",
     "ForeignContainer",
     "Network",
@@ -65,6 +68,8 @@ __all__ = [
     "export_wallet",
     "generate",
     "mix",
+    "mixing_report",
+    "mnemonic",
     "output_descriptor_ur",
     "page",
     "review",

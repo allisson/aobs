@@ -74,6 +74,32 @@ class Entropy:
     __str__ = __repr__
 
 
+@dataclass(frozen=True)
+class MixingReport:
+    """What the appliance is allowed to say about its own mixing.
+
+    Which sources contributed and in what quantity — *system: 32 bytes · camera: 8 frames · dice:
+    99 rolls* — plus the resulting wallet fingerprint. **No score, no estimate, no reassuring
+    tick.** Anything the appliance displays about its own mixing is a claim by the same code that
+    would be lying, so the report states only facts the user can act on; the real verification is
+    this repository's own test vectors.
+    """
+
+    contributions: tuple[Contribution, ...]
+    fingerprint_hex: str
+    camera_constant: bool
+
+
+def report(entropy: Entropy, wallet) -> MixingReport:
+    """Join the mixing to the wallet it produced. `wallet` is a `Wallet`; it is not imported for a
+    type here, because the core's modules stay a straight line."""
+    return MixingReport(
+        contributions=entropy.contributions,
+        fingerprint_hex=wallet.fingerprint_hex,
+        camera_constant=entropy.camera_constant,
+    )
+
+
 def _framed(label: SourceLabel, payload: bytes) -> bytes:
     """`label ‖ length ‖ bytes`, with the label's own length prefixed too, so no concatenation of
     parts can be read as a different one."""

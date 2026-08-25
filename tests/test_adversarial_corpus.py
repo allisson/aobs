@@ -16,12 +16,10 @@ from aobs.core.review import OutputCategory, Review, review
 from aobs.core.text import is_inert
 from aobs.core.wallet import Network, Wallet
 
+from conftest import VECTOR_MNEMONIC
+
 CORPUS = Path(__file__).parent.parent / "fixtures" / "psbt"
 
-VECTOR_MNEMONIC = (
-    "abandon abandon abandon abandon abandon abandon abandon abandon "
-    "abandon abandon abandon about"
-)
 
 
 def _cases() -> list[Path]:

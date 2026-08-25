@@ -165,3 +165,25 @@ def test_entropy_never_renders_its_value() -> None:
     rendered = f"{result!r} {result!s}"
     assert result.value.hex() not in rendered
     assert "256 bits" in rendered
+
+
+def test_the_report_states_sources_and_the_resulting_fingerprint() -> None:
+    """`docs/entropy-mixing.md`: which sources contributed and in what quantity, plus the wallet
+    fingerprint. No score, no estimate, no reassuring tick."""
+    from aobs.core.entropy import report
+    from aobs.core.wallet import Network, Wallet
+
+    entropy = mix(STUB_SYSTEM, camera_frames=(b"\x01\x02",) * 8, dice_rolls="123456" * 3)
+    wallet = Wallet.from_entropy(entropy.value, network=Network.SIGNET)
+    stated = report(entropy, wallet)
+
+    assert stated.fingerprint_hex == wallet.fingerprint_hex
+    assert [(c.label.value, c.quantity, c.unit) for c in stated.contributions] == [
+        ("system", 32, "bytes"),
+        ("camera", 8, "frames"),
+        ("dice", 18, "rolls"),
+    ]
+    assert stated.camera_constant is False
+    # Nothing in the report is a judgement about strength.
+    fields = set(vars(stated))
+    assert not fields & {"score", "strength", "bits", "estimate", "secure"}

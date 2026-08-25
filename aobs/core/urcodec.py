@@ -22,7 +22,6 @@ from dataclasses import dataclass
 
 from .constants import (
     QR_ECC_ANIMATED,
-    QR_ECC_STATIC,
     QR_VERSION_ANIMATED,
     UR_FRAGMENT_LADDER,
     UR_FRAME_RATE_LADDER,
@@ -109,10 +108,6 @@ class PsbtStream:
         return self._encoder.fountain_encoder.seq_len()
 
     @property
-    def is_single_part(self) -> bool:
-        return self._encoder.is_single_part()
-
-    @property
     def cycles_completed(self) -> int:
         """The honest diagnostic: a user on cycle five knows the wallet is not reading, and that
         is the moment the step-down key earns its place."""
@@ -190,6 +185,3 @@ def encode_single_part(ur_type: str, cbor: bytes) -> str:
     stated by `QR_ECC_STATIC` rather than applied here.
     """
     return UREncoder.encode(UR(ur_type, cbor)).upper()
-
-
-STATIC_ECC = QR_ECC_STATIC

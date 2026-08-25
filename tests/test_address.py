@@ -8,10 +8,8 @@ from aobs.core.address import Verdict, page, parse_scanned, verify
 from aobs.core.constants import ADDRESS_PAGE_SIZE
 from aobs.core.wallet import CHANGE_CHAIN, Network, ScriptType, Wallet
 
-VECTOR_MNEMONIC = (
-    "abandon abandon abandon abandon abandon abandon abandon abandon "
-    "abandon abandon abandon about"
-)
+from conftest import VECTOR_MNEMONIC
+
 
 
 @pytest.fixture

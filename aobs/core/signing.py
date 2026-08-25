@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from embit.psbt import SIGHASH, PSBT
 
-from .review import Refusal, RefusalReason, Review, review
+from .review import Refusal, RefusalReason, review
 from .wallet import ScriptType, Wallet
 
 
@@ -35,18 +35,10 @@ def sign(psbt_bytes: bytes, wallet: Wallet) -> bytes:
     reviewed = review(psbt_bytes, wallet)
     if reviewed.refusal is not None:
         raise SigningRefused(reviewed.refusal)
-    return sign_reviewed(psbt_bytes, wallet, reviewed)
 
-
-def sign_reviewed(psbt_bytes: bytes, wallet: Wallet, reviewed: Review) -> bytes:
-    """Sign a PSBT the caller has already reviewed — the same act, without reviewing twice.
-
-    The review is re-checked here rather than trusted: a caller cannot hand in a `Review` that
-    says yes about different bytes, because every signature still comes from a path this function
-    re-derives against this PSBT's own scripts.
-    """
-    if reviewed.refusal is not None:
-        raise SigningRefused(reviewed.refusal)
+    # These are the same bytes the review just read, and there is no entry point that takes a
+    # `Review` alongside a different PSBT — the review a signature rests on cannot be one of
+    # something else.
     psbt = PSBT.parse(psbt_bytes)
     signed = 0
     for i, inp in enumerate(psbt.inputs):

@@ -15,10 +15,8 @@ from aobs.core.wallet import (
     script_type_from_address,
 )
 
-VECTOR_MNEMONIC = (
-    "abandon abandon abandon abandon abandon abandon abandon abandon "
-    "abandon abandon abandon about"
-)
+from conftest import VECTOR_MNEMONIC
+
 
 
 @pytest.fixture

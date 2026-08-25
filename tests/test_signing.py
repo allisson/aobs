@@ -16,11 +16,9 @@ from aobs.core.review import RefusalReason, review
 from aobs.core.signing import SigningRefused, sign
 from aobs.core.wallet import Network, Wallet
 
+from conftest import VECTOR_MNEMONIC
+
 CORPUS = Path(__file__).parent.parent / "fixtures" / "psbt"
-VECTOR_MNEMONIC = (
-    "abandon abandon abandon abandon abandon abandon abandon abandon "
-    "abandon abandon abandon about"
-)
 
 
 def _wallet(network: str) -> Wallet:

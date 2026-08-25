@@ -12,6 +12,10 @@ from enum import Enum
 from embit import bip32, bip39, script
 from embit.networks import NETWORKS
 
+#: The bech32 data charset (BIP173). Read to take a witness version off an address; the encoding
+#: itself is embit's.
+BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+
 RECEIVE_CHAIN = 0
 CHANGE_CHAIN = 1
 
@@ -87,10 +91,9 @@ def script_type_from_address(address: str) -> ScriptType | None:
     data = body.rsplit("1", 1)[1]
     if not data:
         return None
-    charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
-    if data[0] not in charset:
+    if data[0] not in BECH32_CHARSET:
         return None
-    version = charset.index(data[0])
+    version = BECH32_CHARSET.index(data[0])
     for script_type in ScriptType:
         if script_type.witness_version == version:
             return script_type
@@ -216,7 +219,7 @@ class Wallet:
 
 
 # BIP380's descriptor checksum, transcribed from the BIP's own reference implementation.
-_CHECKSUM_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+_CHECKSUM_CHARSET = BECH32_CHARSET
 _CHECKSUM_INPUT_CHARSET = (
     "0123456789()[],'/*abcdefgh@:$%{}"
     "IJKLMNOPQRSTUVWXYZ&+-.;<=>?!^_|~"

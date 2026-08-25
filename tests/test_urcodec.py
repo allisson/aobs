@@ -32,11 +32,9 @@ from aobs.core.urcodec import (
 from aobs.core.vendor.ur2.ur_decoder import URDecoder
 from aobs.core.wallet import Network, ScriptType, Wallet
 
+from conftest import VECTOR_MNEMONIC
+
 CORPUS = Path(__file__).parent.parent / "fixtures" / "psbt"
-VECTOR_MNEMONIC = (
-    "abandon abandon abandon abandon abandon abandon abandon abandon "
-    "abandon abandon abandon about"
-)
 
 
 # --- What we emit --------------------------------------------------------------------------------

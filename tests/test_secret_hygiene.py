@@ -24,6 +24,8 @@ from aobs.core.signing import SigningRefused, sign
 from aobs.core.text import inert, is_inert
 from aobs.core.wallet import Network, Wallet
 
+from conftest import VECTOR_MNEMONIC
+
 CORPUS = Path(__file__).parent.parent / "fixtures" / "psbt"
 
 SENTINEL = "correct-horse-battery-staple-SENTINEL-SEED"
@@ -81,11 +83,7 @@ def test_the_described_failure_is_the_type_and_a_fixed_message() -> None:
 
 
 def test_a_refusal_raised_over_a_real_wallet_leaks_nothing() -> None:
-    wallet = Wallet.from_mnemonic(
-        "abandon abandon abandon abandon abandon abandon abandon abandon "
-        "abandon abandon abandon about",
-        network=Network.SIGNET,
-    )
+    wallet = Wallet.from_mnemonic(VECTOR_MNEMONIC, network=Network.SIGNET)
     with pytest.raises(SigningRefused) as raised:
         sign((CORPUS / "foreign_input.psbt").read_bytes(), wallet)
     message = str(raised.value)
@@ -144,11 +142,7 @@ def test_a_psbt_carrying_ansi_escapes_renders_inert() -> None:
     behaviour."""
     meta = json.loads((CORPUS / "ansi_escape_label.json").read_text())
     psbt_bytes = (CORPUS / "ansi_escape_label.psbt").read_bytes()
-    wallet = Wallet.from_mnemonic(
-        "abandon abandon abandon abandon abandon abandon abandon abandon "
-        "abandon abandon abandon about",
-        network=Network(meta["network"]),
-    )
+    wallet = Wallet.from_mnemonic(VECTOR_MNEMONIC, network=Network(meta["network"]))
     result = review(psbt_bytes, wallet)
 
     # The hostile field is in the PSBT's bytes and reaches no field of the review.
