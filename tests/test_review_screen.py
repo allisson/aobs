@@ -437,7 +437,9 @@ async def test_only_a_truncated_scan_is_told_to_scan_again(name: str) -> None:
         retries = reviewtext.RETRY_STEP in rendered
         assert retries == (REFUSED[name] is RefusalReason.MALFORMED)
         if not retries:
-            assert reviewtext.NO_RETRY_STEP in rendered
+            expected = reviewtext.REFUSAL_STEPS[reviewtext.REFUSAL_KINDS[REFUSED[name]]]
+            assert expected in rendered
+            assert "Retrying will not change this" in rendered
 
 
 async def test_a_refused_psbt_lands_back_on_the_scan_screen_with_the_wallet_loaded(

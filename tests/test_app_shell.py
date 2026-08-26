@@ -48,6 +48,7 @@ from aobs.ui.screens.refusal import RefusalScreen
 from aobs.ui.screens.review import ReviewScreen
 from aobs.ui.screens.home import NO_CAMERA, PATHS, HomeScreen
 from aobs.ui.screens.keymap import KeymapScreen
+from aobs.ui.screens.network import NetworkScreen
 from aobs.ui.screens.scan import ScanScreen
 from aobs.ui.screens.wallet_export import (
     ExportDoneScreen,
@@ -232,12 +233,14 @@ async def test_f12_powers_off_from_every_screen_the_app_can_reach() -> None:
             assert money.power.powered_off, f"F12 did not power off {expected.__name__}"
 
     # The wallet paths. Home starts on *generate*, so the walk down the three peer choices is the
-    # walk through the screens that get a wallet in.
+    # walk through the screens that get a wallet in. *Choose the network* sits last, so `up` from
+    # the top wraps straight onto it.
     for walk, expected in (
         (("f10",), DiceScreen),
         (("f10", "f10"), RecoveryWordsScreen),
         (("f10", "f10", "f10"), SeedEntryScreen),
         (("down", "f10"), WordCountScreen),
+        (("up", "f10"), NetworkScreen),
     ):
         entry = build(power=RecordingPower())
         async with entry.run_test(size=CONSOLE) as pilot:

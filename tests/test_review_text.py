@@ -256,7 +256,29 @@ def test_exactly_one_reason_says_try_scanning_again(reason: RefusalReason) -> No
     retries = reviewtext.RETRY_STEP in failure.next_steps
     assert retries == (reason is RefusalReason.MALFORMED)
     if not retries:
-        assert reviewtext.NO_RETRY_STEP in failure.next_steps
+        assert failure.next_steps[0].startswith("Retrying will not change this")
+
+
+def test_only_a_network_mismatch_names_a_fix_on_this_device() -> None:
+    """`NO_RETRY_STEP` says the fix is in the wallet, which is true of four reasons and only half
+    true of the fifth: a mismatch is either a session on the wrong network or a transaction on the
+    wrong network, and the appliance cannot tell which. Naming only the wallet sends someone off
+    to rebuild a transaction that was already correct."""
+    either_side = [
+        reason
+        for reason, kind in reviewtext.REFUSAL_KINDS.items()
+        if kind is RefusalKind.EITHER_SIDE
+    ]
+    assert either_side == [RefusalReason.NETWORK_MISMATCH]
+
+    step = reviewtext.refusal_failure(Refusal(RefusalReason.NETWORK_MISMATCH)).next_steps[0]
+    assert "power off" in step, "the fix that is on this device"
+    assert "build the transaction differently" in step, "and the one that is not"
+    assert step.count("either") == 1, "both named in one sentence, neither recommended"
+
+
+def test_every_kind_has_a_step_and_every_step_a_kind() -> None:
+    assert set(reviewtext.REFUSAL_STEPS) == set(RefusalKind)
 
 
 def test_only_malformed_is_a_failed_transfer() -> None:
