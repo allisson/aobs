@@ -30,7 +30,10 @@ from aobs.core.wallet_qr import export_wallet
 from aobs.ports.frame_source import Frame
 from aobs.ui.app import SignerApp
 from aobs.ui.geometry import MAX_COLUMNS, MIN_COLUMNS, MIN_ROWS
+from aobs.ui.screens.address_list import AddressListScreen
+from aobs.ui.screens.address_verify import AddressVerifyScreen
 from aobs.ui.screens.confirm import ConfirmScreen
+from aobs.ui.screens.descriptor import DescriptorScreen
 from aobs.ui.screens.console_too_small import ConsoleTooSmallScreen
 from aobs.ui.screens.camera_lost import CameraLostScreen
 from aobs.ui.screens.dice import DiceScreen
@@ -46,6 +49,12 @@ from aobs.ui.screens.review import ReviewScreen
 from aobs.ui.screens.home import NO_CAMERA, PATHS, HomeScreen
 from aobs.ui.screens.keymap import KeymapScreen
 from aobs.ui.screens.scan import ScanScreen
+from aobs.ui.screens.wallet_export import (
+    ExportDoneScreen,
+    ExportPasswordShowScreen,
+    ReadBackScreen,
+    WalletQrScreen,
+)
 
 from conftest import CORPUS, VECTOR_MNEMONIC, fixed_bytes
 
@@ -259,6 +268,33 @@ async def test_f12_powers_off_from_every_screen_the_app_can_reach() -> None:
             await pilot.press("f12")
             await pilot.pause()
             assert entry.power.powered_off, f"F12 did not power off {expected.__name__}"
+
+    # The receive and export side. Every one of these needs a wallet in the session, so the
+    # wallet is put there directly rather than walked to — the keystrokes that reach them are
+    # their own tests, and what is asserted here is only that `F12` still ends the session.
+    for reach, expected in (
+        (lambda app: app.open_address_verify("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"),
+         AddressVerifyScreen),
+        (lambda app: app.open_address_list(), AddressListScreen),
+        (lambda app: app.open_descriptor(), DescriptorScreen),
+        (lambda app: app.open_wallet_export(), WalletQrScreen),
+        (lambda app: app.push_screen(ExportPasswordShowScreen(exported)),
+         ExportPasswordShowScreen),
+        (lambda app: app.push_screen(ReadBackScreen(exported)), ReadBackScreen),
+        (lambda app: app.push_screen(ExportDoneScreen(exported)), ExportDoneScreen),
+    ):
+        outbound = build(power=RecordingPower())
+        outbound.wallet = Wallet.from_mnemonic(VECTOR_MNEMONIC, network=Network.MAINNET)
+        outbound.mnemonic = VECTOR_MNEMONIC
+        async with outbound.run_test(size=CONSOLE) as pilot:
+            await reach_home(outbound, pilot)
+            reach(outbound)
+            await pilot.pause()
+            assert isinstance(outbound.screen, expected), type(outbound.screen).__name__
+            reached.append(type(outbound.screen))
+            await pilot.press("f12")
+            await pilot.pause()
+            assert outbound.power.powered_off, f"F12 did not power off {expected.__name__}"
 
     loaded = build(power=RecordingPower())
     async with loaded.run_test(size=CONSOLE) as pilot:

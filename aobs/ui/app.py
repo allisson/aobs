@@ -21,6 +21,7 @@ from aobs.core.entropy import Entropy, MixingReport, mix
 from aobs.core.entropy import report as mixing_report
 from aobs.core.failure import describe
 from aobs.core.wallet import Network, Wallet
+from aobs.core.wallet_qr import ExportedWallet
 from aobs.ports.entropy_source import EntropySource
 from aobs.ports.frame_source import FrameSource
 from aobs.ports.keymap import Keymap
@@ -112,6 +113,12 @@ class SignerApp(App[None]):
         #: One sentence for the screen the user lands on next — how far an abandoned scan got.
         #: Nothing here is attacker-controlled: the appliance writes it about its own state.
         self.notice: str | None = None
+        #: The encrypted wallet QR this session has produced, container and password together —
+        #: shown apart, always. Held for the session so the eight words stay re-showable after
+        #: the export completes: the password is in RAM either way, so refusing to redisplay
+        #: protects nothing, while a second export would hand the user a second password that
+        #: silently invalidates the paper the first one is written on.
+        self.export: ExportedWallet | None = None
         #: The words a wallet-entry path has settled on, waiting for the passphrase. The wallet is
         #: not constructed until then, because `Wallet.from_mnemonic` takes the passphrase and
         #: there is no such thing as adding one afterwards.
@@ -241,6 +248,50 @@ class SignerApp(App[None]):
         from aobs.ui.screens.seed_entry import SeedEntryScreen
 
         self.push_screen(SeedEntryScreen(words))
+
+    # --- receiving and exporting ---------------------------------------------------------------
+
+    def open_address_verify(self, scanned: str) -> None:
+        """A scanned address, proved or not proved. The scan screen hands the text straight in;
+        whether it is an address at all is this screen's question and needs no camera."""
+        from aobs.ui.screens.address_verify import AddressVerifyScreen
+
+        self.push_screen(AddressVerifyScreen(scanned))
+
+    def open_address_list(self) -> None:
+        """Twenty at a time — the check that the descriptor export landed intact."""
+        from aobs.ui.screens.address_list import AddressListScreen
+
+        self.push_screen(AddressListScreen())
+
+    def open_descriptor(self) -> None:
+        """One static `ur:crypto-output`, for the watch-only wallet. No camera needed: outbound."""
+        from aobs.ui.screens.descriptor import DescriptorScreen
+
+        self.push_screen(DescriptorScreen())
+
+    def open_wallet_export(self) -> None:
+        """Encrypt this session's entropy under a freshly generated eight-word password.
+
+        **Generated once per session and held**, which is what makes the password re-showable for
+        the rest of it (`docs/export-password.md`) — and what stops a second visit from handing
+        the user a second password that silently invalidates the paper they wrote the first one
+        on. It is the same reasoning as the read-back retrying the same password, and it is
+        enforced the same way: by there being no second call to `export_wallet()`.
+
+        There is no password parameter to pass and nothing here would have one to pass.
+        """
+        from aobs.core import mnemonic as bip39_words
+        from aobs.core.wallet_qr import export_wallet
+        from aobs.ui.screens.wallet_export import WalletQrScreen
+
+        if self.mnemonic is None:  # pragma: no cover - the path needs a wallet to be offered
+            return
+        if self.export is None:
+            self.export = export_wallet(
+                bip39_words.to_entropy(self.mnemonic), self.entropy.random_bytes
+            )
+        self.push_screen(WalletQrScreen(self.export))
 
     def open_export_password(self, container: bytes) -> None:
         """A scanned wallet backup, waiting on its eight words."""

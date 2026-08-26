@@ -73,3 +73,14 @@ def from_entropy(entropy: bytes) -> str:
     the generate path and the restore path both hold entropy and both need the words.
     """
     return bip39.mnemonic_from_bytes(entropy)
+
+
+def to_entropy(mnemonic: str) -> bytes:
+    """The BIP39 entropy a mnemonic spells — the inverse of `from_entropy`.
+
+    The encrypted wallet QR stores entropy and a word count, never the words themselves, so an
+    export from a session that typed a seed in has to get back to the bytes. Here rather than in
+    the screens for the same reason as `from_entropy`: nothing in `aobs/ui/` imports the vendored
+    library.
+    """
+    return bip39.mnemonic_to_bytes(mnemonic.strip())
