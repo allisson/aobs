@@ -20,8 +20,7 @@ wallet QR* sit here as peers of each other and of everything else, rather than u
 submenu — `docs/seed-entry.md` is explicit that burying the encrypted QR would hide the path two
 tickets were spent making safe. The network is chosen here too, for the same reason: it must be
 settled before a wallet is constructed, and this is the last screen before every path that
-constructs one. The three export paths are still inventory.
-"""
+constructs one. """
 
 from __future__ import annotations
 
@@ -67,9 +66,9 @@ PATHS: tuple[Path, ...] = (
         needs_wallet=True,
         scans=ScanTarget.ADDRESS,
     ),
-    Path("Browse your addresses", needs_wallet=True),
-    Path("Export the descriptor", needs_wallet=True),
-    Path("Export the encrypted wallet QR", needs_wallet=True),
+    Path("Browse your addresses", needs_wallet=True, opens="open_address_list"),
+    Path("Export the descriptor", needs_wallet=True, opens="open_descriptor"),
+    Path("Export the encrypted wallet QR", needs_wallet=True, opens="open_wallet_export"),
     Path("Show recovery words", needs_wallet=True, opens="open_recovery_words"),
 )
 

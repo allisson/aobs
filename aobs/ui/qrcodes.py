@@ -55,12 +55,17 @@ class QrCode:
         return (self.modules + 1) // 2
 
 
-def render(payload: str, *, ecc: str = QR_ECC_ANIMATED) -> QrCode:
+def render(payload: str | bytes, *, ecc: str = QR_ECC_ANIMATED) -> QrCode:
     """`payload`, as a code and as the text that draws it.
 
     The version is whatever the payload needs and is reported rather than pinned: the fragment
     size is what keeps it inside version 15, and the step-down ladder is what the user reaches
     for when it is not enough.
+
+    **`bytes` is passed straight through to byte mode, never decoded first.** The encrypted
+    wallet QR is binary with no base64 (`docs/encrypted-wallet-qr.md`), and a container that has
+    been through a text codec on the way out is one the scan screen's magic-and-version framing
+    would not recognise on the way back in.
     """
     code = qrcode.QRCode(error_correction=_ECC[ecc], border=QUIET_ZONE)
     code.add_data(payload)
