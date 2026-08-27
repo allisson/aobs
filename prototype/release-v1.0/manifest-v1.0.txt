@@ -1,0 +1,59 @@
+# aobs release manifest — v1.0
+#
+# PROTOTYPE. Every hash below except the kernel's is invented; this file exists to be
+# reacted to, not to verify anything. See ../README-prototype.md.
+#
+# This file is what the signature covers. The ISO is not signed directly: it is named
+# here, so verifying this file and then hashing the ISO tells you *which inputs
+# produced that ISO* — which is what independent reproduction needs and what a bare
+# signature over the ISO cannot say.
+#
+# Read it with `cat`. Check the files published beside it with:
+#
+#     grep -E '^[0-9a-f]{64}  ' manifest-v1.0.txt | sha256sum -c -
+#
+# The `grep` is not decoration: `sha256sum -c` reads this whole file as a checksum
+# list and fails on every comment and `key: value` line. Verified against busybox
+# coreutils — without the grep, exit status 1 and two spurious FAILED lines.
+
+format: aobs-manifest-1
+release: v1.0
+released: 2026-09-14
+
+# What was built, and from what.
+
+git-tag: v1.0
+git-commit: 4f1c8a6e2b90d7c35a18ef04b6d2917c0ae53b81
+source-date-epoch: 1773446400
+iso-name: bitcoin-signer-amd64.iso
+
+# The sha256 of `build/inputs.sha256` as committed at the tag above. This is the field
+# that binds the archive to the source: without it, an archive replaced in place on
+# GitHub Releases would still match its own hash. With it, the archive is pinned to a
+# list that a reader can regenerate from a `git checkout` of the tag.
+
+inputs-list-sha256: c31f80a6e75b2d940c8ea1f36b4d0729ae85c1f302b9d6478e0a35cb1d92f4e6
+
+# The inputs. These live inside the archive named in the file list below, so their
+# hashes are recorded as fields rather than as checksum lines: a reader running the
+# `sha256sum -c` one-liner has the archive on disk, not its contents.
+
+alpine-branch: v3.24
+aports-commit: 9c0e1f77a2b6d34e58af0912cd7be4a30f6512dd
+input-base-rootfs: alpine-minirootfs-3.24.1-x86_64.tar.gz sha256=b3d1e0c88f47a2951d6e04fb37c8a91e5d20b7fa64c39e18075a2cbd41f9e630
+input-kernel: linux-6.12.106.tar.xz sha256=0392555761d99c7604503f6178951e2df77e978b92cc96d11e248423e48ed785
+input-apks-appliance: 96 packages
+input-apks-toolchain: 101 packages
+
+# Who is expected to have signed this file. Listed here so the verifier can tell
+# "one of two signers" from "one signer, and I have no idea whether there should be
+# another" — the manifest cannot list the signatures over itself, but it can list who
+# was supposed to make them.
+
+signer: C8532ED68A596CFBB7F92D04360718E309BEAA9F builder
+signer: 1A4B7E90C25D8F3610EBA47D9C0F5182B6E3D74A witness-ci
+
+# The published files. This block is `sha256sum -c` format on purpose.
+
+a7f4c2091b8e63d5470af1c8b26d90e3745fa61c08b3d92e5c7014af86b2d359  bitcoin-signer-amd64.iso
+5e90b7a3c14d82f60e5b39c7a08d1462fb35e097c62a4d81f095b3ea7c604d18  aobs-inputs-v1.0.tar
