@@ -185,6 +185,13 @@ holding the exported xpub, building unsigned PSBTs, and broadcasting signed ones
 load-bearing — the appliance derives everything it shows the user from the PSBT and its own keys,
 never from what the watch-only wallet asserts.
 
+## Reproducibility contract
+
+The stated, checkable claim about which facts of a build environment do not reach the bytes of
+`bitcoin-signer-amd64.iso`. Not "the build is reproducible" — the word alone promises nothing. The
+contract is a list of environment facts that must not matter, so that a stranger who rebuilds from
+the same commit and gets a different hash has found a defect rather than a difference of opinion.
+
 ## Input archive
 
 Every byte the build consumes that the build did not write: the two apk closures, Alpine's own
