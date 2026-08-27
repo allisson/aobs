@@ -122,7 +122,14 @@ available_kib=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo)
 if [ -z "$available_kib" ]; then
 	available_kib=$(awk '/^MemFree:/ { print $2 }' /proc/meminfo)
 fi
-if [ -n "$available_kib" ] && [ "$available_kib" -lt "$RAM_FLOOR_KIB" ]; then
+# **An unreadable figure is a refusal, not a skip.** Treating "I could not tell" as "it is fine"
+# would turn the floor into a check that quietly stops running the day `/proc/meminfo` changes
+# shape — which is the exact failure mode this whole build exists to make impossible.
+if [ -z "$available_kib" ]; then
+	refuse "Cannot read available memory from /proc/meminfo." \
+		"The 512 MiB floor cannot be checked, so the appliance will not start."
+fi
+if [ "$available_kib" -lt "$RAM_FLOOR_KIB" ]; then
 	refuse "This machine has $((available_kib / 1024)) MiB of memory available; the appliance needs 512 MiB." \
 		"Signing would be killed part-way rather than failing here, so it will not start."
 fi

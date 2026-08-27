@@ -28,25 +28,26 @@ ROOT = Path(__file__).parent.parent
 BUILD = ROOT / "build"
 
 
-def _load_verifier():
+def _load_by_path(path: Path):
     """`build/` is deliberately not a package: the appliance never imports it.
 
-    `tests/test_structure.py` asserts what may import what inside `aobs/`; putting the verifier
-    on the normal import path would have forced an exception into those rules for a module the
+    `tests/test_structure.py` asserts what may import what inside `aobs/`; putting the verifier on
+    the normal import path would have forced an exception into those rules for a module the
     appliance never executes.
     """
-    name = "aobs_build_verify"
-    spec = importlib.util.spec_from_file_location(name, BUILD / "verify.py")
+    spec = importlib.util.spec_from_file_location(path.stem, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    # `@dataclass` resolves `cls.__module__` through `sys.modules`, so a module loaded by path has
-    # to be registered before its body runs or the decorator raises.
-    sys.modules[name] = module
+    sys.modules[path.stem] = module
     spec.loader.exec_module(module)
     return module
 
 
-verify = _load_verifier()
+# The verifier is taken off `gather.py` rather than loaded a second time here: `gather.py` already
+# owns the by-path import — including registering it in `sys.modules` before its body runs, which
+# `@dataclass` requires — and one incantation in the repository is one place for it to be wrong.
+gather = _load_by_path(BUILD / "gather.py")
+verify = gather.verify
 
 
 def _config() -> str:
@@ -269,6 +270,14 @@ BROKEN_CONFIGS = [
     ("no_initramfs_support", lambda c: _unset(c, "CONFIG_BLK_DEV_INITRD"), "CONFIG_BLK_DEV_INITRD"),
     ("no_zstd_initramfs", lambda c: _unset(c, "CONFIG_RD_ZSTD"), "CONFIG_RD_ZSTD"),
     ("no_tmpfs", lambda c: _unset(c, "CONFIG_TMPFS"), "CONFIG_TMPFS"),
+    # `docs/boot-pipeline.md`'s *Time*: no clock service, and the appliance never displays a date
+    # or time, because that judgement would require trusting a clock deliberately never set.
+    ("rtc_driver_on", lambda c: _set(c, "CONFIG_RTC_CLASS", "y"), "CONFIG_RTC_CLASS"),
+    ("rtc_sets_system_time", lambda c: _set(c, "CONFIG_RTC_HCTOSYS", "y"), "CONFIG_RTC_HCTOSYS"),
+    ("core_dumps_on", lambda c: _set(c, "CONFIG_COREDUMP", "y"), "CONFIG_COREDUMP"),
+    ("kcore_on", lambda c: _set(c, "CONFIG_PROC_KCORE", "y"), "CONFIG_PROC_KCORE"),
+    ("rdrand_trusted", lambda c: _set(c, "CONFIG_RANDOM_TRUST_CPU", "y"), "CONFIG_RANDOM_TRUST_CPU"),
+    ("freed_pages_retained", lambda c: _unset(c, "CONFIG_INIT_ON_FREE_DEFAULT_ON"), "CONFIG_INIT_ON_FREE_DEFAULT_ON"),
 ]
 
 
@@ -314,6 +323,9 @@ BROKEN_ROOTFS = [
     ("udhcpc", "/sbin/udhcpc", "network utility"),
     ("pytest", "/usr/bin/pytest", "test runner"),
     ("openrc", "/sbin/openrc", "init system"),
+    ("hwclock", "/sbin/hwclock", "no clock service"),
+    ("timezone_database", "/usr/share/zoneinfo/America/Sao_Paulo", "no timezone database"),
+    ("localtime", "/etc/localtime", "no timezone database"),
 ]
 
 
@@ -470,15 +482,51 @@ def test_the_in_rootfs_assertions_pass_in_this_container_too() -> None:
     not this test, and the backend-identity half of the script is only true where the appliance's
     environment is reproduced.
     """
-    if os.environ.get("AOBS_AUTHORITATIVE_TIER") != "1":
-        pytest.skip("the backend-identity assertion is a claim about the appliance's environment")
     result = subprocess.run(
         [sys.executable, str(BUILD / "assert_in_rootfs.py")],
         capture_output=True,
         text=True,
         env={**os.environ, "PYTHONPATH": str(ROOT)},
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    output = result.stdout + result.stderr
+    if os.environ.get("AOBS_AUTHORITATIVE_TIER") == "1":
+        assert result.returncode == 0, output
+        return
+    # Off-container, *which library* performs the EC is not a claim about anything: it is whatever
+    # the host provides. `docs/test-harness.md` scopes the tier gate to exactly that half — "the
+    # signature-vector check needs no gate and runs in both tiers" — so the rest must still pass
+    # here, and only a lone backend-identity violation is tolerated.
+    assert result.returncode == 0 or "the live EC backend" in output, output
+
+
+def test_the_two_copies_of_the_signature_vector_agree() -> None:
+    """The vector is pinned twice and the duplication is unavoidable: the rootfs carries no pytest.
+
+    So the two cannot share a module, and nothing but this test stops them from drifting. If they
+    ever disagree, one of them is wrong about the appliance and there is no way to tell which from
+    either file alone.
+    """
+    from tests import test_structure
+
+    rootfs = _load_by_path(BUILD / "assert_in_rootfs.py")
+    assert rootfs.VECTOR_MESSAGE == test_structure._VECTOR_MESSAGE
+    assert rootfs.EXPECTED_ECDSA == test_structure._EXPECTED_ECDSA
+
+
+def test_the_build_fetches_no_wheel_and_installs_no_package_manager() -> None:
+    """"No pip, no virtualenv, no wheel fetched at build time" — `docs/boot-pipeline.md`.
+
+    A build whose entire selling point is that every input is pinned has no dependency resolver in
+    it. `build/Dockerfile.test` does install a wheel (`urtypes`, an independent decoder used only by
+    the suite) and is exempt for that reason: it builds the harness, not the image.
+    """
+    for name in ("Dockerfile.iso", "mkiso.sh"):
+        text = (BUILD / name).read_text(encoding="utf-8")
+        recipe = "\n".join(
+            line for line in text.splitlines() if not line.lstrip().startswith("#")
+        )
+        for resolver in ("pip ", "pip3", "pip install", "virtualenv", "--break-system-packages"):
+            assert resolver not in recipe, f"build/{name} reaches for {resolver}"
 
 
 def test_the_verifier_never_raises_on_a_violation() -> None:

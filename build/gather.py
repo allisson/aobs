@@ -9,13 +9,17 @@
 Exit 0 means no violations; exit 1 prints each violation — the claim it broke and what was seen —
 and the build stops there.
 
-**All the I/O lives here and none of the judgement does.** `verify.py` never opens a file, which is
-exactly what lets `tests/test_build_verifier.py` feed it a deliberately broken input in
-milliseconds instead of building an image to find out whether an assertion still bites.
+**All the filesystem contact lives here and none of the judgement does.** `verify.py` never opens a
+file, which is exactly what lets `tests/test_build_verifier.py` feed it a deliberately broken input
+in milliseconds instead of building an image to find out whether an assertion still bites.
 
-Two subcommands are not judgements at all and are here because they read the same files:
-`pins-of-group` prints one group of `build/apk-versions.txt` as `apk add` arguments, and
-`prune-busybox-applets` deletes the applet symlinks whose names the claims forbid.
+Two subcommands decide nothing and are here because they touch the same files. `pins-of-group`
+prints one group of `build/apk-versions.txt` as `apk add` arguments. `prune-busybox-applets`
+**deletes** the applet symlinks whose names the claims forbid — a mutation, in a module otherwise
+about reading, and deliberately not in `build/mkiso.sh`: which links may be removed is a *policy*
+("only a symlink, only into busybox, never a regular file"), a policy that deletes files inside the
+image is exactly the kind that must be tested, and shell is where it could not be. The verifier
+judges the result independently either way, so an applet nobody listed fails the build.
 """
 
 from __future__ import annotations
@@ -70,11 +74,8 @@ def main(argv: list[str]) -> int:
 
     if command == "cmdline":
         firmware, path = arguments
-        text = _read(path)
-        extract = (
-            verify.cmdline_from_isolinux if firmware == verify.BIOS else verify.cmdline_from_grub
-        )
-        return _report(verify.check_cmdline(extract(text), firmware))
+        extract = verify.FIRMWARE_EXTRACTORS[firmware]
+        return _report(verify.check_cmdline(extract(_read(path)), firmware))
 
     if command == "rootfs":
         return _report(verify.check_rootfs(_listing(arguments[0])))

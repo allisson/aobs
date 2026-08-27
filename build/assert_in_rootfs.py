@@ -178,13 +178,18 @@ def main() -> int:
     if _failures:
         # No point signing with a tree that does not import; and the message would be noise on top
         # of the real failure.
-        return _report()
+        return _verdict()
     check_the_backend_is_the_apk()
     check_both_signature_schemes()
-    return _report()
+    return _verdict()
 
 
-def _report() -> int:
+def _verdict() -> int:
+    """The exit code, and the one line printed when there is nothing to say.
+
+    `main()` calls this twice on purpose: once to stop after a failed import, because signing with
+    a tree that does not import produces noise on top of the real failure, and once at the end.
+    """
     if _failures:
         sys.stderr.write("the built rootfs violates:\n" + "\n".join(_failures) + "\n")
         return 1

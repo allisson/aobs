@@ -202,6 +202,12 @@ _MUST_BE_OFF: dict[str, str] = {
     # RDRAND. The cmdline says so too; this is the same claim in the file a reviewer reads.
     "CONFIG_RANDOM_TRUST_CPU": "RDRAND is never a sole or direct source of the entropy floor (#8)",
     "CONFIG_RANDOM_TRUST_BOOTLOADER": "no bootloader-supplied seed alone initialises the RNG (#8)",
+    # `docs/boot-pipeline.md`'s *Time*: no clock service, no `hwclock`, no NTP, no timezone
+    # database. The RTC is read by firmware and ignored, so the kernel needs no driver for it —
+    # and the appliance never displays a date or time, because that judgement would require
+    # trusting a clock deliberately never set.
+    "CONFIG_RTC_CLASS": "the appliance never reads a clock: nothing sets system time from an RTC",
+    "CONFIG_RTC_HCTOSYS": "the appliance never reads a clock: nothing sets system time from an RTC",
 }
 
 #: Every symbol that must be on, and why. A symbol that is merely *absent* counts as off: the build
@@ -321,7 +327,17 @@ def check_kernel_config(config_text: str) -> list[Violation]:
 
 
 def _check_usb_class_drivers(symbols: dict[str, str]) -> list[Violation]:
-    """#14 as an equality: the built-in USB class driver set is *exactly* usbhid and uvcvideo."""
+    """#14 as an equality: the built-in USB class driver set is *exactly* usbhid and uvcvideo.
+
+    **Stated precisely, because "exactly" invites more than this can deliver.** The equality is over
+    *every enabled symbol whose name mentions USB*, against an explicit allow-list — which is why a
+    driver nobody thought to forbid fails without this module being edited, and why a pair of greps
+    for `usbhid` and `uvcvideo` would not. What it does not reach is a USB class driver whose Kconfig
+    symbol does not contain the string `USB`. Upstream names them all so today, and there is no list
+    of "all USB class drivers" to check against instead. `docs/boot-checklist.md` item 9 is the other
+    half: on a booted appliance the driver list is read off the running kernel, which is a fact about
+    the shipped image rather than about the config text.
+    """
     violations: list[Violation] = []
     enabled_usb = {
         symbol
@@ -401,6 +417,12 @@ def cmdline_from_grub(config_text: str) -> str:
     line = _first_directive(config_text, "linux")
     _, _, parameters = line.partition(" ")
     return parameters.strip()
+
+
+#: Which extractor reads which firmware path's bootloader config. Here rather than in
+#: `build/gather.py` so that a firmware path is one entry in one table — the extractor and the
+#: parameters that path requires — instead of the same two-valued `if` written in two modules.
+FIRMWARE_EXTRACTORS = {BIOS: cmdline_from_isolinux, UEFI: cmdline_from_grub}
 
 
 def _first_directive(config_text: str, keyword: str) -> str:
@@ -519,6 +541,26 @@ REQUIRED_PATHS: dict[str, str] = {
 }
 
 
+def _components(path: object) -> list[str]:
+    """`/usr/lib/python3.14/site-packages/pip/__init__.py` → its path components, leading `/` gone.
+
+    Both listing checks below match on components rather than on substrings: a directory counts as
+    much as a binary, and `pip` must not match `pipes.py`.
+    """
+    return str(path).strip("/").split("/")
+
+
+#: Paths forbidden as whole paths rather than by name, because the name alone is innocent.
+#:
+#: Python's stdlib ships a `zoneinfo` *module*; what `docs/boot-pipeline.md` rules out is the
+#: timezone *database* — the data files — so the check has to be about the path and not the word.
+FORBIDDEN_PATH_PREFIXES: dict[str, str] = {
+    "/usr/share/zoneinfo": "no timezone database: the appliance never displays a date or time",
+    "/etc/localtime": "no timezone database: the appliance never displays a date or time",
+    "/etc/timezone": "no timezone database: the appliance never displays a date or time",
+}
+
+
 def check_rootfs(paths: Iterable[str]) -> list[Violation]:
     """The image's own claims, read off a path listing — what must not be there, and what must.
 
@@ -531,7 +573,19 @@ def check_rootfs(paths: Iterable[str]) -> list[Violation]:
         if required not in present:
             violations.append(Violation(f"the rootfs carries {required} — {claim}", "absent"))
     for path in paths:
-        for part in str(path).strip("/").split("/"):
+        text = "/" + str(path).strip("/")
+        forbidden = next(
+            (
+                claim
+                for prefix, claim in FORBIDDEN_PATH_PREFIXES.items()
+                if text == prefix or text.startswith(prefix + "/")
+            ),
+            None,
+        )
+        if forbidden is not None:
+            violations.append(Violation(forbidden, text))
+            continue
+        for part in _components(path):
             claim = FORBIDDEN_BASENAMES.get(part)
             if claim is not None:
                 violations.append(Violation(claim, str(path)))
@@ -553,7 +607,7 @@ def check_vendored_tree(paths: Iterable[str]) -> list[Violation]:
     violations: list[Violation] = []
     for path in paths:
         text = str(path)
-        parts = text.strip("/").split("/")
+        parts = _components(path)
         if "prebuilt" in parts:
             violations.append(
                 Violation(
