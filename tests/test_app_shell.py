@@ -271,7 +271,7 @@ async def test_f12_powers_off_from_every_screen_the_app_can_reach() -> None:
 
     # The tail every path shares, and the one screen a scanned backup opens. Driven through the
     # app the way the money path above is: the keystrokes that reach them are their own tests.
-    exported = export_wallet(bytes(16), fixed_bytes())
+    exported = export_wallet(bytes(16), fixed_bytes(), network=Network.MAINNET)
     for reach, expected in (
         (lambda app: app.begin_passphrase(VECTOR_MNEMONIC), PassphraseScreen),
         (lambda app: app.open_export_password(exported.container), ExportPasswordScreen),

@@ -200,6 +200,15 @@ PASSWORD_NOT_HERE = (
     "this QR is everything — which is why they are never shown together."
 )
 
+#: The network this backup is for, on the screen the user is about to commit to paper. On mainnet
+#: this is the same *stated rather than asked* treatment `docs/network-selection.md` gives the home
+#: screen and the fingerprint screen: the default stays free and stops being silent at the one
+#: moment it is being written down.
+EXPORT_QR_NETWORK = (
+    "This backup is for {network}. It carries that network, and a session on another one will "
+    "refuse it — write it on the paper beside the eight words."
+)
+
 EXPORT_QR_INSTRUCTION = (
     "Photograph or print this code. Keep it apart from the paper you are about to write the "
     "eight words on."

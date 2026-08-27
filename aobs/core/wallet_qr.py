@@ -1,8 +1,16 @@
-"""The encrypted wallet QR: 88 bytes carrying the BIP39 entropy, and never the passphrase.
+"""The encrypted wallet QR: 89 bytes carrying the BIP39 entropy, and never the passphrase.
 
 Container layout, exactly as `docs/encrypted-wallet-qr.md` fixes it:
 
-    magic 4 | version 1 | Argon2id m,t,p 6 | salt 16 | nonce 12 | ciphertext 33 | tag 16
+    magic 4 | version 1 | network 1 | Argon2id m,t,p 6 | salt 16 | nonce 12 | ciphertext 33 | tag 16
+
+The whole 12-byte header is the AEAD's associated data, so **the network byte is authenticated
+without being encrypted**: readable before the password is typed, and still covered by the tag
+once it has been. The network was never a secret, and the appliance holds no network-dependent
+secret a cleartext byte could leak.
+
+**This module does not compare the network against a session.** The core holds no session; the
+comparison is the application's, and this stays a pure codec.
 
 ChaCha20-Poly1305 with the full 16-byte tag — never truncated, because this format has no size
 pressure and the tag is the one field that authenticates the backup. Argon2id parameters are
@@ -26,6 +34,7 @@ from .constants import (
     ARGON2_PARALLELISM,
     ARGON2_TIME_COST,
     WALLET_QR_MAGIC,
+    WALLET_QR_NETWORK_BYTE,
     WALLET_QR_NONCE_BYTES,
     WALLET_QR_PLAINTEXT_BYTES,
     WALLET_QR_SALT_BYTES,
@@ -34,6 +43,14 @@ from .constants import (
     WALLET_QR_VERSION,
 )
 from .export_password import ExportPassword, generate
+from .wallet import Network
+
+#: The header's network byte, both ways, from the one explicit table in `constants` — so the two
+#: directions cannot drift apart. `NETWORK_FOR_BYTE` is public because the scan screen reads the
+#: same byte out of the cleartext header before any decryption, and a second copy of this mapping
+#: over there is a second thing to keep in step.
+BYTE_FOR_NETWORK = {network: WALLET_QR_NETWORK_BYTE[network.value] for network in Network}
+NETWORK_FOR_BYTE = {byte: network for network, byte in BYTE_FOR_NETWORK.items()}
 
 #: BIP39 word counts, and the entropy length each implies. A word count is one byte in the
 #: container and is what lets the words be shown back exactly as they were.
@@ -41,7 +58,7 @@ WORD_COUNTS = (12, 15, 18, 21, 24)
 
 
 class ForeignContainer(Exception):
-    """The magic bytes or version did not parse: this is not one of our containers.
+    """The magic bytes, version or network did not parse: this is not one of our containers.
 
     Distinguished *before* decryption and by framing rather than by cryptography — an AEAD tag
     cannot tell a wrong password from a foreign QR, and a password verifier that could would hand
@@ -110,12 +127,18 @@ class ExportedWallet:
 class DecodedWallet:
     entropy: bytes
     word_count: int
+    #: The network the container was exported from, read from the header the tag covers. It is
+    #: what lets a session refuse a backup written for another chain — a check the master
+    #: fingerprint cannot make, because the fingerprint comes from the seed and is identical on
+    #: all four networks.
+    network: Network
 
 
 def export_wallet(
     entropy: bytes,
     random_bytes: Callable[[int], bytes],
     *,
+    network: Network,
     params: Argon2Params | None = None,
 ) -> ExportedWallet:
     """Encrypt `entropy` under a freshly generated export password.
@@ -126,6 +149,9 @@ def export_wallet(
     of the feature.
 
     `random_bytes` is the caller's randomness — the `EntropySource` port in the appliance.
+
+    `network` has **no default**. Every caller has one, and a default here would be the
+    silent-mainnet bug this format's network byte exists to catch, reintroduced one layer down.
     """
     word_count = _word_count_for(entropy)
     password = generate(random_bytes)
@@ -133,6 +159,7 @@ def export_wallet(
         entropy=entropy,
         word_count=word_count,
         password=password,
+        network=network,
         salt=random_bytes(WALLET_QR_SALT_BYTES),
         nonce=random_bytes(WALLET_QR_NONCE_BYTES),
         params=params or Argon2Params(),
@@ -153,12 +180,18 @@ def decode(container: bytes, password: ExportPassword) -> DecodedWallet:
         raise ForeignContainer("wrong magic")
     if container[4] != WALLET_QR_VERSION:
         raise ForeignContainer("unknown version")
+    network = NETWORK_FOR_BYTE.get(container[5])
+    if network is None:
+        # Framing before cryptography, like the magic and the version: a container naming a
+        # network this build does not know is reported in its own words, never as a wrong
+        # password, which would send the user hunting for a typing mistake they did not make.
+        raise ForeignContainer("unknown network")
 
-    header = container[:11]
-    params = Argon2Params.parse(container[5:11])
-    salt = container[11:27]
-    nonce = container[27:39]
-    sealed = container[39:]
+    header = container[:12]
+    params = Argon2Params.parse(container[6:12])
+    salt = container[12:28]
+    nonce = container[28:40]
+    sealed = container[40:]
 
     key = _derive_key(password, salt, params)
     try:
@@ -171,7 +204,9 @@ def decode(container: bytes, password: ExportPassword) -> DecodedWallet:
         # Authenticated, so this is our own bytes disagreeing with themselves.
         raise AuthenticationFailed("wrong password or tampering")
     entropy_length = word_count * 4 // 3
-    return DecodedWallet(entropy=plaintext[:entropy_length], word_count=word_count)
+    return DecodedWallet(
+        entropy=plaintext[:entropy_length], word_count=word_count, network=network
+    )
 
 
 # --- Internals ------------------------------------------------------------------------------------
@@ -188,6 +223,7 @@ def _seal(
     entropy: bytes,
     word_count: int,
     password: ExportPassword,
+    network: Network,
     salt: bytes,
     nonce: bytes,
     params: Argon2Params,
@@ -196,12 +232,16 @@ def _seal(
         raise ValueError("salt or nonce is the wrong length")
     # Padded to a fixed 33 bytes so the container's size never states the word count.
     plaintext = entropy.ljust(WALLET_QR_PLAINTEXT_BYTES - 1, b"\x00") + bytes([word_count])
-    header = WALLET_QR_MAGIC + bytes([WALLET_QR_VERSION]) + params.serialize()
+    header = (
+        WALLET_QR_MAGIC
+        + bytes([WALLET_QR_VERSION, BYTE_FOR_NETWORK[network]])
+        + params.serialize()
+    )
     key = _derive_key(password, salt, params)
     sealed = ChaCha20Poly1305(key).encrypt(nonce, plaintext, header)
     container = header + salt + nonce + sealed
     if len(container) != WALLET_QR_TOTAL_BYTES:  # pragma: no cover - arithmetic, checked anyway
-        raise ValueError("container is not 88 bytes")
+        raise ValueError("container is not 89 bytes")
     if len(sealed) != WALLET_QR_PLAINTEXT_BYTES + WALLET_QR_TAG_BYTES:  # pragma: no cover
         raise ValueError("the Poly1305 tag was truncated")
     return container

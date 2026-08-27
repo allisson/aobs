@@ -25,6 +25,8 @@ from enum import Enum
 
 from aobs.core.constants import WALLET_QR_MAGIC, WALLET_QR_VERSION
 from aobs.core.urcodec import ACCEPTED_PSBT_UR_TYPES, DifferentMessage, PsbtCollector, URError
+from aobs.core.wallet import Network
+from aobs.core.wallet_qr import NETWORK_FOR_BYTE
 from aobs.ui.geometry import MAX_COLUMNS
 from aobs.ui.qrdecode import Decoded
 from aobs.ui.widgets.failure import Failure
@@ -112,6 +114,38 @@ TRANSACTION_NOT_A_BACKUP = Failure(
     happened="This is a transaction, not an encrypted wallet backup.",
     next_steps=("Sign a transaction is a separate path on the home screen.",),
 )
+def backup_wrong_network(backup: Network) -> Failure:
+    """A backup for another chain, named — the appliance knows which side is wrong here.
+
+    Unlike `RefusalReason.NETWORK_MISMATCH`, where a PSBT and the session disagree and neither is
+    authoritative, the container *is* authoritative about the chain it was written for, and the
+    session's network is still changeable at this moment. So the *where* is singular and directed,
+    and this is a scan failure rather than a fourth `RefusalKind`.
+    """
+    return Failure(
+        condition="wallet-backup-wrong-network",
+        happened=(
+            f"This is one of our wallet backups, and it was exported on {backup.value}. "
+            "This session is on a different network."
+        ),
+        next_steps=(
+            f"Choose {backup.value} from the home screen, then scan the code again.",
+            "The master fingerprint cannot catch this: it comes from the seed and is identical "
+            "on all four networks.",
+        ),
+    )
+
+
+BACKUP_UNKNOWN_NETWORK = Failure(
+    condition="wallet-backup-unknown-network",
+    happened=(
+        "This is one of our wallet backups, but it names a network this version of the appliance "
+        "does not know."
+    ),
+    next_steps=(
+        "Use the version of the appliance that wrote it, or restore from the recovery words.",
+    ),
+)
 BACKUP_WRONG_VERSION = Failure(
     condition="wallet-backup-version",
     happened=(
@@ -166,8 +200,17 @@ class ScanProgress:
 
 
 class ScanController:
-    def __init__(self, target: ScanTarget, *, hint_after: float = HINT_AFTER_SECONDS) -> None:
+    def __init__(
+        self,
+        target: ScanTarget,
+        *,
+        network: Network,
+        hint_after: float = HINT_AFTER_SECONDS,
+    ) -> None:
         self.target = target
+        #: The session's network, for the wallet-backup gate. Required rather than defaulted: a
+        #: default here is the silent mainnet the gate exists to catch.
+        self.network = network
         self._hint_after = hint_after
         self._collector = PsbtCollector()
         self._elapsed = 0.0
@@ -252,6 +295,17 @@ class ScanController:
                 # Framing, before any decryption: #9's magic-and-version separates this from a
                 # wrong password, which an AEAD tag never could.
                 return Foreign(BACKUP_WRONG_VERSION)
+            # The network, from the same cleartext header and for the same reason: the user learns
+            # the backup belongs to another chain *before* typing eight words in full. This is the
+            # courtesy and never the boundary — anyone who can substitute the QR can flip this
+            # byte, and the tag covers it, so the load-bearing check is the one after the password
+            # verifies. Both exist; deleting either leaves the wrong one.
+            network_byte = decoded.raw[5:6]
+            backup_network = NETWORK_FOR_BYTE.get(network_byte[0]) if network_byte else None
+            if backup_network is None:
+                return Foreign(BACKUP_UNKNOWN_NETWORK)
+            if backup_network is not self.network:
+                return Foreign(backup_wrong_network(backup_network))
             self._complete = True
             return Completed(decoded.raw)
 

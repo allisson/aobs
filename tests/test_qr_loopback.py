@@ -17,13 +17,24 @@ import pytest
 import qrcode
 import zxingcpp
 from PIL import Image
-from qrcode.constants import ERROR_CORRECT_L
+from qrcode.constants import ERROR_CORRECT_H, ERROR_CORRECT_L
 from qrcode.util import MODE_ALPHA_NUM, optimal_mode
 
 from aobs.adapters.fake import ImageFileFrameSource
-from aobs.core.constants import QR_ECC_ANIMATED, QR_VERSION_ANIMATED, UR_FRAGMENT_LADDER
+from aobs.core.constants import (
+    QR_ECC_ANIMATED,
+    QR_ECC_STATIC,
+    QR_VERSION_ANIMATED,
+    UR_FRAGMENT_LADDER,
+    WALLET_QR_TOTAL_BYTES,
+)
+from aobs.core.wallet import Network
+from aobs.core.wallet_qr import Argon2Params, export_wallet
 from aobs.core.urcodec import PsbtStream, decode_psbt_parts
 from aobs.ports.frame_source import Frame
+from aobs.ui import qrcodes
+
+from conftest import fixed_bytes
 
 CORPUS = Path(__file__).parent.parent / "fixtures" / "psbt"
 
@@ -137,3 +148,47 @@ def test_a_dropped_frame_costs_a_cycle_and_not_the_scan(tmp_path: Path) -> None:
         if collector.receive(stream.next_part()):
             break
     assert collector.result() == psbt_bytes
+
+
+#: The pinned version of the static wallet-backup code. 89 bytes of binary at ECC H is a version 9
+#: code — 53x53 modules, well inside the console's 77x77 budget. The network byte cost nothing:
+#: 88 bytes was version 9 too. Pinned here rather than asserted about in prose.
+WALLET_QR_VERSION_PINNED = 9
+WALLET_QR_MODULES_PINNED = 53
+
+
+def test_the_wallet_container_still_fits_ecc_h_and_reads_back(tmp_path: Path) -> None:
+    """The container is binary byte mode and is read back through the real decoder.
+
+    The size claim in `docs/encrypted-wallet-qr.md` is the thing under test: a network byte added
+    to the header must not push the code past the version the document promises.
+    """
+    exported = export_wallet(
+        bytes(range(32)),
+        fixed_bytes(),
+        network=Network.SIGNET,
+        params=Argon2Params(memory_kib=64, time_cost=1, parallelism=1),
+    )
+    assert len(exported.container) == WALLET_QR_TOTAL_BYTES == 89
+    assert QR_ECC_STATIC == "H"
+
+    # What the export screen itself draws, and the version it comes out at.
+    rendered = qrcodes.render(exported.container, ecc=QR_ECC_STATIC)
+    assert rendered.version == WALLET_QR_VERSION_PINNED
+    assert rendered.modules == WALLET_QR_MODULES_PINNED + 2 * qrcodes.QUIET_ZONE
+    assert rendered.version < QR_VERSION_ANIMATED, "and well inside the console's own budget"
+
+    code = qrcode.QRCode(error_correction=ERROR_CORRECT_H, border=4, box_size=SCALE)
+    code.add_data(exported.container)
+    code.make(fit=True)
+    assert code.version == WALLET_QR_VERSION_PINNED
+
+    path = tmp_path / "wallet.png"
+    code.make_image().save(path)
+    source = ImageFileFrameSource([path])
+    frames = list(source.frames())
+    source.close()
+    image = Image.frombytes("L", (frames[0].width, frames[0].height), frames[0].data)
+    results = zxingcpp.read_barcodes(image)
+    assert results, "zxing-cpp read nothing from the container's code"
+    assert bytes(results[0].bytes) == exported.container

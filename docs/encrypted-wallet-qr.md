@@ -62,17 +62,31 @@ and zxing-cpp (settled in #6) decodes byte mode natively.
 |---|---|
 | magic | 4 |
 | version | 1 |
+| network | 1 |
 | Argon2id parameters (m, t, p — exact) | 6 |
 | salt | 16 |
 | nonce | 12 |
 | ciphertext (32-byte entropy + 1-byte word count, padded) | 33 |
 | Poly1305 tag | 16 |
-| **total** | **88** |
+| **total** | **89** |
 
-At 88 bytes there is ample room for **ECC level H**, which is where the size headroom should go: the
+The **version byte is 2**. There is no version 1 compatibility and none is needed: no ISO has been
+published, so no version 1 container exists outside this repository's own tests, and one that turns
+up is refused by the framing check that already says *written by a different version*.
+
+The **network byte** names the chain the backup was exported from — `mainnet` `0x00`, `testnet4`
+`0x01`, `signet` `0x02`, `regtest` `0x03`, assigned explicitly and never taken from an enum's
+ordinal. It sits in the header rather than the plaintext deliberately: the whole 12-byte header is
+the AEAD's associated data, so the byte is **authenticated without being encrypted** and can be read
+before the password is typed. The network was never a secret, and the appliance holds no
+network-dependent secret a cleartext byte could leak.
+
+At 89 bytes there is ample room for **ECC level H**, which is where the size headroom should go: the
 reader is a webcam pointed at a screen or a sheet of paper. Note that the size table in #7's research
 assumes ECC level L, so it must be recomputed at H for this payload; the spec's own test vectors pin
-the resulting QR version rather than this document asserting one.
+the resulting QR version rather than this document asserting one — 89 bytes of binary at ECC H is a
+**version 9** code, 53×53 modules, well inside the console's 77×77 budget, and it is pinned in
+`tests/test_qr_loopback.py`. The network byte cost nothing: 88 bytes was version 9 too.
 
 ## Failure behaviour
 
@@ -81,11 +95,29 @@ the resulting QR version rather than this document asserting one.
 An AEAD tag failure cannot tell them apart, and adding a password verifier would actively weaken the
 format by handing an offline attacker a cheap oracle.
 
-So: the magic bytes and version byte are checked first. If they parse, this is one of our containers
-and the failure is **authentication** — wrong password or tampering, and the appliance says exactly
-that without claiming which. If they do not parse, it is a foreign or corrupt QR, and the message is
-different. Physical corruption is mostly caught earlier by the QR's own error correction, which is
-the second reason for ECC level H.
+So: the magic bytes, version byte and network byte are checked first. If they parse, this is one of
+our containers and the failure is **authentication** — wrong password or tampering, and the appliance
+says exactly that without claiming which. If they do not parse, it is a foreign or corrupt QR, and
+the message is different. Physical corruption is mostly caught earlier by the QR's own error
+correction, which is the second reason for ECC level H.
+
+**The network byte follows that discipline exactly, in both directions.**
+
+*A byte naming a network this build does not know* is a **framing** failure, told in its own words —
+*this is one of our wallet backups, but it names a network this version does not know* — and never
+as *wrong password*, which would send the user hunting for a typing mistake they did not make.
+
+*A byte naming a network this session is not on* is not a failure of the format at all: the
+container is intact and the words are right. It is a **refusal**, and it happens twice. Once at the
+scan screen, from the cleartext header, so the user learns the backup belongs to another chain
+before typing eight words in full; and once after the password verifies, from the same byte now
+covered by the tag. Only the second is the boundary — anyone who can substitute the QR can flip the
+cleartext byte, and flipping it either fails authentication or arrives at the authenticated
+comparison. Both checks must exist, and a later simplification that keeps one must keep the second.
+
+*A byte that is physically damaged* fails the tag, and is reported as **wrong password or tampering**
+with no claim as to which. The new field does not weaken the format's existing failure discipline
+and is not allowed to.
 
 ## Out of scope for this document
 

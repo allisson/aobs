@@ -31,6 +31,7 @@ from aobs.core.constants import (
 )
 from aobs.core.descriptor import output_descriptor_ur
 from aobs.core.wallet import Network, ScriptType, Wallet
+from aobs.core.wallet_qr import decode
 from aobs.ui import addresstext, qrcodes
 from aobs.ui.app import SignerApp
 from aobs.ui.screens.descriptor import DescriptorScreen
@@ -142,6 +143,21 @@ async def test_the_qr_screen_states_that_the_password_is_not_on_it() -> None:
         screen = await open_export(app, pilot)
         assert addresstext.PASSWORD_NOT_HERE in texts(screen)
         assert "not on this screen" in blob(screen)
+
+
+@pytest.mark.parametrize("network", list(Network))
+async def test_the_qr_screen_names_the_network_this_backup_is_for(network: Network) -> None:
+    """What the QR carries and what the user writes on the paper have to agree.
+
+    On mainnet this is `docs/network-selection.md`'s *stated rather than asked*: the default stays
+    free and stops being silent at the one moment it is committed to paper.
+    """
+    app = build(network=network)
+    async with app.run_test(size=CONSOLE) as pilot:
+        screen = await open_export(app, pilot)
+        assert addresstext.EXPORT_QR_NETWORK.format(network=network.value) in texts(screen)
+        assert network.value in blob(screen)
+        assert decode(screen.container, app.export.password).network is network
 
 
 async def test_the_password_and_the_container_never_share_a_screen() -> None:

@@ -16,14 +16,21 @@ import pytest
 from conftest import render_qr
 
 from aobs.adapters.fake import ImageFileFrameSource
-from aobs.core.constants import WALLET_QR_MAGIC, WALLET_QR_TOTAL_BYTES, WALLET_QR_VERSION
+from aobs.core.constants import (
+    WALLET_QR_MAGIC,
+    WALLET_QR_NETWORK_BYTE,
+    WALLET_QR_TOTAL_BYTES,
+    WALLET_QR_VERSION,
+)
 from aobs.core.urcodec import PSBT_UR_TYPE, PsbtStream, decode_psbt_parts
+from aobs.core.wallet import Network
 from aobs.ports.frame_source import Frame
 from aobs.ui import viewfinder
 from aobs.ui.qrdecode import Decoded, decode_frame
 from aobs.ui.scanning import (
     AIMING_LINE,
     BACKUP_NOT_A_TRANSACTION,
+    BACKUP_UNKNOWN_NETWORK,
     BACKUP_WRONG_VERSION,
     DESCRIPTOR_NOT_A_TRANSACTION,
     HINT_AFTER_SECONDS,
@@ -38,6 +45,7 @@ from aobs.ui.scanning import (
     ScanController,
     ScanState,
     ScanTarget,
+    backup_wrong_network,
 )
 
 CORPUS = Path(__file__).parent.parent / "fixtures" / "psbt"
@@ -78,7 +86,7 @@ def test_a_binary_container_survives_as_bytes_and_not_as_text(tmp_path: Path) ->
     re-encoding the text is how a container gets misread as a foreign QR: the text here is
     mojibake, and the bytes are exact.
     """
-    container = WALLET_QR_MAGIC + bytes([WALLET_QR_VERSION]) + bytes(range(83))
+    container = _container(WALLET_QR_VERSION).raw
     assert len(container) == WALLET_QR_TOTAL_BYTES
     decoded = decode_frame(frame_of(render_qr(container, tmp_path)))
     assert decoded is not None
@@ -155,7 +163,7 @@ def test_the_rendered_markup_is_one_line_per_cell_row_of_half_blocks() -> None:
 
 
 def test_before_anything_decodes_the_line_is_about_aiming() -> None:
-    controller = ScanController(ScanTarget.TRANSACTION)
+    controller = ScanController(ScanTarget.TRANSACTION, network=Network.MAINNET)
     controller.frame(None, 0.2)
     progress = controller.progress
     assert progress.state is ScanState.AIMING
@@ -169,7 +177,7 @@ def test_the_density_hint_waits_a_few_seconds_and_then_arrives() -> None:
     Asserted by handing the controller an elapsed number, which is the whole reason the
     controller reads no clock.
     """
-    controller = ScanController(ScanTarget.TRANSACTION)
+    controller = ScanController(ScanTarget.TRANSACTION, network=Network.MAINNET)
     controller.frame(None, HINT_AFTER_SECONDS - 0.2)
     assert controller.progress.status == AIMING_LINE
     controller.frame(None, HINT_AFTER_SECONDS)
@@ -178,7 +186,7 @@ def test_the_density_hint_waits_a_few_seconds_and_then_arrives() -> None:
 
 
 def test_parts_arriving_says_the_count_and_nothing_about_density() -> None:
-    controller = ScanController(ScanTarget.TRANSACTION)
+    controller = ScanController(ScanTarget.TRANSACTION, network=Network.MAINNET)
     parts = parts_of()
     controller.frame(seen(parts[0]), 0.2)
     progress = controller.progress
@@ -189,7 +197,7 @@ def test_parts_arriving_says_the_count_and_nothing_about_density() -> None:
 
 def test_frames_decoding_with_no_new_parts_names_the_still_frame() -> None:
     """A stall the appliance can diagnose: the wallet is showing one frame, so say so."""
-    controller = ScanController(ScanTarget.TRANSACTION)
+    controller = ScanController(ScanTarget.TRANSACTION, network=Network.MAINNET)
     parts = parts_of()
     controller.frame(seen(parts[0]), 0.2)
     for tick in range(1, 40):
@@ -203,7 +211,7 @@ def test_frames_decoding_with_no_new_parts_names_the_still_frame() -> None:
 
 
 def test_a_scan_that_stops_decoding_altogether_falls_back_to_the_density_hint() -> None:
-    controller = ScanController(ScanTarget.TRANSACTION)
+    controller = ScanController(ScanTarget.TRANSACTION, network=Network.MAINNET)
     controller.frame(seen(parts_of()[0]), 0.2)
     controller.frame(None, 0.2 + HINT_AFTER_SECONDS)
     assert controller.progress.status == NOT_DECODING_LINE
@@ -217,7 +225,7 @@ def test_out_of_order_arrival_looks_like_holes_filling_in() -> None:
     is doing its job (`docs/scan-feedback.md`)."""
     parts = parts_of()
     assert len(parts) >= 4
-    controller = ScanController(ScanTarget.TRANSACTION)
+    controller = ScanController(ScanTarget.TRANSACTION, network=Network.MAINNET)
 
     controller.frame(seen(parts[2]), 0.2)
     assert controller.progress.slot_map == "▯▯▮" + "▯" * (len(parts) - 3)
@@ -244,7 +252,7 @@ def test_above_ninety_six_parts_the_fraction_stands_alone() -> None:
     # 5 kB of payload in 50-byte fragments, which is the shape Green's encoder produces.
     parts = PsbtStream(bytes(5000), rung=3).cycle()
     assert len(parts) > MAX_SLOTS
-    controller = ScanController(ScanTarget.TRANSACTION)
+    controller = ScanController(ScanTarget.TRANSACTION, network=Network.MAINNET)
     controller.frame(seen(parts[0]), 0.2)
     progress = controller.progress
     assert progress.slot_map is None
@@ -254,7 +262,7 @@ def test_above_ninety_six_parts_the_fraction_stands_alone() -> None:
 def test_a_completed_stream_hands_back_exactly_what_was_sent() -> None:
     psbt_bytes = (CORPUS / "many_inputs.psbt").read_bytes()
     stream = PsbtStream(psbt_bytes)
-    controller = ScanController(ScanTarget.TRANSACTION)
+    controller = ScanController(ScanTarget.TRANSACTION, network=Network.MAINNET)
     event = None
     for index in range(stream.seq_len * 2):
         event = controller.frame(seen(stream.next_part()), 0.2 * (index + 1))
@@ -274,7 +282,7 @@ def test_parts_from_a_different_transaction_are_named_and_the_stream_restarts() 
     """Detectable for free: every part carries the message length and a CRC32 of the message."""
     first = parts_of("many_inputs")
     second = parts_of("honest_p2wpkh")
-    controller = ScanController(ScanTarget.TRANSACTION)
+    controller = ScanController(ScanTarget.TRANSACTION, network=Network.MAINNET)
     controller.frame(seen(first[0]), 0.2)
     controller.frame(seen(first[1]), 0.4)
     assert controller.progress.received == 2
@@ -289,7 +297,7 @@ def test_parts_from_a_different_transaction_are_named_and_the_stream_restarts() 
 
 def test_giving_up_says_how_far_it_got() -> None:
     parts = parts_of()
-    controller = ScanController(ScanTarget.TRANSACTION)
+    controller = ScanController(ScanTarget.TRANSACTION, network=Network.MAINNET)
     controller.frame(seen(parts[0]), 0.2)
     notice = controller.give_up_notice()
     assert f"1 of {len(parts)}" in notice
@@ -297,7 +305,7 @@ def test_giving_up_says_how_far_it_got() -> None:
 
 
 def test_giving_up_before_anything_arrived_claims_no_count() -> None:
-    controller = ScanController(ScanTarget.TRANSACTION)
+    controller = ScanController(ScanTarget.TRANSACTION, network=Network.MAINNET)
     controller.frame(None, 0.2)
     assert "Nothing was kept." in controller.give_up_notice()
 
@@ -306,7 +314,7 @@ def test_giving_up_before_anything_arrived_claims_no_count() -> None:
 
 
 def test_an_address_completes_on_the_first_decode_with_no_parts_to_count() -> None:
-    controller = ScanController(ScanTarget.ADDRESS)
+    controller = ScanController(ScanTarget.ADDRESS, network=Network.MAINNET)
     address = "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"
     event = controller.frame(Decoded(text=address, raw=address.encode()), 0.2)
     assert isinstance(event, Completed)
@@ -318,8 +326,8 @@ def test_an_address_completes_on_the_first_decode_with_no_parts_to_count() -> No
 
 
 def test_a_wallet_backup_completes_on_the_first_decode() -> None:
-    container = WALLET_QR_MAGIC + bytes([WALLET_QR_VERSION]) + bytes(range(83))
-    controller = ScanController(ScanTarget.WALLET_BACKUP)
+    container = _container(WALLET_QR_VERSION).raw
+    controller = ScanController(ScanTarget.WALLET_BACKUP, network=Network.MAINNET)
     event = controller.frame(Decoded(text="mojibake", raw=container), 0.2)
     assert isinstance(event, Completed)
     assert event.payload == container
@@ -345,7 +353,7 @@ def test_ur_psbt_is_accepted_inbound_and_never_emitted() -> None:
     renamed = [part.replace("UR:CRYPTO-PSBT/", "UR:PSBT/") for part in emitted]
     assert decode_psbt_parts(renamed) == psbt_bytes
 
-    controller = ScanController(ScanTarget.TRANSACTION)
+    controller = ScanController(ScanTarget.TRANSACTION, network=Network.MAINNET)
     event = None
     for index, part in enumerate(renamed):
         event = controller.frame(seen(part), 0.2 * (index + 1))
@@ -356,52 +364,101 @@ def test_ur_psbt_is_accepted_inbound_and_never_emitted() -> None:
 # --- The controller: a QR that decoded and is not ours -------------------------------------------
 
 
-def _container(version: int) -> Decoded:
+def _container(version: int, network: Network = Network.MAINNET, *, network_byte: int | None = None) -> Decoded:
+    byte = WALLET_QR_NETWORK_BYTE[network.value] if network_byte is None else network_byte
     return Decoded(
-        text="mojibake", raw=WALLET_QR_MAGIC + bytes([version]) + bytes(range(83))
+        text="mojibake", raw=WALLET_QR_MAGIC + bytes([version, byte]) + bytes(range(83))
     )
 
 
 @pytest.mark.parametrize(
-    ("target", "decoded", "expected"),
+    ("target", "network", "decoded", "expected"),
     [
         (
             ScanTarget.TRANSACTION,
+            Network.MAINNET,
             Decoded(text="https://example.com/pay", raw=b"https://example.com/pay"),
             NOT_OURS,
         ),
         (
             ScanTarget.TRANSACTION,
+            Network.MAINNET,
             Decoded(text="UR:CRYPTO-ACCOUNT/OEADCY", raw=b"UR:CRYPTO-ACCOUNT/OEADCY"),
             DESCRIPTOR_NOT_A_TRANSACTION,
         ),
         (
             ScanTarget.TRANSACTION,
+            Network.MAINNET,
             Decoded(text="UR:CRYPTO-HDKEY/ONAXHD", raw=b"UR:CRYPTO-HDKEY/ONAXHD"),
             DESCRIPTOR_NOT_A_TRANSACTION,
         ),
-        (ScanTarget.TRANSACTION, _container(WALLET_QR_VERSION), BACKUP_NOT_A_TRANSACTION),
-        (ScanTarget.WALLET_BACKUP, _container(WALLET_QR_VERSION + 1), BACKUP_WRONG_VERSION),
+        (
+            ScanTarget.TRANSACTION,
+            Network.MAINNET,
+            _container(WALLET_QR_VERSION),
+            BACKUP_NOT_A_TRANSACTION,
+        ),
         (
             ScanTarget.WALLET_BACKUP,
+            Network.MAINNET,
+            _container(WALLET_QR_VERSION + 1),
+            BACKUP_WRONG_VERSION,
+        ),
+        # A version 1 container: the free case, asserted so it stays free.
+        (
+            ScanTarget.WALLET_BACKUP,
+            Network.MAINNET,
+            _container(1),
+            BACKUP_WRONG_VERSION,
+        ),
+        # A backup for another network, and the session's own network is what makes it foreign.
+        (
+            ScanTarget.WALLET_BACKUP,
+            Network.MAINNET,
+            _container(WALLET_QR_VERSION, Network.SIGNET),
+            backup_wrong_network(Network.SIGNET),
+        ),
+        (
+            ScanTarget.WALLET_BACKUP,
+            Network.SIGNET,
+            _container(WALLET_QR_VERSION, Network.MAINNET),
+            backup_wrong_network(Network.MAINNET),
+        ),
+        (
+            ScanTarget.WALLET_BACKUP,
+            Network.REGTEST,
+            _container(WALLET_QR_VERSION, Network.TESTNET4),
+            backup_wrong_network(Network.TESTNET4),
+        ),
+        # A network byte no version of the appliance assigns.
+        (
+            ScanTarget.WALLET_BACKUP,
+            Network.MAINNET,
+            _container(WALLET_QR_VERSION, network_byte=0x7F),
+            BACKUP_UNKNOWN_NETWORK,
+        ),
+        (
+            ScanTarget.WALLET_BACKUP,
+            Network.MAINNET,
             Decoded(text="UR:CRYPTO-PSBT/1-3/ABCD", raw=b"UR:CRYPTO-PSBT/1-3/ABCD"),
             TRANSACTION_NOT_A_BACKUP,
         ),
         (
             ScanTarget.WALLET_BACKUP,
+            Network.MAINNET,
             Decoded(text="just some text", raw=b"just some text"),
             NOT_OURS,
         ),
     ],
     ids=lambda value: getattr(value, "condition", None) or getattr(value, "value", None) or "",
 )
-def test_a_foreign_qr_is_named_for_what_it_actually_is(target, decoded, expected) -> None:
+def test_a_foreign_qr_is_named_for_what_it_actually_is(target, network, decoded, expected) -> None:
     """One row per case, so a new case is added by adding a row.
 
     *Unrecognised QR* would discard information the appliance already holds
     (`docs/failure-states.md`).
     """
-    event = ScanController(target).frame(decoded, 0.2)
+    event = ScanController(target, network=network).frame(decoded, 0.2)
     assert isinstance(event, Foreign)
     assert event.failure == expected
     assert event.failure.condition != ""
@@ -414,6 +471,8 @@ def test_every_foreign_condition_has_its_own_name_and_its_own_words() -> None:
         BACKUP_NOT_A_TRANSACTION,
         TRANSACTION_NOT_A_BACKUP,
         BACKUP_WRONG_VERSION,
+        BACKUP_UNKNOWN_NETWORK,
+        backup_wrong_network(Network.SIGNET),
     )
     assert len({failure.condition for failure in failures}) == len(failures)
     assert len({failure.happened for failure in failures}) == len(failures)

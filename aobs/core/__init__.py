@@ -15,7 +15,7 @@ The entry points, in the shape every core function follows:
     sign(psbt_bytes, wallet) -> bytes
     mix(system, camera_frames=…, dice_rolls=…) -> Entropy
     verify(scanned, wallet) -> AddressCheck
-    export_wallet(entropy, random_bytes) -> ExportedWallet
+    export_wallet(entropy, random_bytes, network=…) -> ExportedWallet
 """
 
 from .address import AddressCheck, Verdict, page, verify
