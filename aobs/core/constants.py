@@ -58,6 +58,12 @@ ENTROPY_HKDF_SALT = b"aobs/entropy/v1"
 ENTROPY_HKDF_INFO = b"aobs/entropy/bip39-entropy/v1"
 ENTROPY_OUTPUT_BYTES = 32
 
+#: Whole camera frames handed to `mix()` per generated wallet. A small fixed number, hashed, with
+#: no entropy estimate of any kind — `docs/entropy-mixing.md` is explicit that the estimator is
+#: the part that produced the one real memory-safety failure in a comparable project, so there is
+#: none. Eight is the number the published example report states.
+ENTROPY_CAMERA_FRAMES = 8
+
 #: 99 D6 rolls carry 256 bits at log2(6) ≈ 2.585 bits each. Stated as a fact, never as a quota.
 DICE_BITS_PER_ROLL = 2.584962500721156
 

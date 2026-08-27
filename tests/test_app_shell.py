@@ -37,6 +37,7 @@ from aobs.ui.screens.descriptor import DescriptorScreen
 from aobs.ui.screens.console_too_small import ConsoleTooSmallScreen
 from aobs.ui.screens.camera_lost import CameraLostScreen
 from aobs.ui.screens.dice import DiceScreen
+from aobs.ui.screens.entropy_wait import EntropyWaitScreen
 from aobs.ui.screens.emit import EmitScreen
 from aobs.ui.screens.export_password import ExportPasswordScreen
 from aobs.ui.screens.fingerprint import FingerprintScreen
@@ -254,6 +255,20 @@ async def test_f12_powers_off_from_every_screen_the_app_can_reach() -> None:
             await pilot.pause()
             assert entry.power.powered_off, f"F12 did not power off {expected.__name__}"
 
+    # The randomness wait, which is reached by a pool that is not up rather than by a keystroke.
+    cold = FixedEntropySource()
+    cold.not_ready_for = 1000
+    waiting = build(power=RecordingPower(), entropy=cold, entropy_poll_interval=None)
+    async with waiting.run_test(size=CONSOLE) as pilot:
+        await reach_home(waiting, pilot)
+        await pilot.press("f10", "f10")  # generate, then skip the dice
+        await pilot.pause()
+        assert isinstance(waiting.screen, EntropyWaitScreen)
+        reached.append(type(waiting.screen))
+        await pilot.press("f12")
+        await pilot.pause()
+        assert waiting.power.powered_off
+
     # The tail every path shares, and the one screen a scanned backup opens. Driven through the
     # app the way the money path above is: the keystrokes that reach them are their own tests.
     exported = export_wallet(bytes(16), fixed_bytes())
@@ -315,6 +330,43 @@ async def test_f12_powers_off_from_every_screen_the_app_can_reach() -> None:
     # Every screen in the tree, not just the ones this walk happened to visit: a later ticket
     # that adds a screen and no route to it fails here.
     assert set(reached) == set(_screen_classes())
+
+
+async def test_the_key_material_the_app_holds_is_wiped_before_the_machine_stops() -> None:
+    """`docs/threat-model.md` claim (ii): a **best-effort** wipe of the derived key material the
+    app itself holds, and the ordering is the whole of what can be asserted.
+
+    The real `Power` does not return, so a wipe after it would never run. The recording fake is
+    the only place that sequence is observable at all, which is why it is watched here rather than
+    in the adapter — and none of it is byte-zeroing: CPython's copies are uncounted, and this
+    drops the retained references, nothing more.
+    """
+
+    class _WatchingPower:
+        def __init__(self, app_getter) -> None:
+            self._app = app_getter
+            self.held_at_stop: list[object] = []
+            self.powered_off = False
+
+        def power_off(self) -> None:
+            app = self._app()
+            self.held_at_stop = [
+                app.wallet, app.mnemonic, app.mixing, app.export, app.scanned
+            ]
+            self.powered_off = True
+
+    app = build()
+    power = _WatchingPower(lambda: app)
+    app.power = power
+    async with app.run_test(size=CONSOLE) as pilot:
+        await reach_home(app, pilot)
+        app.wallet = Wallet.from_mnemonic(VECTOR_MNEMONIC, network=Network.MAINNET)
+        app.mnemonic = VECTOR_MNEMONIC
+        app.scanned = b"a scanned payload"
+        await pilot.press("f12")
+        await pilot.pause()
+        assert power.powered_off
+        assert power.held_at_stop == [None, None, None, None, None]
 
 
 async def test_esc_never_commits_and_never_powers_off() -> None:
@@ -583,14 +635,43 @@ def test_the_entry_point_installs_the_failure_handler_before_constructing_anythi
     assert order == ["install", "adapters"]
 
 
-def test_the_entry_point_refuses_to_run_the_appliance_on_fakes() -> None:
-    """A fake `Power` does not power off and a fake `EntropySource` returns a constant. Until the
-    real adapters exist, `python3 -m aobs` says so rather than starting something that looks like
-    an appliance."""
+def test_the_entry_point_wires_the_real_adapters_and_only_those() -> None:
+    """A fake `Power` does not power off and a fake `EntropySource` returns a deterministic
+    counter, so an appliance started with either would look correct on screen and be worthless in
+    every claim it makes. `real_adapters()` is the one place the halves are chosen, and every one
+    of them is real — the dangerous configuration is unreachable rather than merely discouraged.
+
+    Constructing them is free of hardware on purpose: none of the four touches a device until it
+    is used, which is what lets this run in a container with no camera and no keymap tree.
+    """
+    import aobs.__main__ as entry
+    from aobs.adapters.real import (
+        ForcedPowerOff,
+        KernelEntropySource,
+        LoadkeysKeymap,
+        V4L2FrameSource,
+    )
+
+    adapters = entry.real_adapters()
+    assert {name: type(port) for name, port in adapters.items()} == {
+        "frames": V4L2FrameSource,
+        "entropy": KernelEntropySource,
+        "power": ForcedPowerOff,
+        "keymap": LoadkeysKeymap,
+    }
+
+
+def test_a_missing_camera_is_not_a_reason_to_refuse_to_start() -> None:
+    """It is a normal session with fewer paths, which the application already models: the probe
+    answers honestly and the home screen disables the paths that scan. Generating a wallet and
+    exporting a descriptor are both outbound and need no camera at all."""
     import aobs.__main__ as entry
 
-    with pytest.raises(NotImplementedError, match="real adapters"):
-        entry.real_adapters()
+    frames = entry.real_adapters()["frames"]
+    stream = frames.frames()
+    with pytest.raises(OSError):  # no capture device in a container
+        next(stream)
+    frames.close()
 
 
 async def test_the_running_app_installs_no_logging_handler_that_writes_anywhere() -> None:

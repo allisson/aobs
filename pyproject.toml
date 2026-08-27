@@ -16,8 +16,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The harness. `zxing-cpp` and `segno` are the loopback test's two ends; the
-# appliance's own renderer and camera adapter land in a later spec.
+# The harness. `qrcode` and `zxing-cpp` are the loopback test's two ends; the appliance's own
+# renderer draws QR codes itself and its camera adapter reads V4L2 through `ioctl`, so neither of
+# those two is a dependency of the appliance.
 test = [
     "pytest>=8",
     # `run_test()` is an async context manager, so the app suite is async. `asyncio_mode =

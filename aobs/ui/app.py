@@ -16,7 +16,7 @@ from textual.app import App
 from textual.binding import Binding
 
 from aobs.core import mnemonic as bip39_words
-from aobs.core.constants import ENTROPY_OUTPUT_BYTES
+from aobs.core.constants import ENTROPY_CAMERA_FRAMES, ENTROPY_OUTPUT_BYTES
 from aobs.core.entropy import Entropy, MixingReport, mix
 from aobs.core.entropy import report as mixing_report
 from aobs.core.failure import describe
@@ -33,6 +33,12 @@ from aobs.ui.screens.console_too_small import ConsoleTooSmallScreen
 from aobs.ui.screens.home import HomeScreen
 from aobs.ui.screens.keymap import KeymapScreen
 from aobs.ui.screens.scan import INBOUND_FRAME_RATE, ScanScreen
+
+#: How often the randomness wait screen asks whether the kernel's pool has come up. Four times a
+#: second: fast enough that the screen is gone before the user has finished reading it on a
+#: machine that was nearly ready, slow enough that the poll's own byte draw is not the reason the
+#: pool stays busy.
+ENTROPY_POLL_INTERVAL = 0.25
 
 
 class SignerApp(App[None]):
@@ -72,6 +78,7 @@ class SignerApp(App[None]):
         network: Network = Network.MAINNET,
         scan_frame_interval: float | None = 1 / INBOUND_FRAME_RATE,
         emit_animated: bool = True,
+        entropy_poll_interval: float | None = ENTROPY_POLL_INTERVAL,
     ) -> None:
         super().__init__()
         self.frames = frames
@@ -86,6 +93,9 @@ class SignerApp(App[None]):
         #: animation itself: pacing 47 frames in real time would cost it 23 seconds to assert
         #: something that is not Textual's clock.
         self.emit_animated = emit_animated
+        #: How often the randomness wait screen asks the `EntropySource` whether the pool is up.
+        #: `None` means no timer at all, which is how the suite steps the wait itself.
+        self.entropy_poll_interval = entropy_poll_interval
 
         # --- session state ---
         self.wallet: Wallet | None = None
@@ -149,18 +159,7 @@ class SignerApp(App[None]):
         and nothing else — generating a wallet and exporting its descriptor are both outbound and
         need no camera at all.
         """
-        stream = self.frames.frames()
-        try:
-            next(stream)
-        except (StopIteration, OSError):
-            return False
-        finally:
-            # The port promises an `Iterator`, not a generator, so `close()` is not guaranteed —
-            # the real V4L2 adapter is free to hand back something else.
-            close = getattr(stream, "close", None)
-            if close is not None:
-                close()
-        return True
+        return bool(self._pull_frames(1))
 
     # --- the global keys ---------------------------------------------------------------------
 
@@ -221,19 +220,83 @@ class SignerApp(App[None]):
         self.push_screen(DiceScreen())
 
     def generate_wallet(self, dice_rolls: str) -> None:
-        """One draw from the `EntropySource`, mixed with whatever was rolled. Always 24 words.
+        """The entropy-consuming step, with the randomness wait in front of it.
+
+        The wait sits **here** rather than at startup, and that placement is the decision:
+        `docs/entropy-mixing.md` sequences entropy-consuming work after user interaction has begun
+        precisely so the pool has had a keyboard and a camera generating interrupts for it.
+        Moving the wait to boot would guarantee it was not ready.
+        """
+        if not self.entropy.ready():
+            from aobs.ui.screens.entropy_wait import EntropyWaitScreen
+
+            self.push_screen(EntropyWaitScreen(dice_rolls))
+            return
+        self._generate(dice_rolls)
+
+    def entropy_ready(self, dice_rolls: str) -> None:
+        """The pool came up while the wait screen was showing. Go on, without it on the stack."""
+        self.pop_screen()
+        self._generate(dice_rolls)
+
+    def _generate(self, dice_rolls: str) -> None:
+        """One draw from the `EntropySource`, camera frames, and whatever was rolled. 24 words.
 
         The UI computes no entropy of its own and makes no estimate — `mix()` is handed what the
-        screens collected and nothing else, and the kernel CSPRNG is a required argument to it, so
-        there is no reachable path in which dice substitute for it.
+        screens and the camera produced and nothing else, and the kernel CSPRNG is a required
+        argument to it, so there is no reachable path in which dice or frames substitute for it.
         """
         from aobs.ui.screens.recovery_words import RecoveryWordsScreen
 
-        entropy = mix(self.entropy.random_bytes(ENTROPY_OUTPUT_BYTES), dice_rolls=dice_rolls)
+        entropy = mix(
+            self.entropy.random_bytes(ENTROPY_OUTPUT_BYTES),
+            camera_frames=self._entropy_frames(),
+            dice_rolls=dice_rolls,
+        )
         self._pending_entropy = entropy
         self.push_screen(
             RecoveryWordsScreen(bip39_words.from_entropy(entropy.value), read_back=True)
         )
+
+    def _entropy_frames(self) -> tuple[bytes, ...]:
+        """Whole frames for the mixer — `docs/entropy-mixing.md`'s camera source, at last live.
+
+        The camera contributes **in every session, without being asked**, which is a statement the
+        project publishes and which this is the first code to keep. It is a small fixed number of
+        whole frames, hashed by `mix()`, with **no entropy estimate of any kind**: Krux's one real
+        memory-safety failure lived inside a camera entropy estimator, so there is none here to
+        get wrong.
+
+        A camera that is absent, covered, or that yields nothing contributes nothing and blocks
+        nothing — the mixer is additive and the kernel CSPRNG sets the floor either way. That is
+        why every failure below is swallowed rather than shown: there is nothing for the user to
+        do about it and nothing about their seed that got worse.
+        """
+        return self._pull_frames(ENTROPY_CAMERA_FRAMES)
+
+    def _pull_frames(self, count: int) -> tuple[bytes, ...]:
+        """At most `count` frames, and whatever the camera managed if it managed fewer.
+
+        The one place the app opens a frame stream of its own — the scan screen runs its own, with
+        a timer. **Nothing may be left holding the device**: the adapter holds mapped buffers and
+        the next stream of the session opens fresh ones, so a leak here is a camera that works
+        once per session. The port promises an `Iterator`, not a generator, so `close()` is not
+        guaranteed and is called only if it is there.
+        """
+        collected: list[bytes] = []
+        stream = self.frames.frames()
+        try:
+            for frame in stream:
+                collected.append(frame.data)
+                if len(collected) == count:
+                    break
+        except OSError:
+            pass
+        finally:
+            close = getattr(stream, "close", None)
+            if close is not None:
+                close()
+        return tuple(collected)
 
     def open_read_back(self, mnemonic: str) -> None:
         """All 24 words, typed back from the paper — the only check that paper will ever get."""
@@ -385,9 +448,31 @@ class SignerApp(App[None]):
         `F12` specifically: hard to hit by accident, impossible to hit while touch-typing a
         mnemonic — and a power-off that needs a menu is one people avoid, which leaves wallets
         loaded on unattended machines.
+
+        The wipe happens **before** the port is called, because the port does not return on the
+        appliance. It is a sequence the harness can watch with the recording fake, which is the
+        only place a wipe on the way to a power-off can be observed at all.
         """
+        self._wipe()
         self.power.power_off()
         self.exit()
+
+    def _wipe(self) -> None:
+        """Best-effort wipe of the derived key material the app itself holds. Not erasure.
+
+        `docs/threat-model.md` claim (ii) is worded with exactly that reach, and the wording is
+        the honest one: CPython copies `bytes` and `str` freely and the copies cannot be counted,
+        so what this does is drop the **retained, long-lived** references this object holds. A
+        full RAM overwrite was already rejected as theatre, and nothing here should be read as
+        byte-zeroing.
+        """
+        self.wallet = None
+        self.mnemonic = None
+        self.mixing = None
+        self.export = None
+        self.scanned = None
+        self._pending_mnemonic = None
+        self._pending_entropy = None
 
     # --- what the keymap picker calls ---------------------------------------------------------
 

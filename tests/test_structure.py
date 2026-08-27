@@ -82,7 +82,7 @@ def test_core_reads_no_ambient_state() -> None:
 
 def test_the_ports_have_two_adapters_each() -> None:
     from aobs import ports
-    from aobs.adapters import fake
+    from aobs.adapters import fake, real
 
     assert set(ports.__all__) == {
         "DEFAULT_LAYOUT",
@@ -92,13 +92,49 @@ def test_the_ports_have_two_adapters_each() -> None:
         "Keymap",
         "Power",
     }
-    # The harness half exists today; the real half is a later spec, named by the ports.
     assert set(fake.__all__) == {
         "FixedEntropySource",
         "ImageFileFrameSource",
         "RecordingKeymap",
         "RecordingPower",
     }
+    assert set(real.__all__) == {
+        "ForcedPowerOff",
+        "KernelEntropySource",
+        "LoadkeysKeymap",
+        "V4L2FrameSource",
+    }
+
+
+def test_the_application_names_the_real_adapters_in_exactly_one_place() -> None:
+    """`aobs/ui/` knows only the ports, and `aobs/__main__.py` is the one module that knows which
+    adapters are real. That is what lets the whole application be driven headless with the fakes
+    and carry no conditional asking what it is running on."""
+    app_tree = [
+        path
+        for path in (ROOT / "aobs").rglob("*.py")
+        if "vendor" not in path.parts and path.name != "__main__.py"
+    ]
+    for path in app_tree:
+        assert not any(
+            name.startswith("aobs.adapters.real") for name in _imports(path)
+        ), path
+
+
+def test_the_application_cannot_be_started_with_a_fake_wired_in() -> None:
+    """A fake `Power` does not power off and a fake `EntropySource` returns a deterministic
+    counter, so an appliance started with either would look correct on screen and be worthless in
+    every claim it makes. There is no flag and no fallback that could select one."""
+    entry = ROOT / "aobs" / "__main__.py"
+    assert not any(name.startswith("aobs.adapters.fake") for name in _imports(entry))
+    #: No flag and no fallback: nothing here reads the environment or the command line, so there
+    #: is no input at all that could select a different set of adapters.
+    read = {
+        node.attr
+        for node in ast.walk(ast.parse(entry.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Attribute)
+    }
+    assert not read & {"environ", "getenv", "argv"}
 
 
 def test_there_is_no_screen_port() -> None:

@@ -23,12 +23,20 @@ from aobs.adapters.fake import (
 )
 from aobs.core import export_password as eff
 from aobs.core import mnemonic as bip39
-from aobs.core.constants import ENTROPY_OUTPUT_BYTES, EXPORT_PASSWORD_WORDS
+from aobs.core.constants import (
+    ENTROPY_CAMERA_FRAMES,
+    ENTROPY_OUTPUT_BYTES,
+    EXPORT_PASSWORD_WORDS,
+)
 from aobs.core.entropy import mix
 from aobs.core.wallet import Network, Wallet
 from aobs.core.wallet_qr import export_wallet
+from aobs.ports.frame_source import Frame
 from aobs.ui.app import SignerApp
 from aobs.ui.screens.dice import OFFER, DiceScreen
+from aobs.ui.screens.entropy_wait import HOW as WAIT_HOW
+from aobs.ui.screens.entropy_wait import PROCEEDS as WAIT_PROCEEDS
+from aobs.ui.screens.entropy_wait import EntropyWaitScreen
 from aobs.ui.screens.export_password import (
     NOT_IN_THE_QR,
     WRONG_PASSWORD,
@@ -83,6 +91,50 @@ async def open_path(pilot, app: SignerApp, name: str) -> None:
         await pilot.press("down")
     await pilot.press("f10")
     await pilot.pause()
+
+
+async def generate_a_wallet(app: SignerApp, pilot) -> None:
+    """Home to the fingerprint screen, generating with no dice and an empty passphrase."""
+    await open_path(pilot, app, "Generate a new wallet")
+    await pilot.press("f10")  # skip the dice
+    await pilot.pause()
+    mnemonic = " ".join(app.screen.words)
+    await pilot.press("f10")  # type them back
+    await pilot.pause()
+    await type_words(pilot, mnemonic.split())
+    await pilot.press("f10")
+    await pilot.pause()
+    await pilot.press("f10")  # empty passphrase
+    await pilot.pause()
+    assert isinstance(app.screen, FingerprintScreen)
+
+
+class _Camera:
+    """A camera whose frames differ, which is what a real one produces.
+
+    It counts the streams opened and the ones not released, because `docs/` calls a leaked
+    descriptor a camera that works once per session — and the mixer opens one of its own between
+    the startup probe and anything the scan screen does.
+    """
+
+    def __init__(self, dies_after: int | None = None) -> None:
+        self.opened = 0
+        self.leaked = 0
+        self._dies_after = dies_after
+
+    def frames(self):
+        self.opened += 1
+        self.leaked += 1
+        try:
+            for index in range(1000):
+                if self._dies_after is not None and index == self._dies_after:
+                    raise OSError("the camera was unplugged")
+                yield Frame(width=4, height=4, data=bytes([index % 251]) * 16)
+        finally:
+            self.leaked -= 1
+
+    def close(self) -> None:
+        pass
 
 
 async def type_words(pilot, words) -> None:
@@ -340,6 +392,132 @@ async def test_the_facts_screen_reads_the_same_with_no_rolls_as_with_many() -> N
     assert [part.split(":")[0] for part in with_none.split("  ·  ")] == [
         part.split(":")[0] for part in with_many.split("  ·  ")
     ]
+
+
+async def test_the_camera_contributes_frames_to_every_generated_wallet() -> None:
+    """`docs/entropy-mixing.md`: *the camera contributes without being asked, and is present in
+    every session regardless, being the QR channel.*
+
+    That sentence was published before anything passed frames to `mix()`. This is the assertion
+    that it is now true of the running application and not only of the document.
+    """
+    frames = _Camera()
+    app = build(frames=frames)
+    async with app.run_test(size=CONSOLE) as pilot:
+        await generate_a_wallet(app, pilot)
+        facts = str(app.screen.query_one("#mixing-facts", Static).content)
+        assert facts == (
+            f"system: {ENTROPY_OUTPUT_BYTES} bytes"
+            f"  ·  camera: {ENTROPY_CAMERA_FRAMES} frames"
+            "  ·  dice: 0 rolls"
+        )
+        assert frames.opened == 2, "one stream for the startup probe, one for the mixer"
+        assert frames.leaked == 0, "a leaked stream is a camera that works once per session"
+
+
+async def test_the_camera_is_a_source_and_never_a_requirement() -> None:
+    """A covered lens or an absent camera contributes nothing and blocks nothing — the mixer is
+    additive and the kernel CSPRNG sets the floor either way. So a session with no camera is shown
+    no degraded state, for the same reason a user who skips the dice is not."""
+    app = build()  # `ImageFileFrameSource([])`: a machine with no webcam
+    async with app.run_test(size=CONSOLE) as pilot:
+        await generate_a_wallet(app, pilot)
+        facts = str(app.screen.query_one("#mixing-facts", Static).content)
+        assert facts == f"system: {ENTROPY_OUTPUT_BYTES} bytes  ·  dice: 0 rolls"
+        rendered = texts(app).lower()
+        for word in ("warning", "weak", "insecure", "degraded", "missing"):
+            assert word not in rendered
+
+
+async def test_a_camera_that_dies_while_the_mixer_is_reading_it_stops_nothing() -> None:
+    """There is nothing for the user to do about it and nothing about their seed that got worse,
+    which is why this is neither a screen nor a notice."""
+    app = build(frames=_Camera(dies_after=2))
+    async with app.run_test(size=CONSOLE) as pilot:
+        await generate_a_wallet(app, pilot)
+        facts = str(app.screen.query_one("#mixing-facts", Static).content)
+        assert "camera: 2 frames" in facts, "the frames it did produce still count"
+        assert app.wallet is not None, "generation completed rather than stopping on the camera"
+
+
+# --- The randomness wait -----------------------------------------------------------------------
+#
+# `docs/entropy-mixing.md` boots with `random.trust_cpu=off random.trust_bootloader=off`, so a
+# cold machine's pool genuinely takes time. The port answers *ready?* rather than disappearing
+# into a syscall, and this is the screen that asks.
+
+
+async def test_an_uninitialised_pool_is_a_screen_and_not_a_frozen_appliance() -> None:
+    entropy = FixedEntropySource()
+    entropy.not_ready_for = 2
+    app = build(entropy=entropy, entropy_poll_interval=None)
+    async with app.run_test(size=CONSOLE) as pilot:
+        await open_path(pilot, app, "Generate a new wallet")
+        await pilot.press("f10")
+        await pilot.pause()
+
+        assert isinstance(app.screen, EntropyWaitScreen)
+        rendered = texts(app)
+        assert WAIT_HOW in rendered
+        assert WAIT_HOW == "Keep typing, and point the camera at something."
+        assert WAIT_PROCEEDS in rendered
+        assert entropy.calls == [], "nothing is drawn while the pool is not ready"
+
+
+async def test_the_wait_ends_by_itself_the_moment_the_pool_is_ready() -> None:
+    """The user has no way to judge when the wait is over. The appliance does, so it is the one
+    that decides — there is no key to press."""
+    entropy = FixedEntropySource()
+    entropy.not_ready_for = 2
+    app = build(entropy=entropy, entropy_poll_interval=None)
+    async with app.run_test(size=CONSOLE) as pilot:
+        await open_path(pilot, app, "Generate a new wallet")
+        await pilot.press("3", "3", "3")
+        await pilot.press("f10")
+        await pilot.pause()
+
+        app.screen.poll_once()  # still not ready
+        await pilot.pause()
+        assert isinstance(app.screen, EntropyWaitScreen)
+
+        app.screen.poll_once()  # the pool came up
+        await pilot.pause()
+        assert isinstance(app.screen, RecoveryWordsScreen)
+        assert entropy.calls == [ENTROPY_OUTPUT_BYTES], "one draw, once the pool was ready"
+        expected = bip39.from_entropy(
+            mix(fixed_bytes(b"aobs-fake-entropy")(ENTROPY_OUTPUT_BYTES), dice_rolls="333").value
+        )
+        assert " ".join(app.screen.words) == expected, "the rolls survived the wait"
+
+
+async def test_the_wait_is_not_a_trap() -> None:
+    """A machine whose pool will never initialise must be leavable. `esc` lands back on the dice
+    with the rolls still there, and the outbound half of the session is untouched."""
+    entropy = FixedEntropySource()
+    entropy.not_ready_for = 1000
+    app = build(entropy=entropy, entropy_poll_interval=None)
+    async with app.run_test(size=CONSOLE) as pilot:
+        await open_path(pilot, app, "Generate a new wallet")
+        await pilot.press("6", "6")
+        await pilot.press("f10")
+        await pilot.pause()
+        assert isinstance(app.screen, EntropyWaitScreen)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, DiceScreen)
+        assert app.screen.rolls == "66"
+
+
+async def test_a_pool_that_was_ready_all_along_shows_no_wait_at_all() -> None:
+    """The ordinary case: entropy-consuming work is sequenced after the picker, the home screen
+    and the dice, which is the whole reason the pool has had a chance to come up."""
+    app = build()
+    async with app.run_test(size=CONSOLE) as pilot:
+        await open_path(pilot, app, "Generate a new wallet")
+        await pilot.press("f10")
+        await pilot.pause()
+        assert isinstance(app.screen, RecoveryWordsScreen)
 
 
 async def test_a_failed_read_back_retries_the_same_words() -> None:

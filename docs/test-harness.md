@@ -77,6 +77,37 @@ Sparrow, Green and Blue Wallet.** #4's format decisions came from documentation;
 turns them into a regression test, and it is the difference between *we read the spec correctly* and
 *we read their output correctly*.
 
+## Testing the appliance's own adapters
+
+**A good test here asserts what crosses the port, never how the adapter reached it.** The
+behaviour of the camera probe, the randomness wait, the picker and the power-off is application
+behaviour, and it is asserted where all the other application behaviour is — driven headless
+through the display seam, pressing real keys against real screens. An adapter test that asserts a
+particular `ioctl` was issued in a particular order tests the transcript of an implementation: it
+fails on the first correct refactor and catches nothing a boot would not catch better.
+
+**No new seam.** The four ports are the seam and stay the only one. The adapters get no injectable
+syscall dependency — a constructor parameter only tests ever vary is a fifth seam in production
+code paying rent to the suite.
+
+**Everything decidable without hardware is a pure function**, tested directly with no mocks and no
+devices, because that is where the risk is: pixel-format conversion to the port's greyscale
+contract including the strides where image width and row length differ, the format preference
+order as a function from *what the device offers* to *what we ask for*, the V4L2 structure
+layouts round-tripped against known byte layouts, capture-device selection from candidate nodes
+and their capabilities, and layout-name validation from a directory listing.
+
+**Three behaviours are patched at the standard-library boundary**, because they must be right and
+are not otherwise observable: the non-blocking-then-blocking ordering of the randomness call and
+the readiness answer it produces; that the keymap loader is invoked exactly once with the chosen
+layout and that a non-zero result becomes a visible failure; and that the power-off issues a
+forced stop. They are patched where the adapter calls the standard library, which keeps the
+adapter's own signature clean.
+
+What is left is the syscall glue, kept short enough to read in one sitting so the untested
+remainder is small enough to audit by eye. Its verification procedure is written down rather than
+implied: [`boot-checklist.md`](boot-checklist.md) items 4, 11, 12, 13, 14, 15, 19 and 20.
+
 ## Asserting the display
 
 **Two levels, and pixels are not one of them.**

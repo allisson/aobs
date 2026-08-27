@@ -27,6 +27,12 @@ py3-pillow=12.2.0-r0
 # `bitcoin-core/secp256k1` release with `--enable-module-schnorrsig --enable-module-extrakeys`,
 # which is what BIP86 needs. `-dev` is not wanted: ctypes loads `libsecp256k1.so.2` at runtime.
 libsecp256k1=0.5.0-r1
+# `loadkeys` and the maps it loads. The `Keymap` adapter shells out to the first and reads the
+# second — `docs/boot-pipeline.md` already counts both in the image's closure, and pinning them
+# here is what stops the version the adapter was written against from drifting from the one the
+# ISO installs. `kbd-misc` is what makes `layouts()` return more than the default.
+kbd=2.8.0-r0
+kbd-misc=2.8.0-r0
 
 # The harness. Not installed on the appliance — the ISO carries no test runner.
 py3-pytest=9.0.3-r0
