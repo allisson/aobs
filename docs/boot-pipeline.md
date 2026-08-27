@@ -3,8 +3,35 @@
 How `bitcoin-signer-amd64.iso` is built, what it contains, and what happens between power-on and the
 first screen.
 
-Producing the ISO is out of scope for this effort. Deciding how it works is this document, written
-precisely enough that building it is mechanical.
+Producing the ISO — release engineering, hosting, signing keys — is out of scope for this effort.
+Deciding how it works is this document, written precisely enough that building it is mechanical.
+
+**Where each decision below now lives**, since a decision readable only in a diff is invisible to
+the next session:
+
+| | |
+|---|---|
+| the kernel, as one reviewable file | `build/kernel.config` |
+| PID 1 | `build/init` |
+| the four stages | `build/mkiso.sh`, `build/Dockerfile.iso` |
+| the fixed cmdline, per firmware path | `build/isolinux.cfg`, `build/grub.cfg` |
+| every build-time assertion, as pure functions | `build/verify.py` |
+| the assertions that cannot be pure — one signature in each scheme, in the built rootfs | `build/assert_in_rootfs.py` |
+| each assertion fed a deliberately broken input | `tests/test_build_verifier.py` |
+
+Two things in this document are implemented differently from the letter of it, both narrowed rather
+than widened, and both written down where they happen:
+
+- **PID 1 sets the keymap but not the font.** There is no font file in the image to load: the
+  kernel's built-in 8×16 font is already the one #3's exact-1:2 cell requirement asks for, which is
+  the same reason `font-terminus` is dropped below.
+- **The BIP86 assertion signs and verifies rather than comparing bytes.** A BIP340 signature is not
+  required to be byte-stable — any valid nonce yields a valid signature, and implementations
+  measurably disagree on the one they pick — so a pinned Schnorr vector would assert something
+  BIP340 never promised and fail against a perfectly good library. Verification proves what the
+  check is for: that the `schnorrsig`/`xonly`/`keypair` symbols bound at all. The BIP84 ECDSA half
+  *is* compared byte for byte, because RFC6979 plus embit's low-R grinding makes it deterministic.
+  `PublicKey.schnorr_verify` is not what verifies — see below for why it must never be called.
 
 Almost every constraint here arrives from a closed ticket rather than being chosen freshly:
 [#2](https://github.com/allisson/aobs/issues/2) (no network stack),
@@ -192,6 +219,22 @@ Measured from Alpine v3.24 `APKINDEX` dependency closures, x86_64, installed siz
 Largest: `python3` 22.42, `libcrypto3` 4.97, `py3-pygments` 4.31, `py3-cryptography` 3.42, `kbd-misc`
 3.19, `py3-textual` 2.70. For scale, `linux-lts` is **151.76 MiB**, almost entirely the modules this
 build does not produce.
+
+**Measured at the first real build, and larger than the table above: 97.1 MiB in 96 packages.**
+
+The table was computed from `APKINDEX` dependency closures before a rootfs existed. What it missed
+is Alpine v3.24's `-pyc` companion subpackages — `py3-textual-pyc`, `py3-rich-pyc`,
+`py3-pygments-pyc` and so on, pulled in through `install_if` once `python3-pyc` is present — which
+roughly doubles every Python payload. The three packages the table counted in prose but no pin
+named (`busybox`, `busybox-binsh`, `alpine-baselayout`) account for about 1 MiB of the difference;
+the bytecode accounts for the rest.
+
+**This does not move the RAM floor and nothing here is re-derived on its account:** 97 MiB unpacked
+against a 512 MiB floor leaves the same real headroom, and the working set is dominated by
+Argon2id's transient and the Python heap rather than by the tree on disk. It is recorded because
+the build prints both measurements at every run precisely so this number stays a measurement.
+Dropping the bytecode would be a size *optimisation* with a first-import cost, and it is not one
+this document asks for.
 
 **The initramfs size risk is closed.** ~54 MiB of mostly-text Python zstd-compresses to roughly 20 MiB,
 plus a no-net/no-block kernel around 8 MiB: a **~30 MiB image**. No BIOS or UEFI implementation

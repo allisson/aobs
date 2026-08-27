@@ -1,0 +1,141 @@
+#!/bin/sh
+#
+# PID 1. `docs/boot-pipeline.md`: a short POSIX shell script that ends in `exec python3 -m aobs`,
+# so the app itself is PID 1 for the session. There is no init system, no OpenRC, no supervisor, no
+# inittab, no getty, no VT switching. If the app exits, the kernel panics on init death rather than
+# dropping to a shell (`panic=0` hangs there, visibly).
+#
+# It does only what nothing else can, and in this order:
+#
+#   1. Mount `proc`, `sys`, `dev`, `devpts`, `shm` — tmpfs and pseudo-filesystems only.
+#   2. Put the console in UTF-8 and load the default keymap, so the picker is typeable.
+#   3. Flip `authorized_default=0` on every root hub, after our own devices enumerate and
+#      before the first secret is entered (#14).
+#   4. Check available RAM against the floor and refuse to start below it (#10).
+#   5. `exec` the app.
+#
+# **Not Python**, and that is a decision rather than an accident: writing PID 1 in Python would put
+# `ctypes`-wrapped `mount(2)` calls in the one process that cannot be restarted and is hardest to
+# test. Everything here is a `mount` or an `echo` into sysfs.
+#
+# There is no `set -e`. A failure here must be *named on the console and held there*, never a
+# silent exit — an init that dies is a kernel panic the user cannot read past, which is the one
+# failure `docs/failure-states.md` refuses to ship. Each step below checks its own result.
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+#: The RAM floor, in KiB. 512 MiB, derived rather than asserted (`docs/boot-pipeline.md`): unpacked
+#: rootfs ~54 MiB + kernel ~50 MiB + Argon2id's 64 MiB transient (#9) + the Python heap + camera
+#: buffers is a ~200 MiB working set. 512 MiB leaves real headroom, sits below anything amd64
+#: hardware that boots UEFI actually has, and is a number a user can check. `build/mkiso.sh` prints
+#: the measured initramfs and rootfs sizes at every build so this figure stays derived.
+RAM_FLOOR_KIB=524288
+
+#: How long to let USB enumeration settle before revoking authorization. There is no udev here and
+#: nothing to wait on, so this is a wait rather than a signal. `docs/boot-checklist.md` states the
+#: limit this creates rather than hiding it: between power-on and the flip there is a window of
+#: seconds in which an inserted device would be authorized.
+USB_SETTLE_SECONDS=3
+
+# A refusal the user can read, then power off on a keypress. Never a reboot: there is nothing to
+# reboot into, and a loop would flash the explanation past them.
+refuse() {
+	printf '\n  %s\n\n  %s\n' "$1" "$2" >/dev/console
+	printf '  Press any key to power off.\n' >/dev/console
+	read -r _ </dev/console
+	poweroff -f
+	# `poweroff -f` does not return. If it somehow does, hang visibly rather than exiting: an
+	# init that exits is a kernel panic, and the message above would scroll away underneath it.
+	while true; do read -r _ </dev/console; done
+}
+
+# --- 1. Mounts: tmpfs and pseudo-filesystems only ------------------------------------------------
+#
+# This is the claim "no filesystem is ever mounted" made true of the running system: `/proc/mounts`
+# on the appliance lists exactly these, and no other kind of mount is possible — there is no block
+# layer in the kernel to mount one from.
+
+mount -t proc -o nosuid,nodev,noexec proc /proc ||
+	refuse "Cannot mount /proc." "The appliance cannot start."
+mount -t sysfs -o nosuid,nodev,noexec sysfs /sys ||
+	refuse "Cannot mount /sys." "The appliance cannot start."
+mount -t devtmpfs -o nosuid,mode=0755 dev /dev ||
+	refuse "Cannot mount /dev." "The appliance cannot start."
+mkdir -p /dev/pts /dev/shm
+mount -t devpts -o nosuid,noexec,gid=5,mode=0620 devpts /dev/pts ||
+	refuse "Cannot mount /dev/pts." "The appliance cannot start."
+mount -t tmpfs -o nosuid,nodev,mode=1777 shm /dev/shm ||
+	refuse "Cannot mount /dev/shm." "The appliance cannot start."
+
+# --- 2. Console -----------------------------------------------------------------------------------
+#
+# UTF-8 first: the TUI draws box characters, and a console left in the default 8-bit mode renders
+# them as mojibake — which on the seed-entry and review screens is not cosmetic.
+#
+# **No `setfont`.** The kernel's built-in 8×16 font is already the one #3's exact-1:2 cell
+# requirement asks for, which is precisely why `font-terminus` (2.17 MiB) is not installed. There
+# is no font file in the image to load.
+#
+# The keymap loaded here is only the default, so that the **picker** is typeable. Choosing the map
+# is the app's first screen (#12): a user on AZERTY or ABNT2 who types a BIP39 passphrase through a
+# US map creates a wallet they can never reopen, with no error and no signal.
+
+kbd_mode -u -C /dev/console 2>/dev/null
+printf '\033%%G' >/dev/console
+loadkeys us >/dev/null 2>&1 ||
+	refuse "Cannot load the default keymap." \
+		"Without it the keymap picker cannot be trusted, so the appliance will not start."
+
+# --- 3. USB: revoke authorization for anything plugged in from here on (#14) ---------------------
+#
+# Our own keyboard and camera have enumerated by now. From this point a device plugged in binds
+# nothing: `authorized_default=0` means new devices are not authorized, and with `CONFIG_MODULES=n`
+# and only `usbhid` and `uvcvideo` compiled in there is nothing else for one to bind to anyway.
+#
+# This happens **before the first secret is entered**, which is #14's sequencing and is the reason
+# it is here rather than anywhere in the app.
+
+sleep "$USB_SETTLE_SECONDS"
+
+for hub in /sys/bus/usb/devices/usb*/authorized_default; do
+	# No USB at all — a PS/2 keyboard and no camera — is a legitimate configuration, and the glob
+	# then matches nothing. A hub that exists and *refuses the write* is not: the claim would be
+	# false and the user would never know.
+	[ -e "$hub" ] || continue
+	echo 0 >"$hub" 2>/dev/null ||
+		refuse "Cannot revoke USB authorization on $hub." \
+			"A device plugged in mid-session would enumerate, so the appliance will not start."
+done
+
+# The module-wide default, for hubs that appear after this point.
+if [ -w /sys/module/usbcore/parameters/authorized_default ]; then
+	echo 0 >/sys/module/usbcore/parameters/authorized_default 2>/dev/null
+fi
+
+# --- 4. The RAM floor (#10) ----------------------------------------------------------------------
+#
+# A clear refusal now, rather than an OOM kill later with a wallet loaded. `MemAvailable` is the
+# right field: `MemTotal` counts memory the initramfs itself is already holding.
+
+available_kib=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo)
+if [ -z "$available_kib" ]; then
+	available_kib=$(awk '/^MemFree:/ { print $2 }' /proc/meminfo)
+fi
+if [ -n "$available_kib" ] && [ "$available_kib" -lt "$RAM_FLOOR_KIB" ]; then
+	refuse "This machine has $((available_kib / 1024)) MiB of memory available; the appliance needs 512 MiB." \
+		"Signing would be killed part-way rather than failing here, so it will not start."
+fi
+
+# --- 5. The app ----------------------------------------------------------------------------------
+#
+# `exec`, so the app *is* PID 1: exactly one userspace process exists for the whole session, which
+# is what makes `docs/threat-model.md`'s claim (iii) structural rather than a promise — a stranger
+# checks it with `ls -d /proc/[0-9]*`.
+#
+# The app installs its own failure handler before it constructs anything, names any failure on
+# screen, and waits for a keypress before forcing power-off. Reaching the line after this `exec` is
+# impossible; if it somehow happened, the kernel would panic on init death and hang there.
+
+cd /
+exec python3 -m aobs </dev/console >/dev/console 2>&1
