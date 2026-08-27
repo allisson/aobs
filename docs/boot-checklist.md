@@ -1,7 +1,14 @@
 # Boot checklist
 
 The checks that only a booted appliance can answer. Everything else is automated — see
-[`test-harness.md`](test-harness.md).
+[`test-harness.md`](test-harness.md) for the application and `build/verify.py` for the image.
+
+**The boundary is the point of this document.** The build now refuses to produce an ISO when a claim
+about the *configuration* goes false — no networking, no modules, exactly two USB class drivers, no
+getty, no package manager, both signature schemes working against the packaged `libsecp256k1`. None
+of that is evidence about a *running machine*: whether the medium is really never read again,
+whether `authorized_default` really reads `0`, whether `fbcon` really gives 85×43 on your firmware.
+That is this list, and no runner will ever shorten it.
 
 **This is published with the ISO, not kept internal.** Each item below is the verification procedure
 for a claim this project makes in public, and a claim whose procedure is unwritten is not really

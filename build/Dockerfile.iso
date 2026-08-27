@@ -1,0 +1,45 @@
+# The ISO build tier. Separate from `build/Dockerfile.test` on purpose: the dev loop must never
+# need a kernel toolchain, and building an image must never need a test runner.
+#
+#     docker build -f build/Dockerfile.iso -t aobs-iso .
+#     mkdir -p out && docker run --rm --privileged -v "$PWD:/src" -v "$PWD/out:/out" aobs-iso
+#
+# `--privileged` is for one thing: `chroot /rootfs /usr/bin/python3` in stage 1, which runs the
+# in-rootfs signature assertions inside the userland the image will actually carry. Nothing else in
+# the build needs it.
+#
+# `docs/boot-pipeline.md`: building the ISO needs a container runtime on the host and nothing else.
+#
+# `--platform=linux/amd64` is not optional and not a portability nicety. The artifact is
+# `bitcoin-signer-amd64.iso`; `syslinux` exists for no other architecture in Alpine, and an
+# aarch64 builder would silently install an aarch64 userland into a rootfs meant for an x86_64
+# kernel. On an Apple-silicon or other arm64 host this runs under emulation — correct, and slow
+# enough that the kernel stage is measured in hours rather than minutes.
+FROM --platform=linux/amd64 alpine:3.24
+
+# The toolchain, pinned by exact version like every other input — `build/Dockerfile.test` is the
+# model, and a repository whose selling point is that every input is pinned cannot make an exception
+# for the thing that builds it.
+#
+# These are **not** in `build/apk-versions.txt`, and that is the one judgement here. That file's
+# contract is "what goes into the image, read by both tiers": `Dockerfile.test` installs every line
+# of it with `grep -v '^#'` on purpose, and a compiler in that list would land in the test tier,
+# which needs none of it. Nothing below is installed into `/rootfs`.
+#
+# It does not make the build reproducible and does not claim to: the same compiler version can still
+# emit a different binary. `docs/boot-pipeline.md` puts reproducible builds out of scope and says
+# nothing here forecloses them; pinning is the part that costs nothing.
+RUN apk add --no-cache \
+	build-base=0.5-r4 bison=3.8.2-r3 flex=2.6.4-r8 perl=5.42.2-r0 bc=1.08.2-r1 \
+	elfutils-dev=0.195-r0 openssl-dev=3.5.8-r0 linux-headers=7.0.0-r1 \
+	xz=5.8.3-r0 zstd=1.5.7-r2 cpio=2.15-r0 tar=1.35-r5 wget=1.25.0-r3 \
+	xorriso=1.5.8-r0 syslinux=6.04_pre1-r19 grub=2.14-r0 grub-efi=2.14-r0 \
+	mtools=4.0.49-r0 dosfstools=4.2-r2 \
+	python3=3.14.7-r1
+
+# Kernel builds are noisy about a locale and a timezone neither the build nor the appliance has.
+ENV LC_ALL=C
+ENV KBUILD_BUILD_TIMESTAMP="aobs"
+
+WORKDIR /src
+CMD ["/bin/sh", "/src/build/mkiso.sh"]

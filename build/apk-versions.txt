@@ -1,10 +1,17 @@
 # The exact apk versions the test tier installs, from Alpine v3.24, x86_64.
 #
 # `docs/test-harness.md` requires the tier to install *the exact versions the ISO installs*, so a
-# `zxing-cpp` or `cryptography` skew fails in CI rather than on the appliance. The ISO build does
-# not exist yet — `docs/boot-pipeline.md` is a separate spec — so what this file pins today is
-# Alpine v3.24 as it stands, read from the published `APKINDEX`. When the ISO build lands it reads
-# this same file, so the two cannot drift apart silently.
+# `zxing-cpp` or `cryptography` skew fails in CI rather than on the appliance. What this file pins
+# is Alpine v3.24 as it stands, read from the published `APKINDEX`, and it has three consumers:
+# `build/Dockerfile.test` installs **both** groups below, `build/mkiso.sh` installs the appliance
+# group **only**, and `build/verify.py` parses it to assert that no harness package reached the
+# rootfs. One list, so the two tiers cannot drift apart silently.
+#
+# The `# @group` markers are **machine-readable and load-bearing**. The split used to be a prose
+# comment with `py3-pip` on the far side of it, which means a parser reading the file naively — as
+# `Dockerfile.test` does, and is right to do, because it wants both halves — would have put a
+# package manager in the rootfs and defeated a published claim with nothing noticing. A package
+# outside any group is a parse error in `verify.py`, not a guess.
 #
 # Regenerate with:
 #   curl -s https://dl-cdn.alpinelinux.org/alpine/v3.24/{main,community}/x86_64/APKINDEX.tar.gz
@@ -13,7 +20,22 @@
 # neither `embit` nor a UR library. Both are vendored in the app tree (`aobs/core/vendor/`), so
 # nothing here needs to install them.
 
-# The appliance's own dependencies.
+# The appliance's own dependencies. Everything below this marker is installed into the rootfs.
+# @group appliance
+# The userland PID 1 itself needs, and the one part of this list the test tier never exercised:
+# `build/Dockerfile.test` inherits busybox and the base layout from the `alpine:3.24` image, so
+# neither was ever a *listed* dependency — and the first ISO build produced a rootfs with no
+# `/bin/sh`, no `mount`, no `sleep` and no `poweroff`, in which `build/init` could not have run a
+# single line. `check_rootfs` now asserts the interpreter and the shell are present for exactly
+# that reason. `docs/boot-pipeline.md`'s size table already counted both in the closure.
+#
+# `busybox-binsh` is what provides `/bin/sh`. Busybox being in the image is deliberate and stated:
+# "no shell on the appliance" would protect nobody, since Python is in the image and can `os.execv`
+# anything. The true claim is the one the build checks — no getty, no VT with a login, no path from
+# the running app to a prompt.
+busybox=1.37.0-r31
+busybox-binsh=1.37.0-r31
+alpine-baselayout=3.7.2-r1
 python3=3.14.7-r1
 py3-cryptography=47.0.0-r0
 py3-argon2-cffi=25.1.0-r1
@@ -34,7 +56,9 @@ libsecp256k1=0.5.0-r1
 kbd=2.8.0-r0
 kbd-misc=2.8.0-r0
 
-# The harness. Not installed on the appliance — the ISO carries no test runner.
+# The harness. Not installed on the appliance — the ISO carries no test runner and no package
+# manager, and `build/verify.py` fails the build if any name below reaches the rootfs.
+# @group harness
 py3-pytest=9.0.3-r0
 py3-pytest-asyncio=1.3.0-r1
 py3-hypothesis=6.151.12-r0
