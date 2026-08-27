@@ -232,6 +232,7 @@ _MUST_BE_ON: dict[str, str] = {
     "CONFIG_INPUT": "the keyboard",
     "CONFIG_INPUT_KEYBOARD": "the keyboard",
     "CONFIG_INPUT_EVDEV": "the keyboard",
+    "CONFIG_HID_SUPPORT": "the menu `CONFIG_HID` lives under: without it HID drops silently",
     "CONFIG_HID": "the keyboard",
     "CONFIG_HID_GENERIC": "the keyboard",
     "CONFIG_USB_SUPPORT": "the two USB class drivers #14 allows",
@@ -283,6 +284,9 @@ _USB_ALLOWED = frozenset(
         "CONFIG_USB_OHCI_HCD",
         "CONFIG_USB_OHCI_HCD_PCI",
         "CONFIG_USB_UHCI_HCD",
+        # Not a driver: an endianness constant kconfig `select`s alongside the OHCI controller.
+        # It appears in the generated `.config` without anyone asking for it.
+        "CONFIG_USB_OHCI_LITTLE_ENDIAN",
         "CONFIG_USB_HIDDEV",
         "CONFIG_USB_ANNOUNCE_NEW_DEVICES",
         # The V4L2 menu `uvcvideo` lives under, and `uvcvideo`'s own sub-option. Neither is a

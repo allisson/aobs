@@ -115,10 +115,17 @@ from a real wallet fails CI rather than quietly committing an xpub.
 
 ## Status
 
-The build exists and **nothing here has been run on real hardware.** `build/kernel.config` is
-checked against every claim it carries, by `tests/test_build_verifier.py`, which also feeds each
-assertion a deliberately broken input to prove it still bites. What no test in this repository can
-tell you is whether the resulting kernel boots, finds a framebuffer and enumerates a camera on your
-machine — that is `docs/boot-checklist.md`, and it is published with the ISO.
+The build exists and **nothing here has been run on real hardware.**
+
+What is verified: `build/kernel.config` is checked against every claim it carries by
+`tests/test_build_verifier.py`, which also feeds each assertion a deliberately broken input to prove
+it still bites, and the config has been through `kconfig`'s own dependency resolution — 613 symbols
+against 6.12.106, no violations. Stages 0 and 1 of the build run end to end: 96 pinned packages,
+97.1 MiB, and both signature schemes signing inside the rootfs the image will carry.
+
+What is not: no ISO has been produced. The kernel compile, the initramfs and `xorriso` are written
+and unexecuted. And no test in this repository can tell you whether the resulting kernel boots,
+finds a framebuffer and enumerates a camera on your machine — that is `docs/boot-checklist.md`, and
+it is published with the ISO.
 
 The claims in `docs/` state what is checkable and how.
