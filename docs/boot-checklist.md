@@ -67,27 +67,51 @@ boot" must not be read as "no device is ever authorized".
 13. **A multi-frame PSBT scans end to end from a real screen**, with decode progress advancing — the
     feedback #3 chose over a viewfinder.
 
+14. **A webcam offering only compressed formats is a named camera problem, not a black picture.**
+    With an MJPEG-only camera attached, the appliance reaches the home screen with the scan paths
+    marked unavailable — the same session a machine with no webcam gets — rather than showing an
+    empty framing aid the user would keep re-aiming at. *(#48. The accepted formats are `GREY`,
+    `YUYV`, `UYVY`, `NV12`, `YU12` and `YV12`; a JPEG decoder is not on the appliance.)*
+
+15. **The camera is released between uses.** Probe at startup, then scan, then leave and scan
+    again: each works. A leaked descriptor is a camera that works exactly once per session, which
+    looks like flaky hardware rather than like a bug. *(#48)*
+
 ## Refusals and failure
 
-14. **The RAM-floor refusal fires.** Boot with less than 512 MiB available and the appliance stops with
+16. **The RAM-floor refusal fires.** Boot with less than 512 MiB available and the appliance stops with
     a clear message rather than starting and dying mid-session with a wallet loaded. *(#10, #12)*
 
-15. **There is no path from the running app to a prompt.** No getty, no VT with a login, no VT
+17. **There is no path from the running app to a prompt.** No getty, no VT with a login, no VT
     switching; Ctrl+Alt+Del does nothing; SysRq does nothing.
 
     **Not defended, and confirm it behaves as documented rather than pretending otherwise:**
     `init=/bin/sh` typed at the bootloader does give a shell. That is stated, not defended — a fresh
     boot holds no secrets. *(#12)*
 
-16. **A failure shows a screen naming it**, waits for a keypress, then powers off. The outcome to check
+18. **A failure shows a screen naming it**, waits for a keypress, then powers off. The outcome to check
     for is the one that must never happen: a silent power-off with no explanation. *(#12)*
 
-17. **No date or time is displayed anywhere**, and an `nLockTime` is shown raw with no judgement about
+19. **A cold boot reaches the randomness wait screen, and leaves it on its own.** On a machine
+    whose pool is slow to initialise — which is what `random.trust_cpu=off
+    random.trust_bootloader=off` is for — go straight to *generate a wallet* and skip the dice.
+    The wait screen appears, names typing and pointing the camera at something, and **clears
+    itself** the moment the pool comes up, with no key pressed. `esc` leaves it, and the rolls are
+    still there on the dice screen behind. *(#8, #48. The outcome to check for is the one this
+    screen exists to prevent: the appliance freezing inside a syscall with nothing on screen.)*
+
+20. **A keymap that will not load is named before any secret exists.** Select a layout whose map
+    the image does not ship — or run with the loader removed — and the appliance names the failure
+    on the fault screen while the picker is still the first screen. A silently failed application
+    is a passphrase typed through the wrong map, which is an unopenable wallet that reports no
+    error. *(#12, #48)*
+
+21. **No date or time is displayed anywhere**, and an `nLockTime` is shown raw with no judgement about
     whether it has passed — there is no clock to make that judgement with. *(#12)*
 
 ## Interop
 
-18. **A full round trip with each target watch-only wallet**, on mainnet: export the descriptor, have
+22. **A full round trip with each target watch-only wallet**, on mainnet: export the descriptor, have
     the wallet build a PSBT, scan it, sign, scan the result back, broadcast.
 
     **This is the check with the fewest substitutes.** #5 found that Green cannot receive taproot over

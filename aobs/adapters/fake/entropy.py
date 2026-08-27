@@ -15,6 +15,15 @@ class FixedEntropySource:
         self._seed = seed
         self._counter = 0
         self.calls: list[int] = []
+        #: How many `ready()` calls answer *not yet* before the pool comes up. Zero — a pool that
+        #: was ready before it was asked — is the ordinary case, so it is the default and every
+        #: existing test keeps its behaviour. A test that wants the wait screen sets it.
+        self.not_ready_for = 0
+        self.readiness_asked = 0
+
+    def ready(self) -> bool:
+        self.readiness_asked += 1
+        return self.readiness_asked > self.not_ready_for
 
     def random_bytes(self, count: int) -> bytes:
         self.calls.append(count)

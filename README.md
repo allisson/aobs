@@ -11,15 +11,19 @@ decision made only inside a code diff is invisible to the next session.
 
 ## What exists today
 
-`aobs/core/` — the pure core — the harness around it, and the application shell. There are no real
-adapters and no ISO yet, and most screens are still later specs.
+`aobs/core/` — the pure core — the harness around it, the application, and both halves of every
+port. `python3 -m aobs` starts a signer whose camera is a webcam, whose randomness is the kernel,
+whose keymap picker changes the keyboard and whose `F12` stops the machine. There is no ISO yet:
+`docs/boot-pipeline.md` is a separate spec, and it is what will `exec` this.
 
 | | |
 |---|---|
 | `aobs/core/` | Bytes in, value objects out. No I/O, no clock, no ambient state. |
 | `aobs/ports/` | The four ports: `FrameSource`, `Keymap`, `EntropySource`, `Power`. |
-| `aobs/adapters/fake/` | The harness half of each port. The real half is a later spec. |
-| `aobs/ui/` | The Textual application: global keys, the failure shape, the keymap picker. |
+| `aobs/adapters/fake/` | The harness half of each port: image files, fixed bytes, recorders. |
+| `aobs/adapters/real/` | The appliance's half: V4L2 capture, `getrandom`, `loadkeys`, power-off. |
+| `aobs/ui/` | The Textual application: global keys, the failure shape, every screen. |
+| `aobs/__main__.py` | What PID 1 `exec`s, and the one place the real adapters are named. |
 | `fixtures/` | Every fixture, and the one script that generates them all. |
 | `build/` | The test tier, and the apk pins the ISO build will read. |
 

@@ -1,8 +1,8 @@
 """The four ports.
 
 `docs/test-harness.md` fixes them, and each has exactly two adapters. This package declares the
-interfaces; `aobs/adapters/fake/` holds the harness half and the real half lands with the
-appliance's own spec.
+interfaces; `aobs/adapters/fake/` holds the harness half and `aobs/adapters/real/` the
+appliance's.
 
 There was a fifth name here, `Screen`, and it was wrong. Its two adapters were "Textual on the
 console" and "Textual `run_test()`" — the *same* application under two drivers, not two
