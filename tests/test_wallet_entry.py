@@ -35,7 +35,8 @@ from aobs.ui.screens.export_password import (
     ExportPasswordScreen,
 )
 from aobs.ui.screens.fingerprint import COMPARE_IT, RECORD_IT, FingerprintScreen
-from aobs.ui.screens.home import CHOOSE_NETWORK, PATHS, HomeScreen
+from aobs.ui.screens.home import CHOOSE_NETWORK, NETWORK_FIXED, PATHS, HomeScreen
+from aobs.ui.screens.network import NetworkScreen
 from aobs.ui.screens.passphrase import PassphraseScreen
 from aobs.ui.screens.recovery_words import RecoveryWordsScreen
 from aobs.ui.screens.seed_entry import CHECKSUM_FAILED, READ_BACK_FAILED, SeedEntryScreen
@@ -131,23 +132,103 @@ async def test_the_three_ways_in_are_peers_on_one_screen() -> None:
             assert "path-unavailable" not in widget.classes or PATHS[index].needs_camera
 
 
-async def test_the_network_is_chosen_before_the_wallet_and_fixed_after_it() -> None:
+NETWORK_PATH = "Choose the network"
+
+
+async def load_wallet(pilot, app: SignerApp) -> None:
+    """Reach a loaded wallet the way the appliance does — through the passphrase screen, which is
+    the one tail all three ways in share, and therefore the one place the latch can close."""
+    app.begin_passphrase(VECTOR_MNEMONIC)
+    await pilot.pause()
+    await pilot.press("f10")
+    await pilot.pause()
+
+
+async def test_mainnet_is_the_default_and_costs_no_keypress() -> None:
+    """The appliance is written for a stranger booting the ISO with real funds. The default is not
+    silent for being free: it is on the header and on the path's own line."""
     app = build()
     async with app.run_test(size=CONSOLE) as pilot:
         await reach_home(pilot)
         assert app.network is Network.MAINNET
         assert CHOOSE_NETWORK in texts(app)
-        await pilot.press("right")
-        await pilot.pause()
-        assert app.network is Network.TESTNET4
-        assert "testnet4" in texts(app), "the header says which chain the session is on"
+        assert "aobs  ·  mainnet" in texts(app), "the header says which chain the session is on"
+        assert f"{NETWORK_PATH}  ·  mainnet" in texts(app), "and so does the path beside it"
 
-        app.wallet = Wallet.from_mnemonic(VECTOR_MNEMONIC, network=app.network)
-        app.screen.refresh(recompose=True)
+
+async def test_the_network_does_not_move_under_an_arrow_key() -> None:
+    """It used to move under left/right, one row from the up/down that selects a path — the only
+    setting on the appliance that changed without `F10`."""
+    app = build()
+    async with app.run_test(size=CONSOLE) as pilot:
+        await reach_home(pilot)
+        await pilot.press("right", "left", "right")
         await pilot.pause()
-        await pilot.press("right")
+        assert app.network is Network.MAINNET
+
+
+async def test_the_network_is_chosen_through_a_path_and_fixed_for_the_session() -> None:
+    app = build()
+    async with app.run_test(size=CONSOLE) as pilot:
+        await open_path(pilot, app, NETWORK_PATH)
+        assert isinstance(app.screen, NetworkScreen)
+        assert app.screen.selected_network is Network.MAINNET, "opens on the session's own network"
+
+        await pilot.press("down")
+        await pilot.press("f10")
         await pilot.pause()
-        assert app.network is Network.TESTNET4, "the network a wallet was derived on cannot move"
+        assert isinstance(app.screen, HomeScreen), "and lands back where it was opened from"
+        assert app.network is Network.TESTNET4
+        assert f"{NETWORK_PATH}  ·  testnet4" in texts(app)
+        assert not app.network_fixed, "reversible right up until a wallet is made"
+
+        await load_wallet(pilot, app)
+        assert app.network_fixed
+        assert app.wallet is not None and app.wallet.network is Network.TESTNET4
+
+
+async def test_the_network_path_closes_for_good_once_a_wallet_is_derived_on_it() -> None:
+    """A latch, not a guard on `app.wallet`: the rule the session has is *fixed for the rest of
+    the session*, and a later *forget this wallet* path must not quietly re-open it."""
+    app = build()
+    async with app.run_test(size=CONSOLE) as pilot:
+        await reach_home(pilot)
+        await load_wallet(pilot, app)
+        await pilot.press("f10")  # done, off the fingerprint screen
+        await pilot.pause()
+
+        assert NETWORK_FIXED in texts(app)
+        index = next(i for i, path in enumerate(PATHS) if path.name == NETWORK_PATH)
+        assert "path-unavailable" in app.screen.query_one(f"#path-{index}", Static).classes
+
+        await open_path(pilot, app, NETWORK_PATH)
+        assert isinstance(app.screen, HomeScreen), "the accept key on it does nothing at all"
+
+        # And the latch does not re-open even if the wallet itself goes away.
+        app.wallet = None
+        await open_path(pilot, app, NETWORK_PATH)
+        assert isinstance(app.screen, HomeScreen)
+
+
+async def test_the_fingerprint_screen_names_the_network() -> None:
+    """The master fingerprint comes from the seed and is identical on all four networks, so this
+    line is the only thing on that screen a wrong-network session would change."""
+    app = build()
+    async with app.run_test(size=CONSOLE) as pilot:
+        await open_path(pilot, app, NETWORK_PATH)
+        await pilot.press("down", "down")  # signet
+        await pilot.press("f10")
+        await pilot.pause()
+        await load_wallet(pilot, app)
+
+        assert isinstance(app.screen, FingerprintScreen)
+        assert "network  signet  ·  fixed for the rest of this session" in texts(app)
+
+        on_mainnet = Wallet.from_mnemonic(VECTOR_MNEMONIC, network=Network.MAINNET)
+        assert app.wallet is not None
+        assert app.wallet.fingerprint_hex == on_mainnet.fingerprint_hex, (
+            "which is exactly why the line has to be there"
+        )
 
 
 # --- Generation -----------------------------------------------------------------------------------

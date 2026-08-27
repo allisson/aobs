@@ -317,11 +317,13 @@ def _confirm_counts(review: Review) -> list[str]:
 
 
 class RefusalKind(str, Enum):
-    """The two kinds, and the only two.
+    """The three kinds, and the only three.
 
-    Getting the split wrong in either direction is a real failure: telling someone to retry a
+    Getting the split wrong in any direction is a real failure: telling someone to retry a
     transaction that can never be accepted teaches them the appliance is broken; telling someone
-    a truncated scan is unfixable sends them back to their wallet for no reason.
+    a truncated scan is unfixable sends them back to their wallet for no reason; and telling
+    someone whose session is on the wrong network that their wallet must build differently sends
+    them off to rebuild a transaction that was already correct.
     """
 
     #: The bytes did not arrive intact. A retry is the honest fix, and this is the only kind
@@ -329,21 +331,38 @@ class RefusalKind(str, Enum):
     TRANSFER_FAILED = "transfer-failed"
     #: Nothing on this device will help. The wallet has to build a different transaction.
     DEVICE_CANNOT_HELP = "device-cannot-help"
+    #: The fix may be on either side and the appliance cannot tell which. Both are named and
+    #: neither is recommended — `docs/network-selection.md`.
+    EITHER_SIDE = "either-side"
 
 
 RETRY_STEP = "Try scanning again."
 NO_RETRY_STEP = (
     "Retrying will not change this; your wallet must build the transaction differently."
 )
+#: One sentence, two fixes, no default. A mismatch has two causes the appliance cannot tell apart
+#: — the session is on the wrong network, or the transaction is — and `NO_RETRY_STEP` silently
+#: picks the second, sending someone off to rebuild a transaction that was already correct.
+EITHER_SIDE_STEP = (
+    "Retrying will not change this: either this session is on the wrong network — power off and "
+    "start it again on the one you meant — or your wallet must build the transaction differently."
+)
 
 #: Every reason declares its kind here, in one place. A new `RefusalReason` fails the test that
 #: sweeps this mapping until it says which kind it is.
 REFUSAL_KINDS: dict[RefusalReason, RefusalKind] = {
     RefusalReason.MALFORMED: RefusalKind.TRANSFER_FAILED,
-    RefusalReason.NETWORK_MISMATCH: RefusalKind.DEVICE_CANNOT_HELP,
+    RefusalReason.NETWORK_MISMATCH: RefusalKind.EITHER_SIDE,
     RefusalReason.MISSING_UTXO: RefusalKind.DEVICE_CANNOT_HELP,
     RefusalReason.SIGHASH_NOT_ALL: RefusalKind.DEVICE_CANNOT_HELP,
     RefusalReason.UNSIGNABLE_INPUT: RefusalKind.DEVICE_CANNOT_HELP,
+}
+
+#: The third sentence, per kind. Every kind is here or the sweep test fails.
+REFUSAL_STEPS: dict[RefusalKind, str] = {
+    RefusalKind.TRANSFER_FAILED: RETRY_STEP,
+    RefusalKind.DEVICE_CANNOT_HELP: NO_RETRY_STEP,
+    RefusalKind.EITHER_SIDE: EITHER_SIDE_STEP,
 }
 
 #: Two sentences per reason: what it is, and why it stops. The third — where the fix is — comes
@@ -385,6 +404,5 @@ def refusal_failure(refusal: Refusal) -> Failure:
     `docs/failure-states.md`'s and the widget cannot hold a `Button` at all.
     """
     condition, what, why = REFUSAL_SENTENCES[refusal.reason]
-    kind = REFUSAL_KINDS[refusal.reason]
-    step = RETRY_STEP if kind is RefusalKind.TRANSFER_FAILED else NO_RETRY_STEP
+    step = REFUSAL_STEPS[REFUSAL_KINDS[refusal.reason]]
     return Failure(condition=condition, happened=f"{what} {why}", next_steps=(step,))

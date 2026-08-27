@@ -98,12 +98,15 @@ class SignerApp(App[None]):
         #: What `core.mix()` reported, for a wallet generated here. `None` for one typed in or
         #: restored, because there was no mixing to report.
         self.mixing: MixingReport | None = None
-        #: Not settled by any document in `docs/`. This spec proceeds on the parent's stated
-        #: assumption — chosen on the wallet screen before the wallet is constructed, defaulting
-        #: to mainnet, shown in the header of every screen that shows money. If the assumption is
-        #: wrong the correction is one screen and this one argument, and it belongs on the map
-        #: rather than in a diff.
+        #: Which chain this session is on — `docs/network-selection.md`. Chosen from the wallet
+        #: screen before any wallet is constructed, defaulting to mainnet, and `account` stays 0.
         self.network = network
+        #: A one-way latch, not a guard on `self.wallet`. The two behave identically today because
+        #: nothing clears the wallet, and that is exactly the trap: a later *forget this wallet*
+        #: path would quietly re-open network switching, and the same seed could then be restored
+        #: onto a different chain with only the header changing. The rule the session actually has
+        #: is *fixed for the rest of the session*, so it is the rule that is written down.
+        self.network_fixed = False
         self.camera_available = False
         #: What an unrecoverable fault said, for a test to read. Never a traceback.
         self.fatal_message: str | None = None
@@ -307,6 +310,21 @@ class SignerApp(App[None]):
             return
         self.push_screen(RecoveryWordsScreen(self.mnemonic, read_back=False))
 
+    def open_network(self) -> None:
+        """*Choose the network*: a path opened with `F10`, not an arrow key on the home screen.
+
+        Unreachable once `network_fixed` — the home screen renders the path unavailable and
+        refuses to open it — so this never has to defend itself against a fixed session.
+        """
+        from aobs.ui.screens.network import NetworkScreen
+
+        self.push_screen(NetworkScreen(self.network))
+
+    def accept_network(self, network: Network) -> None:
+        """The chosen network, back from the picker. Reversible right up until a wallet is made."""
+        self.network = network
+        self.pop_screen()
+
     def begin_passphrase(self, mnemonic: str) -> None:
         """The words are settled, whichever path settled them. Ask for the passphrase once."""
         from aobs.ui.screens.passphrase import PassphraseScreen
@@ -333,11 +351,15 @@ class SignerApp(App[None]):
         wallet = Wallet.from_mnemonic(mnemonic, network=self.network, passphrase=passphrase)
         self.wallet = wallet
         self.mnemonic = mnemonic
+        #: The one place the latch closes, because this is the one place a wallet is derived on
+        #: the answer. It never re-opens.
+        self.network_fixed = True
         self.mixing = mixing_report(entropy, wallet) if entropy is not None else None
         self.switch_screen(
             FingerprintScreen(
                 wallet.fingerprint_hex,
                 created_here=entropy is not None,
+                network=self.network,
                 report=self.mixing,
             )
         )

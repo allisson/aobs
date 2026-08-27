@@ -15,6 +15,12 @@ difference, and differences here read as verdicts.
 **The fingerprint is a comparison, except the one time it cannot be.** On a wallet created here
 there is nothing to compare against, and the appliance says so and tells the user to record it —
 rather than showing a number that looks like a confirmation and is not (`docs/secret-hygiene.md`).
+
+**The network is stated here because this is where it stops being reversible**
+(`docs/network-selection.md`), and because it is the one thing on this screen the fingerprint
+cannot catch: the master fingerprint comes from the seed, so **it is identical on every network**.
+A wallet restored into the wrong session compares equal and derives different addresses. This line
+is the only thing that differs.
 """
 
 from __future__ import annotations
@@ -26,6 +32,7 @@ from textual.screen import Screen
 from textual.widgets import Static
 
 from aobs.core.entropy import MixingReport, SourceLabel
+from aobs.core.wallet import Network
 
 #: Verbatim, and distinct from the compare text below. A user reading the wrong one of these two
 #: sentences draws exactly the wrong conclusion from the same eight hex characters.
@@ -39,6 +46,11 @@ COMPARE_IT = (
     "Check this fingerprint against the one you recorded. If it differs, a word or the passphrase "
     "is not what you used before — and the addresses will not be yours."
 )
+
+#: A fact and a rule, not an offer — the choice is already made by the time this screen exists.
+#: It is here rather than only in the header because the fingerprint above it cannot catch a wrong
+#: network: the master fingerprint comes from the seed and is the same on all four.
+NETWORK_LINE = "network  {network}  ·  fixed for the rest of this session"
 
 KEYS = "F10 done  ·  F12 power off"
 
@@ -62,6 +74,7 @@ class FingerprintScreen(Screen):
 
     DEFAULT_CSS = """
     FingerprintScreen #mixing-facts { margin-top: 1; }
+    FingerprintScreen #fingerprint-network { margin-top: 1; }
     FingerprintScreen #fingerprint { margin-top: 1; text-style: bold; }
     FingerprintScreen #fingerprint-advice { margin-top: 1; }
     FingerprintScreen #fingerprint-keys { margin-top: 1; }
@@ -72,11 +85,13 @@ class FingerprintScreen(Screen):
         fingerprint_hex: str,
         *,
         created_here: bool,
+        network: Network,
         report: MixingReport | None = None,
     ) -> None:
         super().__init__()
         self._fingerprint_hex = fingerprint_hex
         self._created_here = created_here
+        self._network = network
         self._report = report
 
     def compose(self) -> ComposeResult:
@@ -84,6 +99,9 @@ class FingerprintScreen(Screen):
             yield Static("Your wallet is loaded", id="title")
             if self._report is not None:
                 yield Static(facts(self._report), id="mixing-facts")
+            yield Static(
+                NETWORK_LINE.format(network=self._network.value), id="fingerprint-network"
+            )
             yield Static(f"master fingerprint  {self._fingerprint_hex}", id="fingerprint")
             yield Static(
                 RECORD_IT if self._created_here else COMPARE_IT, id="fingerprint-advice"

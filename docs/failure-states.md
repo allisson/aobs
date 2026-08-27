@@ -81,17 +81,36 @@ from a different transaction* and a reset — not a stream that silently never c
 **Three sentences in a fixed shape: what it is, why it stops, and where the fix is.** The third is the
 one that prevents blind retry, and it is the whole point.
 
-Every refusal in #11's list is one of two kinds, and the appliance always says which:
+Every refusal in #11's list is one of three kinds, and the appliance always says which:
 
-- **Nothing on this device will help.** Non-`SIGHASH_ALL`, network mismatch, an unsignable input,
-  missing UTXO data. The transaction must be rebuilt. *Retrying will not change this; your wallet must
-  build the transaction differently.*
+- **Nothing on this device will help.** Non-`SIGHASH_ALL`, an unsignable input, missing UTXO data.
+  The transaction must be rebuilt. *Retrying will not change this; your wallet must build the
+  transaction differently.*
 - **The transfer failed.** An unparseable PSBT can be a truncated scan. *Try scanning again* is honest
   here — and **nowhere else**.
+- **The fix may be on either side, and the appliance cannot tell which.** Network mismatch, and only
+  network mismatch. *Retrying will not change this: either this session is on the wrong network —
+  power off and start it again on the one you meant — or your wallet must build the transaction
+  differently.*
 
 Getting that split wrong in either direction is a real failure: telling someone to retry a transaction
 that can never be accepted teaches them the appliance is broken; telling someone a truncated scan is
 unfixable sends them back to their wallet for no reason.
+
+### Why network mismatch is its own kind
+
+It was *nothing on this device will help* until
+[#46](https://github.com/allisson/aobs/issues/46), and that was the split being wrong in a third
+direction the two kinds could not express. A mainnet PSBT arriving at a signet session has two causes
+the appliance cannot distinguish: **the user chose the wrong network**, or **the watch-only wallet
+built the wrong transaction**. The first has its fix on this device — power off, start again — and
+saying *your wallet must build the transaction differently* silently picks the second, sending someone
+off to rebuild a transaction that was already correct.
+
+This is `docs/address-verification.md`'s **"not found", never "not yours"** applied to a refusal: two
+indistinguishable causes, so state what happened and name both fixes with neither recommended. It is
+still one sentence, so the three-sentence shape holds. `docs/network-selection.md` holds the rest of
+the network decision.
 
 ## What a failure costs
 

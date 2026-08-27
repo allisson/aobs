@@ -18,9 +18,15 @@ thing in all three cases, and two aiming implementations would drift.
 **This is also the wallet screen.** *Generate*, *type a seed in* and *restore from an encrypted
 wallet QR* sit here as peers of each other and of everything else, rather than under an *import*
 submenu — `docs/seed-entry.md` is explicit that burying the encrypted QR would hide the path two
-tickets were spent making safe. The network is chosen here too, for the same reason: it must be
-settled before a wallet is constructed, and this is the last screen before every path that
-constructs one. """
+tickets were spent making safe. The network is chosen from here too, for the same reason: it must
+be settled before a wallet is constructed, and this is the last screen before every path that
+constructs one.
+
+**The network is a path, not an arrow key** (`docs/network-selection.md`). It used to move under
+`left`/`right` on this screen, which made it the only setting on the appliance that changed without
+`F10` — and put a money-affecting choice one key away from the `up`/`down` that selects a path. It
+sits last because it is a setting rather than a way in, and it goes unavailable for good once a
+wallet has been constructed. """
 
 from __future__ import annotations
 
@@ -32,7 +38,6 @@ from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import Static
 
-from aobs.core.wallet import Network
 from aobs.ui.scanning import ScanTarget
 
 
@@ -43,11 +48,17 @@ class Path:
     name: str
     needs_camera: bool = False
     needs_wallet: bool = False
+    #: Unavailable once the session's network is fixed. Only the network path itself, which stops
+    #: being a choice the moment a wallet is derived on the answer.
+    needs_unfixed_network: bool = False
     #: What this path scans, for the three that scan. `None` is a path whose own spec opens it.
     scans: ScanTarget | None = None
     #: The method on the app that opens this path, for the ones that open a screen directly.
     #: Named rather than referenced so this table stays a value with no import in it.
     opens: str | None = None
+    #: An enum-valued session setting whose current value is shown after the name, for a path that
+    #: carries a setting rather than an action. Named rather than referenced, like `opens`.
+    shows: str | None = None
 
 
 PATHS: tuple[Path, ...] = (
@@ -70,6 +81,12 @@ PATHS: tuple[Path, ...] = (
     Path("Export the descriptor", needs_wallet=True, opens="open_descriptor"),
     Path("Export the encrypted wallet QR", needs_wallet=True, opens="open_wallet_export"),
     Path("Show recovery words", needs_wallet=True, opens="open_recovery_words"),
+    Path(
+        "Choose the network",
+        needs_unfixed_network=True,
+        opens="open_network",
+        shows="network",
+    ),
 )
 
 #: One sentence, and it says what happened rather than what to do: a camera authorised after
@@ -78,29 +95,41 @@ NO_CAMERA = "No camera was found, so the paths that scan a QR code are unavailab
 
 NO_WALLET = "No wallet is loaded yet, so the paths that need one are unavailable."
 
-#: Network selection is **not settled by any document in `docs/`**. This implements the parent
-#: spec's stated assumption: chosen here, before the wallet is constructed, defaulting to mainnet,
-#: with `account` fixed at 0 and not user-selectable. It is shown in the header of every screen
-#: that shows money, which is what makes the choice checkable rather than remembered. If the
-#: assumption is wrong the correction is one screen and one constructor argument, and it belongs
-#: on the map rather than in a diff.
-CHOOSE_NETWORK = "left/right changes the network. It is fixed once a wallet is loaded."
+#: Settled by `docs/network-selection.md`. Mainnet is the default and costs nothing, and the
+#: choice is stated rather than asked: here, and again on the fingerprint screen at the moment it
+#: stops being reversible. `account` stays 0 and is not user-selectable.
+CHOOSE_NETWORK = "The network is chosen before a wallet is made, and fixed for good once one is."
 
 #: What is left to say once it is fixed. Not an apology and not an offer: the wallet's addresses
 #: are derived on this network and changing it now would mean a different wallet.
 NETWORK_FIXED = "The network is fixed for the rest of this session."
 
 
-def is_available(path: Path, *, camera: bool, wallet: bool) -> bool:
-    return (camera or not path.needs_camera) and (wallet or not path.needs_wallet)
+def label(path: Path, app: object) -> str:
+    """The line for a path: its name, and for a path that carries a setting, the setting's value.
+
+    A stranger who wants mainnet pays nothing for it, and the way that stays honest rather than
+    silent is that the current answer is on the screen beside the question.
+    """
+    if path.shows is None:
+        return path.name
+    return f"{path.name}  ·  {getattr(app, path.shows).value}"
+
+
+def is_available(path: Path, *, camera: bool, wallet: bool, network_fixed: bool) -> bool:
+    return (
+        (camera or not path.needs_camera)
+        and (wallet or not path.needs_wallet)
+        and (not network_fixed or not path.needs_unfixed_network)
+    )
 
 
 class HomeScreen(Screen):
     BINDINGS = [
         Binding("up", "previous", "Previous path"),
         Binding("down", "next", "Next path"),
-        Binding("left", "previous_network", "Previous network"),
-        Binding("right", "next_network", "Next network"),
+        # No `left`/`right`: the network is a path opened with `F10` like everything else, not a
+        # setting that moves under an arrow key one row from the selection keys.
         # Never `enter`, never `esc` — `docs/failure-states.md`. `F10` is the one accept key the
         # appliance teaches, and the keymap picker already taught it.
         Binding("f10", "open", "Open this path"),
@@ -123,23 +152,26 @@ class HomeScreen(Screen):
         camera = app.camera_available  # type: ignore[attr-defined]
         wallet = app.wallet is not None  # type: ignore[attr-defined]
         network = app.network  # type: ignore[attr-defined]
+        network_fixed = app.network_fixed  # type: ignore[attr-defined]
         notice = app.notice  # type: ignore[attr-defined]
 
         with Vertical(id="frame"):
             yield Static(f"aobs  ·  {network.value}", id="title")
             with Vertical(id="paths"):
                 for index, path in enumerate(PATHS):
-                    available = is_available(path, camera=camera, wallet=wallet)
+                    available = is_available(
+                        path, camera=camera, wallet=wallet, network_fixed=network_fixed
+                    )
                     classes = ["path"] if available else ["path", "path-unavailable"]
                     if index == self._selected:
                         classes.append("path-selected")
                     yield Static(
-                        f"{'>' if index == self._selected else ' '} {path.name}",
+                        f"{'>' if index == self._selected else ' '} {label(path, app)}",
                         id=f"path-{index}",
                         classes=" ".join(classes),
                     )
             yield Static(
-                NETWORK_FIXED if wallet else CHOOSE_NETWORK, classes="note", id="network"
+                NETWORK_FIXED if network_fixed else CHOOSE_NETWORK, classes="note", id="network"
             )
             if not camera:
                 yield Static(NO_CAMERA, classes="note", id="no-camera")
@@ -170,26 +202,6 @@ class HomeScreen(Screen):
         self._selected = (self._selected + 1) % len(PATHS)
         self.refresh(recompose=True)
 
-    # --- the network -------------------------------------------------------------------------
-
-    def _cycle_network(self, delta: int) -> None:
-        """Only while there is no wallet: after that the addresses are derived on this network,
-        and changing it would silently mean a different wallet."""
-        app = self.app
-        if app.wallet is not None:  # type: ignore[attr-defined]
-            return
-        networks = list(Network)
-        app.network = networks[  # type: ignore[attr-defined]
-            (networks.index(app.network) + delta) % len(networks)  # type: ignore[attr-defined]
-        ]
-        self.refresh(recompose=True)
-
-    def action_previous_network(self) -> None:
-        self._cycle_network(-1)
-
-    def action_next_network(self) -> None:
-        self._cycle_network(1)
-
     def action_open(self) -> None:
         """Open the selected path, if this session can.
 
@@ -204,6 +216,7 @@ class HomeScreen(Screen):
             path,
             camera=app.camera_available,  # type: ignore[attr-defined]
             wallet=app.wallet is not None,  # type: ignore[attr-defined]
+            network_fixed=app.network_fixed,  # type: ignore[attr-defined]
         ):
             return
         if path.scans is not None:
