@@ -191,3 +191,17 @@ The stated, checkable claim about which facts of a build environment do not reac
 `bitcoin-signer-amd64.iso`. Not "the build is reproducible" — the word alone promises nothing. The
 contract is a list of environment facts that must not matter, so that a stranger who rebuilds from
 the same commit and gets a different hash has found a defect rather than a difference of opinion.
+
+## Input archive
+
+Every byte the build consumes that the build did not write: the two apk closures, Alpine's own
+signed package index, the base rootfs tarball, and the kernel source tarball. Named as one thing
+because it is fetched, verified and published as one thing — the archive is what makes a release
+rebuildable after the upstream that served those bytes has stopped serving them.
+
+## Witness build
+
+An independent rebuild of a release by someone other than the builder, published so that a third
+party can see the two hashes agree. Not a signature and not an approval: a witness asserts only
+that the same inputs produced the same output on a machine the builder does not control, which is
+the single observation that turns a reproducibility claim into a checkable one.
