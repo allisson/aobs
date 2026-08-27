@@ -29,7 +29,7 @@ from aobs.core.constants import (
     EXPORT_PASSWORD_WORDS,
 )
 from aobs.core.entropy import mix
-from aobs.core.wallet import Network, Wallet
+from aobs.core.wallet import Network, ScriptType, Wallet
 from aobs.core.wallet_qr import export_wallet
 from aobs.ports.frame_source import Frame
 from aobs.ui.app import SignerApp
@@ -41,6 +41,7 @@ from aobs.ui.screens.export_password import (
     NOT_IN_THE_QR,
     WRONG_PASSWORD,
     ExportPasswordScreen,
+    wrong_network,
 )
 from aobs.ui.screens.fingerprint import COMPARE_IT, RECORD_IT, FingerprintScreen
 from aobs.ui.screens.home import CHOOSE_NETWORK, NETWORK_FIXED, PATHS, HomeScreen
@@ -870,10 +871,10 @@ async def test_a_wallet_made_here_is_told_there_is_nothing_to_compare_against() 
 # --- Restoring from an encrypted wallet QR -----------------------------------------------------
 
 
-def a_backup() -> tuple[bytes, tuple[str, ...]]:
+def a_backup(network: Network = Network.MAINNET) -> tuple[bytes, tuple[str, ...]]:
     """A container over the published vector's entropy, and the password that opens it."""
     entropy = bytes(16)  # `abandon abandon … about` is all-zero entropy, by construction
-    exported = export_wallet(entropy, fixed_bytes())
+    exported = export_wallet(entropy, fixed_bytes(), network=network)
     return exported.container, exported.password.words
 
 
@@ -978,6 +979,86 @@ async def test_the_right_eight_words_restore_the_wallet_and_then_ask_for_the_pas
         assert app.wallet is not None
         assert app.wallet.fingerprint_hex == expected.fingerprint_hex
         assert COMPARE_IT in texts(app)
+
+
+async def test_a_backup_for_another_network_is_refused_after_the_words_verify() -> None:
+    """The authenticated gate, and the load-bearing one.
+
+    The scan screen refuses this from the cleartext header, so reaching the grid at all means the
+    cleartext byte disagreed with the byte the tag covers. The words are right; the refusal is not
+    about them, and the screen says so and stays where it is.
+    """
+    container, words = a_backup(Network.SIGNET)
+    app = build()  # the session is on the mainnet default
+    async with app.run_test(size=CONSOLE) as pilot:
+        await reach_home(pilot)
+        assert app.network is Network.MAINNET
+        app.open_export_password(container)
+        await pilot.pause()
+        await type_words_in_full(pilot, words)
+        await pilot.press("f10")
+        await pilot.pause()
+
+        assert isinstance(app.screen, ExportPasswordScreen), "no transition, and no wallet"
+        shown = texts(app)
+        assert wrong_network(Network.SIGNET) in shown
+        assert "signet" in shown, "the refusal names the network the backup was written for"
+        assert WRONG_PASSWORD not in shown, "the words were right, and it does not say otherwise"
+        assert app.wallet is None
+        assert app.mnemonic is None
+        assert not app.network_fixed, "the network is still changeable, which is the whole fix"
+        grid = app.screen.query_one(WordGrid)
+        assert grid.words == tuple(words), "every slot is still editable, and still filled"
+
+
+@pytest.mark.parametrize("network", list(Network))
+async def test_a_backup_restores_only_into_a_session_on_its_own_network(
+    network: Network,
+) -> None:
+    """Once per network, so the guarantee is stated four times rather than once in general."""
+    container, words = a_backup(network)
+    for session in Network:
+        app = build(network=session)
+        async with app.run_test(size=CONSOLE) as pilot:
+            await reach_home(pilot)
+            app.open_export_password(container)
+            await pilot.pause()
+            await type_words_in_full(pilot, words)
+            await pilot.press("f10")
+            await pilot.pause()
+
+            if session is network:
+                assert isinstance(app.screen, PassphraseScreen), texts(app)
+            else:
+                assert isinstance(app.screen, ExportPasswordScreen), texts(app)
+                assert wrong_network(network) in texts(app)
+                assert app.wallet is None
+
+
+def test_the_same_seed_has_the_same_fingerprint_on_every_network() -> None:
+    """The fact the whole gate exists for, written down where it cannot rot.
+
+    A wallet restored onto the wrong chain compares **equal** against a fingerprint recorded on
+    paper while deriving entirely different addresses — so the one check a careful user knows to
+    make is the one that cannot catch this.
+    """
+    fingerprints = {
+        network: Wallet.from_mnemonic(VECTOR_MNEMONIC, network=network).fingerprint_hex
+        for network in Network
+    }
+    assert len(set(fingerprints.values())) == 1, "identical on all four, which is the problem"
+    addresses = {
+        network: Wallet.from_mnemonic(VECTOR_MNEMONIC, network=network).address(
+            ScriptType.P2WPKH, 0, 0
+        )
+        for network in Network
+    }
+    assert addresses[Network.MAINNET] != addresses[Network.SIGNET], "and the addresses are not"
+    # And an address does not close the gap either: testnet4 and signet share an HRP and version
+    # bytes, so on those two the fingerprint *and* the address compare equal while the chain does
+    # not. Only the container's own network byte separates them.
+    assert addresses[Network.TESTNET4] == addresses[Network.SIGNET]
+    assert len(set(addresses.values())) == 3
 
 
 # --- Show recovery words --------------------------------------------------------------------------

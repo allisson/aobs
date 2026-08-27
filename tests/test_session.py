@@ -29,6 +29,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 
+import pytest
 from textual.widgets import Static
 
 from aobs.adapters.fake import (
@@ -60,6 +61,7 @@ from aobs.ui.screens.passphrase import PassphraseScreen
 from aobs.ui.screens.recovery_words import RecoveryWordsScreen
 from aobs.ui.screens.review import ReviewScreen
 from aobs.ui.screens.scan import ScanScreen
+from aobs.ui.screens.network import NETWORKS, NetworkScreen
 from aobs.ui.screens.seed_entry import SeedEntryScreen
 from aobs.ui.screens.wallet_export import (
     ExportDoneScreen,
@@ -341,7 +343,9 @@ async def test_a_generated_wallet_exports_a_container_carrying_its_own_entropy()
 # --- The round trip ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("network", [Network.MAINNET, Network.SIGNET])
 async def test_a_scanned_container_restores_a_wallet_that_proves_its_own_address(
+    network: Network,
     tmp_path: Path,
 ) -> None:
     """A wallet backup scanned off a QR image, restored, and then used.
@@ -351,15 +355,15 @@ async def test_a_scanned_container_restores_a_wallet_that_proves_its_own_address
     proves the restored wallet is a working wallet rather than merely a fingerprint: it verifies
     one of its own receive addresses, scanned as a second QR in the same session.
     """
-    exported = export_wallet(bip39.to_entropy(VECTOR_MNEMONIC), fixed_bytes())
-    wallet = Wallet.from_mnemonic(VECTOR_MNEMONIC, network=Network.MAINNET)
+    exported = export_wallet(bip39.to_entropy(VECTOR_MNEMONIC), fixed_bytes(), network=network)
+    wallet = Wallet.from_mnemonic(VECTOR_MNEMONIC, network=network)
     mine = wallet.address(ScriptType.P2WPKH, 0, 7)
 
     backup = one_qr(exported.container, tmp_path / "backup")
     address = one_qr(mine, tmp_path / "address")
     # A blank frame to begin with: the presence probe runs before any of this walk's keystrokes.
     camera = _HeldUpToTheCamera([blank_frame(tmp_path)])
-    app = build(frames=camera)
+    app = build(frames=camera, network=network)
 
     async with app.run_test(size=CONSOLE) as pilot:
         await accept_the_keymap(app, pilot)
@@ -391,5 +395,55 @@ async def test_a_scanned_container_restores_a_wallet_that_proves_its_own_address
         assert isinstance(app.screen, AddressVerifyScreen), texts(app)
         shown = texts(app)
         assert addresstext.PROVEN_LEAD in shown
-        assert "m/84h/0h/0h/0/7" in shown
+        assert f"m/84h/{network.coin_type}h/0h/0/7" in shown
         assert grouped(mine) in shown, "shown in full, grouped in fours, never elided"
+
+
+async def test_a_backup_from_another_network_is_refused_before_the_words_are_typed(
+    tmp_path: Path,
+) -> None:
+    """Export on one network, restart the session, choose another, and scan.
+
+    The join this walk exists for is the one no single-segment test reaches: the container's new
+    header byte, written by `export_wallet`, read back by `ScanController` off a real QR image,
+    against a network the user chose on the home screen. The refusal arrives at the scan screen,
+    which is the point of the cleartext gate — the eight words are never asked for.
+    """
+    exported = export_wallet(
+        bip39.to_entropy(VECTOR_MNEMONIC), fixed_bytes(), network=Network.SIGNET
+    )
+    backup = one_qr(exported.container, tmp_path / "backup")
+
+    # --- the next session, on a different network ---
+    camera = _HeldUpToTheCamera([blank_frame(tmp_path)])
+    app = build(frames=camera)
+    async with app.run_test(size=CONSOLE) as pilot:
+        await accept_the_keymap(app, pilot)
+        assert app.network is Network.MAINNET, "the default, taken without a question"
+
+        await open_path(app, pilot, "Choose the network")
+        assert isinstance(app.screen, NetworkScreen)
+        for _ in range(NETWORKS.index(Network.TESTNET4)):
+            await pilot.press("down")
+        await pilot.press("f10")
+        await pilot.pause()
+        assert isinstance(app.screen, HomeScreen)
+        assert app.network is Network.TESTNET4
+
+        camera.showing = [backup]
+        await open_path(app, pilot, "Restore from an encrypted wallet QR")
+        assert isinstance(app.screen, ScanScreen)
+        drain(app, 1)
+        await pilot.pause()
+
+        assert isinstance(app.screen, ScanScreen), "refused where it was scanned"
+        shown = texts(app)
+        assert "signet" in shown, "the refusal names the network the backup was written for"
+        assert app.scanned is None
+        assert app.wallet is None
+        # And the fix is one keystroke away: the network is still not fixed.
+        assert not app.network_fixed
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, HomeScreen)
+        assert NETWORK_FIXED not in texts(app)

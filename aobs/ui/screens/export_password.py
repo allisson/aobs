@@ -25,6 +25,7 @@ from __future__ import annotations
 from aobs.core import mnemonic
 from aobs.core.constants import EXPORT_PASSWORD_WORDS
 from aobs.core.export_password import ExportPassword
+from aobs.core.wallet import Network
 from aobs.core.wallet_qr import AuthenticationFailed, ForeignContainer, decode
 from aobs.ui.wordentry import WordEntryScreen
 from aobs.ui.widgets.wordgrid import EFF
@@ -52,6 +53,24 @@ WRONG_PASSWORD = (
 NOT_OURS = "This is not an aobs wallet QR."
 
 
+def wrong_network(backup: Network) -> str:
+    """The authenticated check, and the load-bearing one.
+
+    The scan screen already refused this from the cleartext header, so reaching here means the
+    cleartext byte disagreed with the byte the tag covers — the tamper path. It refuses in place
+    like a wrong password does: a message on the grid, every slot still editable, no wallet loaded
+    and no screen transition.
+
+    It names the backup's network and does not offer to switch: the network changes on a path the
+    user opens with `F10` and never as a side effect of a scan (`docs/network-selection.md`).
+    """
+    return (
+        f"The words are right, and this backup was exported on {backup.value} — not this "
+        f"session's network. Nothing was restored. Choose {backup.value} from the home screen "
+        "and scan the code again. Every slot is still editable."
+    )
+
+
 class ExportPasswordScreen(WordEntryScreen):
     def __init__(self, container: bytes) -> None:
         super().__init__("Open your encrypted wallet QR", EFF, EXPORT_PASSWORD_WORDS)
@@ -71,6 +90,9 @@ class ExportPasswordScreen(WordEntryScreen):
             return
         except AuthenticationFailed:
             self.grid.say(WRONG_PASSWORD)
+            return
+        if decoded.network is not self.app.network:  # type: ignore[attr-defined]
+            self.grid.say(wrong_network(decoded.network))
             return
         self.app.begin_passphrase(  # type: ignore[attr-defined]
             mnemonic.from_entropy(decoded.entropy)

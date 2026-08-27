@@ -33,7 +33,21 @@ FEE_WARN_SAT_PER_VBYTE = 100.0
 # --- Encrypted wallet QR (docs/encrypted-wallet-qr.md) ---------------------------------------
 
 WALLET_QR_MAGIC = b"AOBS"
-WALLET_QR_VERSION = 1
+#: Version 2 carries the network byte. There is no version 1 compatibility: no ISO has been
+#: published, so no version 1 container exists outside this repository's own tests, and one that
+#: turns up meets the framing check that already says *written by a different version*.
+WALLET_QR_VERSION = 2
+
+#: The network the container was exported from, one byte in the header — readable before any
+#: decryption and covered by the Poly1305 tag. Keyed by `Network.value` and assigned **explicitly**,
+#: never taken from the enum's ordinal: reordering `Network` would otherwise be a silent format
+#: change that reinterprets every container already written.
+WALLET_QR_NETWORK_BYTE = {
+    "mainnet": 0x00,
+    "testnet4": 0x01,
+    "signet": 0x02,
+    "regtest": 0x03,
+}
 
 #: Argon2id parameters, encoded exactly in the container — never lossily (Krux's mistake).
 ARGON2_MEMORY_KIB = 64 * 1024
@@ -44,7 +58,8 @@ WALLET_QR_SALT_BYTES = 16
 WALLET_QR_NONCE_BYTES = 12
 WALLET_QR_PLAINTEXT_BYTES = 33  # 32 entropy bytes, padded, plus one word-count byte
 WALLET_QR_TAG_BYTES = 16
-WALLET_QR_TOTAL_BYTES = 88
+#: 4 magic + 1 version + 1 network + 6 params + 16 salt + 12 nonce + 33 ciphertext + 16 tag.
+WALLET_QR_TOTAL_BYTES = 89
 
 # --- Export password (docs/export-password.md) -----------------------------------------------
 

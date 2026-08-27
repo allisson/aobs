@@ -29,6 +29,26 @@ already holds.
 | Not a UR, not our container | *This is not a PSBT or a wallet backup.* |
 | A UR of the wrong type (`ur:crypto-account`, `ur:crypto-hdkey`) | *This is a wallet descriptor, not a transaction* — a user who scanned on the wrong screen learns exactly that. |
 | Our container, wrong version | #9's magic-and-version framing already separates this from a bad password; the message is that the appliance and the QR are different versions. |
+| Our container, exported on another network | *This is one of our wallet backups, and it was exported on `<network>`* — and the next step is to choose that network from the home screen and scan again. |
+| Our container, naming a network this version does not know | Its own words, never *wrong password*: the user is not sent hunting for a typing mistake they did not make. Its next step matches the wrong-version case. |
+
+### Neither network failure is a `RefusalKind`
+
+Both follow the ordinary three-sentence shape — what it is, why it stops, where the fix is — and
+neither needs the fourth refusal kind that `RefusalReason.NETWORK_MISMATCH` needed.
+
+The reasoning that made network mismatch its own kind was that **the appliance cannot tell which
+side is wrong**: a PSBT built on another chain and a session started on the wrong one are
+indistinguishable, so it names both and recommends neither. Here the opposite holds. The container
+is authoritative about the chain it was exported for; the session's network is still changeable at
+that moment, and *Choose the network* is one path away on the home screen. So the *where* is
+singular and directed, and the failure is an ordinary one.
+
+The wrong-network refusal happens **twice**, and both must exist. At the scan screen it is read from
+the cleartext header — the courtesy, so eight words are not typed in full before the user finds out.
+After the password verifies it is read from the same byte, now covered by the Poly1305 tag — the
+guarantee. Anyone who can substitute the QR can flip the cleartext byte, so only the second is the
+security boundary; a later simplification that deletes one must not delete that one.
 
 ### `ur:psbt` is accepted inbound
 

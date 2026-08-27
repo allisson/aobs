@@ -4,7 +4,9 @@
 
 1. **The ciphertext**, as one static QR at ECC H — read once, off paper, at an unknown angle.
    It states plainly that the password is not on it, because a user who does not know a second
-   artifact exists photographs this one and believes they have a backup.
+   artifact exists photographs this one and believes they have a backup. It also names the
+   network this backup is for: the container carries it, a session on another network refuses
+   it, and what the user writes on the paper should agree with what the QR holds.
 2. **The eight words**, numbered 1–8, one per line, in a fixed-width column, on a screen with
    nothing on it but the instruction to write them down. Never the same screen as the QR:
    together they are one photograph, and that is the whole attack.
@@ -52,6 +54,7 @@ class WalletQrScreen(Screen):
     WalletQrScreen #qr-row { height: auto; }
     WalletQrScreen #wallet-qr { width: auto; height: auto; }
     WalletQrScreen #wallet-qr-password-not-here { margin-top: 1; text-style: bold; }
+    WalletQrScreen #wallet-qr-network { margin-top: 1; }
     WalletQrScreen #wallet-qr-keys { margin-top: 1; }
     """
 
@@ -72,6 +75,12 @@ class WalletQrScreen(Screen):
                     qrcodes.render(self.export.container, ecc=QR_ECC_STATIC).text, id="wallet-qr"
                 )
             yield Static(addresstext.PASSWORD_NOT_HERE, id="wallet-qr-password-not-here")
+            yield Static(
+                addresstext.EXPORT_QR_NETWORK.format(
+                    network=self.app.network.value  # type: ignore[attr-defined]
+                ),
+                id="wallet-qr-network",
+            )
             yield Static(addresstext.EXPORT_QR_INSTRUCTION, id="wallet-qr-instruction")
             yield Static(addresstext.EXPORT_QR_KEYS, id="wallet-qr-keys")
 

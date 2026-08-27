@@ -20,6 +20,7 @@ from textual.containers import Center, Vertical
 from textual.screen import Screen
 from textual.widgets import Static
 
+from aobs.core.wallet import Network
 from aobs.ports.frame_source import Frame
 from aobs.ui import viewfinder
 from aobs.ui.qrdecode import decode_frame
@@ -62,10 +63,13 @@ class ScanScreen(Screen):
     ScanScreen #viewfinder { width: auto; height: auto; }
     """
 
-    def __init__(self, target: ScanTarget) -> None:
+    def __init__(self, target: ScanTarget, *, network: Network) -> None:
         super().__init__()
         self.target = target
-        self.controller = ScanController(target)
+        #: The session's network, held so the rescan rebuilds a controller that still refuses a
+        #: backup for another chain. `SignerApp.open_scan` supplies it.
+        self.network = network
+        self.controller = ScanController(target, network=network)
         #: The bytes, once they are all here. `None` until then, and the end of this ticket.
         self.payload: bytes | None = None
         self._frames = None
@@ -194,7 +198,7 @@ class ScanScreen(Screen):
             self._restart()
 
     def _restart(self) -> None:
-        self.controller = ScanController(self.target)
+        self.controller = ScanController(self.target, network=self.network)
         self.payload = None
         self._ticks = 0
         self._finished = False

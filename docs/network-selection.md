@@ -83,14 +83,27 @@ While the latch is open the choice is fully reversible; once closed, the path re
 rather than hidden — a path a user cannot find teaches them the appliance cannot do it — and pressing
 `F10` on it does nothing at all.
 
-### The encrypted wallet QR carries no network
+### The encrypted wallet QR states its network — closed by #52
 
-`aobs/core/wallet_qr.py` puts the mnemonic in the container and nothing about the chain, so restoring
-a backup exported from a mainnet session into a signet session derives a different wallet, silently,
-with a matching fingerprint. The fingerprint screen's network line is currently the only thing that
-catches it. Whether the container should carry the network is a
-[#32](https://github.com/allisson/aobs/issues/32) question and is **not settled here** — it is named so
-the next session finds it rather than rediscovers it.
+It carried no network, and that was the gap this section named. Restoring a backup exported from a
+signet session into a session still on mainnet derived a different wallet silently, and the one
+check a careful user knows to make actively misled them: **the master fingerprint comes from the
+seed and is identical on all four networks**, so the wrong chain compares *equal* against a recorded
+fingerprint while deriving entirely different addresses. On testnet4 and signet even the addresses
+compare equal, because those two share an HRP and version bytes.
+
+The answer, settled in [#52](https://github.com/allisson/aobs/issues/52) and specified in
+`docs/encrypted-wallet-qr.md`: **the container states which network it was exported from, and a
+session on a different network refuses to restore it.** One byte in the header, covered by the
+Poly1305 tag, checked from cleartext at the scan screen before the eight words are typed and again
+from the authenticated bytes after they verify. The refusal names the network the backup was written
+for, because unlike a PSBT arriving from a watch-only wallet, **here the appliance knows which side
+is wrong**: the container is authoritative about the chain it came from, and the session's network
+is still changeable at that moment.
+
+It is a refusal with no override, not a warning. It offers no switch: the network changes on the
+path opened with `F10` and never as a side effect of a scan. And the export screen now names the
+network the backup is for, so what the user writes on the paper agrees with what the QR carries.
 
 ## A wrong choice has an honest recovery
 

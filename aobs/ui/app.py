@@ -190,7 +190,7 @@ class SignerApp(App[None]):
         """
         self.notice = None
         self.scanned = None
-        self.push_screen(ScanScreen(target))
+        self.push_screen(ScanScreen(target, network=self.network))
 
     def open_review(self, psbt_bytes: bytes) -> None:
         """The scan screen has a whole PSBT. Review it, and show whichever screen applies.
@@ -355,7 +355,9 @@ class SignerApp(App[None]):
             return
         if self.export is None:
             self.export = export_wallet(
-                bip39_words.to_entropy(self.mnemonic), self.entropy.random_bytes
+                bip39_words.to_entropy(self.mnemonic),
+                self.entropy.random_bytes,
+                network=self.network,
             )
         self.push_screen(WalletQrScreen(self.export))
 
