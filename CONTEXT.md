@@ -184,3 +184,17 @@ The untrusted counterparty across the QR channel: Sparrow, Blockstream App/Green
 holding the exported xpub, building unsigned PSBTs, and broadcasting signed ones. "Untrusted" is
 load-bearing — the appliance derives everything it shows the user from the PSBT and its own keys,
 never from what the watch-only wallet asserts.
+
+## Input archive
+
+Every byte the build consumes that the build did not write: the two apk closures, Alpine's own
+signed package index, the base rootfs tarball, and the kernel source tarball. Named as one thing
+because it is fetched, verified and published as one thing — the archive is what makes a release
+rebuildable after the upstream that served those bytes has stopped serving them.
+
+## Witness build
+
+An independent rebuild of a release by someone other than the builder, published so that a third
+party can see the two hashes agree. Not a signature and not an approval: a witness asserts only
+that the same inputs produced the same output on a machine the builder does not control, which is
+the single observation that turns a reproducibility claim into a checkable one.
