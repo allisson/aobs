@@ -696,9 +696,16 @@ def check_vendored_tree(paths: Iterable[str]) -> list[Violation]:
 
 # --- The shared `key: value` reading ------------------------------------------------------------
 #
-# Three files in this release use it: `/etc/aobs-release`, the release manifest, and nothing else.
-# One reader, so the manifest cannot mean by `git-commit:` something other than what the embedded
-# release file means by it.
+# Two files use it here: `/etc/aobs-release` and the release manifest. One reader for both, so the
+# manifest cannot mean by `git-commit:` something other than what the embedded release file means by
+# it.
+#
+# **There is a second reader of `/etc/aobs-release`, and it is not this one.** `aobs/core/release.py`
+# parses the same file for display, because this module cannot import the appliance and the appliance
+# cannot import `build/`. That duplication is real and deliberate; what keeps the two from drifting is
+# `tests/test_build_verifier.py::test_the_appliance_and_the_build_parse_the_release_file_the_same_way`,
+# which feeds both the same text and asserts they agree. The risk was never that either parser is
+# hard — it is that one gets changed and the other does not.
 
 #: `<sha256>  <name>`, exactly as `sha256sum` writes it and as `sha256sum -c` reads it back. Two
 #: spaces, not one: one space is the `--text`/`--binary` marker position and busybox is strict
@@ -928,8 +935,7 @@ def check_embedded_release(
             )
         )
 
-    is_release = bool(tag) and not dirty
-    if is_release:
+    if is_release_build(tag, dirty):
         if release != tag:
             violations.append(
                 Violation(
@@ -975,6 +981,17 @@ class GitFacts:
     tag_commit_date: str
 
 
+def is_release_build(tag: str, dirty: bool) -> bool:
+    """Whether a build may call itself a version. The one definition, used by both sides.
+
+    `build/gather.py` asks it to decide what to write into `/etc/aobs-release`, and
+    `check_embedded_release` asks it to decide what that file was allowed to say. Those two are
+    deliberately a generator and an independent judge — but they must not be allowed to disagree
+    about *what a release build is*, which is what this being one function prevents.
+    """
+    return bool(tag) and not dirty
+
+
 def check_release_preflight(
     git: GitFacts,
     *,
@@ -986,7 +1003,13 @@ def check_release_preflight(
 
     **A development build trips none of them**, which is not a loophole but the design: a guard that
     fires during ordinary work gets disabled, and then it guards nothing on the day it mattered.
-    `release_mode` is `False` for every build that is not cutting a release.
+
+    `release_mode` is that decision, made a parameter rather than left implicit in who calls this.
+    Today the only caller is the release ritual and it passes `True` explicitly; the reason the
+    parameter exists at all is that *"in release mode only"* is a claim the suite has to be able to
+    check, and `tests/test_build_verifier.py` checks it by driving each of the four hostile inputs
+    through `release_mode=False` and asserting silence. A guard nobody has confirmed is quiet during
+    ordinary work is a guard nobody will keep.
 
     `manifest_commit` is the manifest's `git-commit:` field, or `None` when no manifest exists yet —
     the preflight runs before the manifest is written as well as after it.
@@ -1030,9 +1053,8 @@ def check_release_preflight(
             )
         )
 
-    if not git.tag_commit_date:
-        pass  # already reported above: there is no tag to take a date from
-    elif source_date_epoch != git.tag_commit_date:
+    # No tag means no date to compare against, and the missing tag is already reported above.
+    if git.tag_commit_date and source_date_epoch != git.tag_commit_date:
         violations.append(
             Violation(
                 "SOURCE_DATE_EPOCH is the commit date of HEAD, derived and never passed in: a "

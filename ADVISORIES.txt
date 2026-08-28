@@ -1,11 +1,16 @@
 aobs security advisories
 ========================
 
-Append-only. Signed as `ADVISORIES.txt.asc` by the key in `SECURITY.md`, and re-attached as an asset
-to every subsequent release, so the copy you are holding is dated and a stale one is recognisably
-stale.
+Append-only. Signed as `ADVISORIES.txt.asc` by the key in `SECURITY.md`, committed beside this file,
+and re-attached as an asset to every subsequent release — so the copy you are holding is dated and a
+stale one is recognisably stale.
 
     gpg --verify ADVISORIES.txt.asc ADVISORIES.txt
+
+**`ADVISORIES.txt.asc` does not exist yet.** It is produced at the first release, by step 4 of
+`docs/release.md`, because signing requires the maintainer's key and no release has been cut. Until
+then this file is exactly as trustworthy as the git history carrying it, and no more — which is worth
+saying rather than leaving a reader to discover that the command above finds nothing.
 
 Get that key's fingerprint from a channel that is not the one that served you this file. `SECURITY.md`
 names two that do not resolve to GitHub, and explains why that matters.

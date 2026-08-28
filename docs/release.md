@@ -37,7 +37,19 @@ git tag -s v1.0 -m 'aobs v1.0'
 `B5690EEEBB952194`, not the maintainer's, and a tag created in a browser carries the platform's
 signature rather than a person's. `SECURITY.md` holds the fingerprint this must be.
 
-**3. Fetch the inputs, then build.**
+**3. Preflight the cheap half, fetch the inputs, then build.**
+
+The tree and the tag first, because they are what a several-hour kernel compile should not be spent
+discovering:
+
+```sh
+SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) ./build/release-preflight.sh
+```
+
+This form's epoch check is the weaker one, and the script's header says why: `mkiso.sh` derives
+`SOURCE_DATE_EPOCH` itself and ignores the environment, so comparing this shell's variable against the
+tagged commit's date compares two values you just set from the same source. Step 4 runs it again with
+the file the build wrote, which is the form that bites.
 
 ```sh
 docker run --rm --platform=linux/amd64 -v "$PWD:/src" -w /src \
@@ -46,21 +58,23 @@ docker build -f build/Dockerfile.iso -t aobs-iso .
 mkdir -p out && docker run --rm --privileged -v "$PWD:/src" -v "$PWD/out:/out" aobs-iso
 ```
 
-The stage-3 assertion binds `/etc/aobs-release` to that tag. Record the hash ladder the build prints:
-CI's witness build prints the same five rungs, and the first one that differs is where a divergence
-began.
-
-Then run the preflight, which is the four refusals and nothing else:
-
-```sh
-SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) ./build/release-preflight.sh
-```
+The stage-3 assertion binds `/etc/aobs-release` to that tag. **Record the hash ladder the build
+prints** — CI's witness build prints the same five rungs, and the first one that differs is where a
+divergence began.
 
 **4. Build the input archive and the manifest, and verify locally by running the published command
 from the published instructions.**
 
+`RELEASE_FILE` below is the `/etc/aobs-release` the build wrote into the rootfs. Extract it from the
+initramfs, or take it from the builder's `$WORK/rootfs/etc/aobs-release`. The manifest's `release` and
+`git-commit` are generated **from that file** (#61), which is what leaves the image and the manifest
+nothing to disagree about — and it is what refusal 3 judges the epoch against.
+
 ```sh
-mkdir -p release && cp out/bitcoin-signer-amd64.iso release/
+RELEASE_FILE=/path/to/etc-aobs-release
+
+mkdir -p release
+cp out/bitcoin-signer-amd64.iso verify-release.sh ADVISORIES.txt release/
 
 # One deterministic tar: sorted members, fixed mtime, uid, gid and mode, uncompressed —
 # the .apk files and the kernel tarball are already compressed.
@@ -68,13 +82,16 @@ tar --sort=name --owner=0 --group=0 --numeric-owner \
     --mtime="@$(git log -1 --format=%ct)" --format=gnu \
     -C build -cf release/aobs-inputs-v1.0.tar inputs
 
-python3 build/gather.py write-manifest . \
-    /path/to/etc-aobs-release release >release/manifest-v1.0.txt
-python3 build/gather.py manifest . \
-    release/manifest-v1.0.txt /path/to/etc-aobs-release release
+python3 build/gather.py write-manifest . "$RELEASE_FILE" release >release/manifest-v1.0.txt
+python3 build/gather.py manifest . release/manifest-v1.0.txt "$RELEASE_FILE" release
+
+# All four refusals, now that there is a manifest and a release file to judge.
+./build/release-preflight.sh "$RELEASE_FILE" release/manifest-v1.0.txt
+
+gpg --detach-sign --armor --output release/manifest-v1.0.txt.asc release/manifest-v1.0.txt
+gpg --detach-sign --armor --output release/ADVISORIES.txt.asc ADVISORIES.txt
 
 cd release
-gpg --detach-sign --armor --output manifest-v1.0.txt.asc manifest-v1.0.txt
 gpg --verify manifest-v1.0.txt.asc manifest-v1.0.txt
 grep -E '^[0-9a-f]{64}  ' manifest-v1.0.txt | sha256sum -c -
 ./verify-release.sh
@@ -84,10 +101,9 @@ The two raw commands are run **as the README prints them**, not as an equivalent
 signed release shipped a file that gave `gpg: not a detached signature`, and an outsider found it.
 The cost of catching that here is thirty seconds.
 
-`/path/to/etc-aobs-release` is the copy the build wrote into the rootfs. Extract it from the
-initramfs, or take it from the builder's `$WORK/rootfs/etc/aobs-release` — the manifest's `release`
-and `git-commit` are generated **from that file** (#61), which is what leaves the image and the
-manifest nothing to disagree about.
+`ADVISORIES.txt.asc` is produced here and **committed to the repository** as well as attached, because
+#62 requires it to be in git history: a clone from any mirror must carry it, and an edit to a past
+entry must show up in a diff. It is re-signed whenever a new entry is appended.
 
 **5. Push the tag. This is the first irreversible act, and it happens only after the build has
 succeeded.**
@@ -96,12 +112,26 @@ succeeded.**
 git push origin v1.0
 ```
 
-**6. CI's witness build runs from the pushed tag**, compares hashes, and signs the manifest.
+**6. CI's witness build runs from the pushed tag** and publishes the hashes it got.
 
-- **A witness that disagrees blocks the release.** If the hashes differ, that is a reproducibility
+**It does not sign, today, and the release is therefore single-signed.** #58 created no witness key:
+signing would need one in GitHub's secret store, and `verify-release.sh` hardcodes an empty
+`KNOWN_WITNESS` rather than a placeholder fingerprint in the file strangers read to learn whom to
+trust. The multi-signer layout exists and costs nothing to leave unused — when a key exists,
+`witness.yml` gains a signing step, `verify-release.sh` gains one line, `verify.py`'s
+`WITNESS_FINGERPRINT` gains one value, and the manifest gains one `signer:` line, with nothing already
+published needing re-verification.
+
+- **A witness that disagrees blocks the release, and the thing that blocks is this checklist rather
+  than the workflow.** No CI job can block a publication CI does not perform: `witness.yml` builds,
+  hashes, and uploads what it saw. Step 7 does not happen until that artifact has been read and its
+  hash ladder found identical to the one step 3 printed. If they differ, that is a reproducibility
   defect, and the contract's position — a stranger who rebuilds and gets a different hash has found a
-  defect, not a difference of opinion — has to bind us before it binds anyone else. No signature, no
-  publication: fix it and re-tag.
+  defect, not a difference of opinion — has to bind us before it binds anyone else. Fix it and re-tag.
+
+  ```sh
+  gh run download --name witness && diff witness.txt your-own-ladder.txt
+  ```
 - **A witness that cannot run is a different case from one that disagrees.** On an infrastructure
   outage the release may be published single-signed: the witness signature is already non-fatal to
   verification, and the `signer:` lines make its absence visible rather than silent. **Publishing over
@@ -110,12 +140,16 @@ git push origin v1.0
 **7. Publish the Release — once.**
 
 Assets: `bitcoin-signer-amd64.iso`, `aobs-inputs-v1.0.tar`, `manifest-v1.0.txt`,
-`manifest-v1.0.txt.asc` carrying **both** signatures concatenated, `verify-release.sh`,
-`ADVISORIES.txt` and `ADVISORIES.txt.asc`.
+`manifest-v1.0.txt.asc`, `verify-release.sh`, `ADVISORIES.txt` and `ADVISORIES.txt.asc`.
 
-**A single publication is the point.** Appending the witness signature to an already-published `.asc`
-would mutate a signed asset that strangers may already hold, and there is no way to tell a reader
-which version of it they got.
+Everything but the manifest and the `.asc` files is named in the manifest's checksum block, so the
+documented one-liner really does check every published file at once — **the verifier included**, which
+matters, because a tampered `verify-release.sh` is a real attack.
+
+**A single publication is the point**, and it is the reason step 6 waits for the witness rather than
+publishing and appending. Adding a signature to an already-published `.asc` would mutate a signed
+asset that strangers may already hold, with no way to tell a reader which version of it they got.
+That constraint is what will still be true on the day a witness key exists.
 
 **8. Re-verify the *published* assets as a stranger would, then refresh the README's advisory list.**
 

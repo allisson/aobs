@@ -135,11 +135,26 @@ def main(argv: list[str]) -> int:
         )
 
     if command == "release-preflight":
-        source, manifest = arguments[0], (arguments[1] if len(arguments) > 1 else None)
+        source = arguments[0]
+        release_file = arguments[1] if len(arguments) > 1 else None
+        manifest = arguments[2] if len(arguments) > 2 else None
         return _report(
             verify.check_release_preflight(
                 _git_facts(source),
-                source_date_epoch=os.environ.get("SOURCE_DATE_EPOCH", ""),
+                # Explicitly, because this subcommand exists only for the release ritual: the four
+                # refusals are release-mode-only by decision (#65), not by accident of who calls.
+                release_mode=True,
+                # **From `/etc/aobs-release` when the build has produced one**, and that is what makes
+                # this refusal bite at all. `build/mkiso.sh` derives `SOURCE_DATE_EPOCH` itself and
+                # ignores the environment, so comparing the *shell's* variable against the tagged
+                # commit's date compares two values the invocation just set from the same source —
+                # vacuously equal. The embedded value is what the build actually used, so a future
+                # edit that let the build honour an inherited variable would fail here.
+                source_date_epoch=(
+                    verify.parse_fields(_read(release_file)).get("source-date-epoch", "")
+                    if release_file
+                    else os.environ.get("SOURCE_DATE_EPOCH", "")
+                ),
                 manifest_commit=(
                     verify.parse_fields(_read(manifest)).get("git-commit", "")
                     if manifest
@@ -267,7 +282,7 @@ def _git(source: str, *arguments: str) -> tuple[int, str]:
     return result.returncode, result.stdout.strip()
 
 
-def _git_facts(source: str):
+def _git_facts(source: str) -> "verify.GitFacts":
     """The five facts the release-mode refusals and the stage-3 assertion are decided from.
 
     Gathered here, judged in `verify.py`. That is the whole reason the four refusals are pure
@@ -308,7 +323,7 @@ def _write_release(source: str, destination: str) -> int:
     """
     git = _git_facts(source)
     epoch = _source_date_epoch(source)
-    is_release = bool(git.tag) and not git.dirty
+    is_release = verify.is_release_build(git.tag, git.dirty)
     fields = {
         "release": git.tag if is_release else verify.DEVELOPMENT,
         "released": verify.utc_date(epoch),
@@ -321,9 +336,10 @@ def _write_release(source: str, destination: str) -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(text, encoding="utf-8")
 
-    label = "DEVELOPMENT BUILD" if not is_release else fields["release"]
-    commit = fields["git-commit"][:12] + ("-dirty" if git.dirty else "")
-    print(f"aobs {label} · {commit} · {fields['released']}")
+    # The fields, not the row. How the row is *worded* — `DEVELOPMENT BUILD`, the 12-hex prefix, the
+    # separator — belongs to `aobs/core/release.py` and to nothing else; re-deriving it here for a
+    # build-log line would mean a change to the prefix length silently diverging the two.
+    print(" ".join(f"{key}={value}" for key, value in fields.items()))
     return 0
 
 

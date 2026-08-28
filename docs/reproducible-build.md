@@ -112,13 +112,19 @@ Dockerfile: without them the builder's user and hostname end up inside `bzImage`
 byte. The second build varies, all at once:
 
 - the build path
-- the hostname, the user and the uid
+- the hostname
 - the clock, pushed forward 37 hours
 - `TZ`, `LC_ALL` and `LANG`
 - the umask, 022 → 077
 - the CPU count, `--cpus=2` against the runner's full count
 
-The first five are free. **The CPU count costs real time and stays**, because it is what catches the
+**The uid is not varied in the guard**, and the contract still claims it: stage 1 chroots into the
+rootfs to run the in-rootfs signature assertions, so a non-root uid inside the container would fail
+for a reason that has nothing to do with reproducibility. `cpio --reproducible` and the `touch` pass
+are what neutralise ownership, and the release-time arm64/x86_64 comparison crosses a genuinely
+different uid, user and host anyway.
+
+The first four are free. **The CPU count costs real time and stays**, because it is what catches the
 `zstd` hazard — the one divergence source whose fix a future edit could undo without any other
 symptom.
 
@@ -126,8 +132,11 @@ symptom.
 It moves to `docs/boot-checklist.md` as a release-time human check, which is free, because the ritual
 already compares the maintainer's arm64 build against CI's x86_64 witness build.
 
-**Trigger: tags, and any change under `build/`.** A tags-only guard learns about decay at the worst
-possible moment — during a release, when the person who broke it is not the person cutting it.
+**Trigger: every release tag, and every pull request touching `build/`.** A tags-only guard learns
+about decay at the worst possible moment — during a release, when the person who broke it is not the
+person cutting it. The two halves cannot share one `push` filter: GitHub applies a `paths` filter to
+tag pushes too and requires both to be satisfied, so `tags` plus `paths` in one block would skip the
+guard for exactly the release tags it exists to protect.
 
 **Written fallback, decided in advance rather than during the annoyance:** if the guard's first CI run
 exceeds **40 minutes**, the trigger drops to tags plus `workflow_dispatch`. A guard slow enough to be

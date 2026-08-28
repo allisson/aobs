@@ -4,10 +4,13 @@
 # reproduction of a release should happen before anybody outside the project depends on it**, and the
 # only way to make that true is to do it in the ritual rather than to hope somebody does it later.
 #
-# **A witness that disagrees blocks the release.** If the hashes differ, that is a reproducibility
-# defect, and the contract's position — a stranger who rebuilds and gets a different hash has found a
-# defect, not a difference of opinion — has to bind us before it binds anyone else. No signature, no
-# publication: fix it and re-tag.
+# **A witness that disagrees blocks the release — and the thing that blocks is the ritual, not this
+# job.** No CI job can block a publication CI does not perform: this workflow builds, hashes, and
+# publishes what it saw as an artifact. `docs/release.md` step 7 does not happen until a human has
+# read that artifact and found it identical to the builder's hash ladder. If the hashes differ, that is
+# a reproducibility defect, and the contract's position — a stranger who rebuilds and gets a different
+# hash has found a defect, not a difference of opinion — has to bind us before it binds anyone else.
+# No agreement, no publication: fix it and re-tag.
 #
 # **A witness that cannot run is a different case from one that disagrees**, and the distinction is
 # load-bearing. On an infrastructure outage the maintainer may publish single-signed: the witness
@@ -60,12 +63,16 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: The four release-mode refusals
-        # The witness runs the same preflight the maintainer ran, and for a reason that is not
-        # symmetry: the tag is *pushed* by the time this runs, so this is the first check of the
-        # pushed tag's signature rather than of a local one.
+      - name: The tag is a release tag, and the tree is clean
+        # **Not `build/release-preflight.sh`.** Its second refusal needs `git tag -v` to exit zero,
+        # which needs the maintainer's public key in the runner's keyring — and importing it here
+        # would make CI's check of the signature depend on a channel CI is meant to corroborate
+        # rather than to trust. The signature on the tag is the maintainer's instrument, checked
+        # locally in `docs/release.md` step 2 and by any stranger who clones. What the witness can
+        # check for itself, it checks:
         run: |
-          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) ./build/release-preflight.sh
+          test -z "$(git status --porcelain)"
+          git describe --exact-match --tags HEAD | grep -Eq '^v[0-9]+\.[0-9]+$'
 
       - name: Fetch the inputs from the live CDN
         run: |

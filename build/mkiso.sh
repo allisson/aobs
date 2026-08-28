@@ -178,7 +178,7 @@ install -m 0644 "$SRC/build/assert_in_rootfs.py" "$ROOTFS/assert_in_rootfs.py"
 # output and a file a human can open, so that the stage-3 assertion below has something to be about.
 # The manifest's `release` and `git-commit` are generated from this same file, which is what leaves
 # the image and the manifest nothing to disagree over.
-note "embedded release line: $(python3 "$SRC/build/gather.py" write-release "$SRC" "$ROOTFS/etc/aobs-release")"
+note "/etc/aobs-release: $(python3 "$SRC/build/gather.py" write-release "$SRC" "$ROOTFS/etc/aobs-release")"
 
 find "$ROOTFS" | sed "s|^$ROOTFS||" | sort >"$WORK/rootfs-listing.txt"
 judge rootfs "$WORK/rootfs-listing.txt"

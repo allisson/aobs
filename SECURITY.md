@@ -68,8 +68,10 @@ under the process below, naming what an owner of an affected build has to do.
 
 ## Advisories
 
-`ADVISORIES.txt` in the repository root, with a detached `ADVISORIES.txt.asc` signed by the key above
-and re-attached as an asset to **every subsequent release**.
+`ADVISORIES.txt` in the repository root, with a detached `ADVISORIES.txt.asc` signed by the key above,
+committed beside it, and re-attached as an asset to **every subsequent release**. The `.asc` is
+produced at the first release — `docs/release.md` step 4 — and does not exist yet, because signing
+needs the key and no release has been cut.
 
 Three properties are load-bearing, and each of them is why the list is a file in git rather than a
 page somewhere:

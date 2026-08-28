@@ -7,15 +7,24 @@
 # **The second build varies six things at once**, deliberately hostile and all together, because a
 # guard that varies one thing per run costs six builds to say what one build can say:
 #
-#   - the build path            /src is bind-mounted from a differently named directory
-#   - hostname, user and uid    --hostname, and --user with a non-root uid for the second run
-#   - the clock                 faketime is not available, so the *commit* clock is what matters and
-#                               SOURCE_DATE_EPOCH is derived — the varied clock is the container's
+#   - the build path            a differently named host directory mounted at a different path
+#                               *inside* the container too, with SRC and WORK set to match — mounting
+#                               a renamed host directory back at /src would vary nothing the build
+#                               can see, which is the trap
+#   - the hostname              --hostname
+#   - the clock                 the container's clock, pushed 37 hours forward
 #   - TZ, LC_ALL, LANG          set to values that would reach mtools and xorriso if unforced
-#   - the umask                 022 -> 077
+#   - the umask                 022 -> 077, which mkiso.sh must override to 022 itself
 #   - the CPU count             --cpus=2 against the runner's full count
 #
-# The first five are free. **The CPU count costs real time and stays**, because it is what catches the
+# **The uid is deliberately *not* varied here, and the contract still claims it.** Stage 1 chroots
+# into the rootfs to run the in-rootfs signature assertions, so the build needs root inside the
+# container; a non-root uid would fail for a reason that has nothing to do with reproducibility. The
+# uid is a fact about paths and ownership that `cpio --reproducible` and the `touch` pass already
+# neutralise, and `docs/boot-checklist.md` item 27 — the maintainer's arm64 build against this
+# witness — crosses a genuinely different uid, user and host at release time.
+#
+# The first four are free. **The CPU count costs real time and stays**, because it is what catches the
 # `zstd -T0` hazard — the one divergence source whose fix a future edit could undo with no other
 # symptom.
 #
@@ -23,8 +32,9 @@
 # to `docs/boot-checklist.md` item 27 as a release-time human check, which is free, because the ritual
 # already compares the maintainer's arm64 build against the witness build's x86_64 hash.
 #
-# **Trigger: tags and any change under `build/`.** A tags-only guard learns about decay at the worst
-# possible moment — during a release, when the person who broke it is not the person cutting it.
+# **Trigger: every release tag, and every pull request touching `build/`.** A tags-only guard learns
+# about decay at the worst possible moment — during a release, when the person who broke it is not the
+# person cutting it. The `on:` block below says why the two halves cannot live in one `push` filter.
 #
 # **Written fallback, decided in advance rather than during the annoyance:** if this job's first run
 # exceeds 40 minutes, the trigger drops to tags plus `workflow_dispatch`. A guard slow enough to be
@@ -37,11 +47,15 @@
 
 name: reproducible
 
+# `push.tags` carries no `paths` filter, and that is not an oversight. GitHub applies a `paths`
+# filter to **tag** pushes too, and requires both filters to be satisfied — so `tags: ['v*']` plus
+# `paths: ['build/**']` in one `push` block would silently skip the guard for exactly the release
+# tags it exists to protect. The `build/**` half therefore lives on `pull_request`, which is where a
+# change under `build/` reaches `main` in this repository, and is also the earlier of the two places
+# to learn about decay.
 on:
   push:
     tags: ['v*']
-    paths: ['build/**']
-    branches: [main]
   pull_request:
     paths: ['build/**']
   workflow_dispatch:
@@ -88,18 +102,22 @@ jobs:
         # A differently named build path, another hostname and uid, a clock 37 hours ahead, a
         # different timezone and locale, a tighter umask, and two CPUs.
         run: |
-          mkdir -p out-b elsewhere
-          cp -a . elsewhere/a-different-directory-name || true
+          # Outside the workspace, because `cp -a . ./somewhere` copies the destination into itself.
+          elsewhere="$RUNNER_TEMP/a-rather-differently-named-build-directory"
+          mkdir -p out-b "$elsewhere"
+          cp -a . "$elsewhere/"
           docker run --rm --privileged \
             --hostname a-different-host \
             --cpus=2 \
             -e TZ=Pacific/Kiritimati \
             -e LC_ALL=tr_TR.UTF-8 \
             -e LANG=tr_TR.UTF-8 \
-            -v "$PWD/elsewhere/a-different-directory-name:/src" \
+            -v "$elsewhere:/a/quite/differently/named/source/tree" \
             -v "$PWD/out-b:/out" \
-            aobs-iso sh -c 'umask 077; date -s "+37 hours" >/dev/null 2>&1 || true; \
-                            exec /bin/sh /src/build/mkiso.sh' | tee ladder-b.txt
+            -e SRC=/a/quite/differently/named/source/tree \
+            -e WORK=/somewhere/else/entirely \
+            aobs-iso sh -c 'date -s "+37 hours" >/dev/null; umask 077; \
+                            exec /bin/sh "$SRC/build/mkiso.sh"' | tee ladder-b.txt
 
       - name: Compare
         # The ladder first, because it names *where* a divergence began; the ISO comparison is the
