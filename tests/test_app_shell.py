@@ -745,10 +745,14 @@ async def test_the_footer_carries_a_commit_prefix_and_not_only_a_version() -> No
         assert RELEASED.commit not in footer(app), "the full 40 hex would not fit the column cap"
 
 
-async def test_the_footer_row_fits_the_column_cap() -> None:
+async def test_both_footer_rows_fit_the_column_cap() -> None:
+    """The advisory line is the longer of the two and is what fixes the wording's length budget: a
+    line that wraps on the first screen reads as a layout defect rather than as a pointer."""
     app = build(release=RELEASED)
     async with app.run_test(size=CONSOLE):
         assert len(footer(app)) <= MAX_COLUMNS
+        advisories = str(app.screen.query_one("#release-advisories", Static).content)
+        assert len(advisories) <= MAX_COLUMNS, len(advisories)
 
 
 async def test_a_development_build_says_so_and_never_a_version_shaped_string() -> None:

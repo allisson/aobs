@@ -133,6 +133,17 @@ TOOLCHAIN=$(closure "$TOOLCHAIN_PINS")
 note "appliance closure: $(printf '%s\n' "$APPLIANCE" | grep -c . || true) packages"
 note "toolchain closure: $(printf '%s\n' "$TOOLCHAIN" | grep -c . || true) packages"
 
+# Which closure each package belongs to, recorded **inside the archive**. Two reasons, and neither is
+# bookkeeping: a 2030 rebuilder can tell what the appliance gets from what the builder gets without
+# re-resolving anything, and the manifest's `input-apks-appliance` / `input-apks-toolchain` counts are
+# then read off a file that was archived and hashed rather than recomputed from a network.
+{
+	printf '# @closure appliance\n'
+	printf '%s\n' "$APPLIANCE"
+	printf '# @closure toolchain\n'
+	printf '%s\n' "$TOOLCHAIN"
+} >"$INPUTS/CLOSURES.txt"
+
 printf '%s\n%s\n' "$APPLIANCE" "$TOOLCHAIN" | LC_ALL=C sort -u |
 	python3 "$SRC/build/apkindex.py" "$INPUTS" |
 	while read -r repository package; do

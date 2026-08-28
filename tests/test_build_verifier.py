@@ -529,6 +529,454 @@ def test_the_build_fetches_no_wheel_and_installs_no_package_manager() -> None:
             assert resolver not in recipe, f"build/{name} reaches for {resolver}"
 
 
+# --- The release engineering half (#66) ---------------------------------------------------------
+#
+# Every judgement below is one #54's eight closed tickets settled, and every test below feeds it a
+# deliberately broken input. The shape is the same as the kernel-config tests above: name the claim,
+# break the input, assert the verdict *and* that the violation names the claim.
+
+
+def _inputs_list() -> str:
+    return (BUILD / "inputs.sha256").read_text(encoding="utf-8")
+
+
+# --- The input archive, judged on hash and on set equality --------------------------------------
+
+
+def test_the_real_input_list_accepts_the_directory_it_describes() -> None:
+    """The committed list, against a `present` mapping built from the list itself.
+
+    Not a tautology: it asserts the list parses, that it is non-empty, and that `check_inputs`
+    accepts the one input the whole archive design produces. A list nothing can satisfy would pass
+    every hostile test below and fail every build.
+    """
+    present = verify.parse_checksum_list(_inputs_list())
+    assert len(present) > 100, "the archive is ~200 files: appliance + toolchain closures"
+    assert verify.check_inputs(present, _inputs_list()) == []
+
+
+def test_an_input_with_a_wrong_hash_is_rejected_and_names_the_claim() -> None:
+    present = verify.parse_checksum_list(_inputs_list())
+    victim = sorted(present)[0]
+    present[victim] = "0" * 64
+    violations = verify.check_inputs(present, _inputs_list())
+    assert [v for v in violations if victim in v.claim and "sha256" in v.claim]
+
+
+def test_a_missing_input_is_rejected_and_names_the_claim() -> None:
+    present = verify.parse_checksum_list(_inputs_list())
+    victim = sorted(present)[0]
+    del present[victim]
+    violations = verify.check_inputs(present, _inputs_list())
+    assert [v for v in violations if victim in v.claim and "is present" in v.claim]
+
+
+def test_an_extra_input_is_a_failure_and_not_an_ignore() -> None:
+    """The case a naive implementation ignores, and the reason the check is an equality.
+
+    A rebuilder in 2030 unpacks a release asset into `build/inputs/`. If an unexpected `.apk` there
+    were merely unused rather than refused, an attacker who can write to that directory has a place
+    to put one — and `apk` resolving a closure against a local repository is exactly the kind of
+    thing that would pick it up.
+    """
+    present = verify.parse_checksum_list(_inputs_list())
+    present["apks/main/x86_64/backdoor-1.0-r0.apk"] = "a" * 64
+    violations = verify.check_inputs(present, _inputs_list())
+    assert [v for v in violations if "backdoor" in v.claim and "unexpected" in v.claim]
+
+
+def test_an_empty_input_list_is_rejected_rather_than_vacuously_satisfied() -> None:
+    """An empty list accepts every directory, which is the failure mode of a set equality."""
+    assert verify.check_inputs({}, "") != []
+    assert verify.check_inputs({"anything": "0" * 64}, "# only a comment\n") != []
+
+
+# --- The toolchain list has exactly one group ---------------------------------------------------
+
+
+def test_the_real_toolchain_list_carries_exactly_the_toolchain_group() -> None:
+    assert verify.check_toolchain_list(_toolchain()) == []
+
+
+def test_a_second_group_in_the_toolchain_list_is_rejected() -> None:
+    """`Dockerfile.iso` and `fetch-inputs.sh` read that file as every non-comment line, which is
+    correct only while it has one group — the same hazard the `@group` markers closed once."""
+    violations = verify.check_toolchain_list(_toolchain() + "\n# @group harness\npy3-pip=1.0-r0\n")
+    assert [v for v in violations if "exactly one group" in v.claim]
+
+
+def test_an_unpinned_toolchain_package_is_rejected() -> None:
+    violations = verify.check_toolchain_list(_toolchain() + "\ngcc\n")
+    assert [v for v in violations if "name=version" in v.claim]
+
+
+def _toolchain() -> str:
+    return (BUILD / "toolchain-versions.txt").read_text(encoding="utf-8")
+
+
+# --- The embedded release line ------------------------------------------------------------------
+
+_COMMIT = "4f1c8a6e2b90d7c35a18ef04b6d2917c0ae53b81"
+_EPOCH = "1773446400"
+
+
+def _release_file(**overrides: str) -> str:
+    fields = {
+        "release": "v1.0",
+        "released": "2026-03-14",
+        "git-commit": _COMMIT,
+        "source-date-epoch": _EPOCH,
+        "dirty": "no",
+    }
+    fields.update(overrides)
+    return "".join(f"{key}: {value}\n" for key, value in fields.items())
+
+
+def _judge_release(text: str, *, tag: str = "v1.0", dirty: bool = False) -> list:
+    return verify.check_embedded_release(
+        text, tag=tag, head_commit=_COMMIT, dirty=dirty, source_date_epoch=_EPOCH
+    )
+
+
+def test_a_matching_release_line_is_accepted() -> None:
+    assert verify.utc_date(_EPOCH) == "2026-03-14"
+    assert _judge_release(_release_file()) == []
+
+
+def test_a_release_line_naming_another_version_than_the_tag_is_rejected() -> None:
+    violations = _judge_release(_release_file(release="v0.9"))
+    assert [v for v in violations if "the signed tag" in v.claim]
+
+
+def test_a_release_line_naming_another_commit_than_head_is_rejected() -> None:
+    violations = _judge_release(_release_file(**{"git-commit": "b" * 40}))
+    assert [v for v in violations if "git-commit is HEAD" in v.claim]
+
+
+def test_a_dirty_tree_may_not_claim_a_version() -> None:
+    """The `-dirty` build is a development build by every definition this project uses."""
+    violations = _judge_release(_release_file(dirty="yes"), dirty=True)
+    assert [v for v in violations if "version-shaped string" in v.claim]
+
+
+def test_a_development_build_is_skipped_rather_than_faked() -> None:
+    """No tag at HEAD: the tag assertion does not apply, and nothing is invented in its place."""
+    development = _release_file(release=verify.DEVELOPMENT)
+    assert _judge_release(development, tag="") == []
+
+
+def test_a_development_build_that_claims_a_version_is_rejected() -> None:
+    violations = _judge_release(_release_file(release="v1.0"), tag="")
+    assert [v for v in violations if verify.DEVELOPMENT in v.claim]
+
+
+def test_a_release_line_missing_a_field_says_which_one() -> None:
+    for field in ("release", "released", "git-commit", "source-date-epoch", "dirty"):
+        text = "".join(
+            line + "\n"
+            for line in _release_file().splitlines()
+            if not line.startswith(f"{field}:")
+        )
+        violations = _judge_release(text)
+        assert [v for v in violations if field in v.claim], field
+
+
+def test_a_released_date_that_is_not_the_epoch_is_rejected() -> None:
+    """The appliance may not import `datetime`, so the build is the only place the epoch becomes a
+    date — and this is the only thing keeping the two halves of that arrangement consistent."""
+    violations = _judge_release(_release_file(released="2020-01-01"))
+    assert [v for v in violations if "released date" in v.claim]
+
+
+def test_a_release_line_carrying_a_truncated_commit_is_rejected() -> None:
+    violations = _judge_release(_release_file(**{"git-commit": _COMMIT[:12]}))
+    assert [v for v in violations if "40-hex" in v.claim]
+
+
+def test_an_epoch_the_build_did_not_run_under_is_rejected() -> None:
+    violations = _judge_release(_release_file(**{"source-date-epoch": "1", "released": "1970-01-01"}))
+    assert [v for v in violations if "source-date-epoch" in v.claim]
+
+
+def test_the_appliance_and_the_build_parse_the_release_file_the_same_way() -> None:
+    """Two parsers for one format, and this is what stops them drifting.
+
+    `build/verify.py` cannot import the appliance and the appliance cannot import `build/`, so
+    `/etc/aobs-release` is read twice. The format is four `key: value` lines; the risk is not that
+    either parser is hard, it is that one of them is changed and the other is not.
+    """
+    from aobs.core.release import parse
+
+    text = _release_file()
+    appliance = parse(text)
+    build = verify.parse_fields(text)
+    assert appliance.release == build["release"]
+    assert appliance.released == build["released"]
+    assert appliance.commit == build["git-commit"]
+    assert appliance.dirty is (build["dirty"] == "yes")
+
+
+# --- The four release-mode refusals ------------------------------------------------------------
+
+
+def _facts(**overrides) -> object:
+    fields = {
+        "head_commit": _COMMIT,
+        "dirty": False,
+        "tag": "v1.0",
+        "tag_signed": True,
+        "tag_commit_date": _EPOCH,
+    }
+    fields.update(overrides)
+    return verify.GitFacts(**fields)
+
+
+def test_a_clean_signed_tagged_tree_passes_the_preflight() -> None:
+    assert (
+        verify.check_release_preflight(
+            _facts(), source_date_epoch=_EPOCH, manifest_commit=_COMMIT
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides, epoch, manifest_commit, expected",
+    [
+        ({"dirty": True}, _EPOCH, _COMMIT, "clean working tree"),
+        ({"tag": "", "tag_commit_date": ""}, _EPOCH, _COMMIT, "annotated tag"),
+        ({"tag_signed": False}, _EPOCH, _COMMIT, "signed by the maintainer"),
+        ({}, "1773446401", _COMMIT, "SOURCE_DATE_EPOCH"),
+        ({}, _EPOCH, "c" * 40, "manifest's git-commit is HEAD"),
+    ],
+    ids=["dirty", "untagged", "unsigned-tag", "hand-set-epoch", "manifest-not-head"],
+)
+def test_each_release_mode_refusal_fires_on_its_own_hostile_input(
+    overrides: dict, epoch: str, manifest_commit: str, expected: str
+) -> None:
+    violations = verify.check_release_preflight(
+        _facts(**overrides), source_date_epoch=epoch, manifest_commit=manifest_commit
+    )
+    assert [v for v in violations if expected in v.claim], violations
+
+
+@pytest.mark.parametrize(
+    "overrides, epoch, manifest_commit",
+    [
+        ({"dirty": True}, _EPOCH, _COMMIT),
+        ({"tag": "", "tag_commit_date": ""}, _EPOCH, _COMMIT),
+        ({"tag_signed": False}, _EPOCH, _COMMIT),
+        ({}, "1773446401", _COMMIT),
+        ({}, _EPOCH, "c" * 40),
+    ],
+    ids=["dirty", "untagged", "unsigned-tag", "hand-set-epoch", "manifest-not-head"],
+)
+def test_no_release_mode_refusal_fires_in_development_mode(
+    overrides: dict, epoch: str, manifest_commit: str
+) -> None:
+    """A guard that fires during ordinary work gets disabled, and then it guards nothing on the day
+    it mattered. Every one of the four is silent for a build that is not cutting a release."""
+    assert (
+        verify.check_release_preflight(
+            _facts(**overrides),
+            source_date_epoch=epoch,
+            manifest_commit=manifest_commit,
+            release_mode=False,
+        )
+        == []
+    )
+
+
+def test_a_tag_that_is_not_vmajor_minor_is_rejected() -> None:
+    violations = verify.check_release_preflight(
+        _facts(tag="release-1.0"), source_date_epoch=_EPOCH, manifest_commit=_COMMIT
+    )
+    assert [v for v in violations if "vMAJOR.MINOR" in v.claim]
+
+
+def test_a_preflight_with_no_manifest_yet_judges_the_other_three() -> None:
+    """The preflight runs before the manifest is written as well as after it."""
+    assert (
+        verify.check_release_preflight(_facts(), source_date_epoch=_EPOCH, manifest_commit=None)
+        == []
+    )
+
+
+# --- The manifest ------------------------------------------------------------------------------
+
+_ISO_SHA = "a" * 64
+_ARCHIVE_SHA = "b" * 64
+_LIST_SHA = "c" * 64
+
+
+def _manifest(**overrides: str) -> str:
+    fields = {
+        "format": verify.MANIFEST_FORMAT,
+        "release": "v1.0",
+        "released": "2026-03-14",
+        "git-tag": "v1.0",
+        "git-commit": _COMMIT,
+        "source-date-epoch": _EPOCH,
+        "iso-name": "bitcoin-signer-amd64.iso",
+        "alpine-branch": "v3.24",
+        "aports-commit": "0934530484bbcde7498e2c694c710a49616a450e",
+        "inputs-list-sha256": _LIST_SHA,
+    }
+    fields.update(overrides)
+    return (
+        "# a comment sha256sum -c would choke on\n"
+        + "".join(f"{key}: {value}\n" for key, value in fields.items())
+        + f"signer: {verify.BUILDER_FINGERPRINT} builder\n"
+        + "input-kernel: linux-6.12.106.tar.xz sha256=" + "d" * 64 + "\n"
+        + f"{_ISO_SHA}  bitcoin-signer-amd64.iso\n"
+        + f"{_ARCHIVE_SHA}  aobs-inputs-v1.0.tar\n"
+    )
+
+
+_PUBLISHED = {
+    "bitcoin-signer-amd64.iso": _ISO_SHA,
+    "aobs-inputs-v1.0.tar": _ARCHIVE_SHA,
+}
+
+
+def _judge_manifest(text: str, **overrides) -> list:
+    arguments = {
+        "release_text": _release_file(),
+        "inputs_list_sha256": _LIST_SHA,
+        "published": _PUBLISHED,
+    }
+    arguments.update(overrides)
+    return verify.check_manifest(text, **arguments)
+
+
+def test_a_consistent_manifest_is_accepted() -> None:
+    assert _judge_manifest(_manifest()) == []
+
+
+def test_the_documented_one_liner_extracts_exactly_the_published_files() -> None:
+    """The format was decided by measurement: `sha256sum -c` cannot read a file with comments in it,
+    so the documented command is a `grep` nobody would guess unaided. This asserts the `grep` the
+    README prints selects the block and nothing else."""
+    selected = [
+        line
+        for line in _manifest().splitlines()
+        if re.match(r"^[0-9a-f]{64}  ", line)
+    ]
+    assert len(selected) == len(_PUBLISHED)
+    assert "input-kernel" not in "\n".join(selected)
+
+
+@pytest.mark.parametrize(
+    "field", ["format", "release", "git-tag", "git-commit", "iso-name", "inputs-list-sha256"]
+)
+def test_a_manifest_missing_a_field_says_which_one(field: str) -> None:
+    text = "\n".join(
+        line for line in _manifest().splitlines() if not line.startswith(f"{field}:")
+    )
+    violations = _judge_manifest(text)
+    assert [v for v in violations if field in v.claim], field
+
+
+def test_a_manifest_disagreeing_with_the_image_is_rejected() -> None:
+    """#61: `release` and `git-commit` are *generated from* `/etc/aobs-release`, so there is nothing
+    for the image and the manifest to disagree about — and this is what proves it."""
+    for field, value in (("release", "v9.9"), ("git-commit", "e" * 40)):
+        violations = _judge_manifest(_manifest(**{field: value}))
+        assert [v for v in violations if "cannot disagree" in v.claim], field
+
+
+def test_a_manifest_naming_the_wrong_input_list_is_rejected() -> None:
+    """`inputs-list-sha256` is the field doing the real work: it pins the archive to a list a reader
+    can regenerate from a `git checkout`, so an asset replaced in place is still caught."""
+    violations = _judge_manifest(_manifest(**{"inputs-list-sha256": "f" * 64}))
+    assert [v for v in violations if "inputs-list-sha256" in v.claim]
+
+
+def test_a_manifest_with_a_wrong_published_hash_is_rejected() -> None:
+    violations = _judge_manifest(_manifest(), published={**_PUBLISHED, "bitcoin-signer-amd64.iso": "9" * 64})
+    assert [v for v in violations if "bitcoin-signer-amd64.iso" in v.claim]
+
+
+def test_a_manifest_naming_a_file_that_is_not_published_is_rejected() -> None:
+    """A reader's `sha256sum -c` would fail on it, so the manifest may not name it."""
+    published = {name: value for name, value in _PUBLISHED.items() if name.endswith(".iso")}
+    violations = _judge_manifest(_manifest(), published=published)
+    assert [v for v in violations if "aobs-inputs-v1.0.tar" in v.claim]
+
+
+def test_a_manifest_with_no_signer_line_is_rejected() -> None:
+    text = "\n".join(
+        line for line in _manifest().splitlines() if not line.startswith("signer:")
+    )
+    violations = _judge_manifest(text)
+    assert [v for v in violations if "expected to sign" in v.claim]
+
+
+def test_a_manifest_with_no_checksum_block_is_rejected() -> None:
+    text = "\n".join(
+        line for line in _manifest().splitlines() if not re.match(r"^[0-9a-f]{64}  ", line)
+    )
+    violations = _judge_manifest(text)
+    assert [v for v in violations if "sha256sum -c" in v.claim]
+
+
+def test_the_declared_signers_are_the_fingerprints_the_verifier_hardcodes() -> None:
+    """The declared list and the accepted list are different things by design, and they must agree.
+
+    `verify-release.sh` hardcodes the fingerprints it accepts, because trusting the manifest to say
+    who may sign it is circular. The `signer:` lines exist to tell *one of two* from *one, and no
+    idea whether more were coming* — and that only works while the two lists name the same people.
+    """
+    script = (ROOT / "verify-release.sh").read_text(encoding="utf-8")
+    assert f"KNOWN_BUILDER={verify.BUILDER_FINGERPRINT}" in script
+    assert f"KNOWN_WITNESS={verify.WITNESS_FINGERPRINT}" in script
+    declared = {fingerprint for fingerprint, _ in verify.SIGNERS}
+    assert declared == {verify.BUILDER_FINGERPRINT}, (
+        "no witness key exists yet; when one does, both this list and verify-release.sh gain it"
+    )
+
+
+# --- The pinned parallelism ---------------------------------------------------------------------
+
+
+def test_the_real_build_derives_no_parallelism_from_the_core_count() -> None:
+    sources = {
+        name: (ROOT / name).read_text(encoding="utf-8")
+        for name in ("build/mkiso.sh", "build/Dockerfile.iso", "build/fetch-inputs.sh")
+    }
+    assert verify.check_pinned_parallelism(sources) == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'make ARCH=x86_64 -j"$(nproc)" bzImage',
+        "zstd -q -19 -T0 -o out.zst",
+        "JOBS=$(nproc)",
+        'make -j"$JOBS" all',
+    ],
+    ids=["nproc-in-j", "zstd-T0", "nproc-in-a-variable", "unresolvable-variable"],
+)
+def test_a_build_step_that_reads_the_machine_is_rejected(line: str) -> None:
+    """`docs/reproducible-build.md` claim 1 puts CPU count and host architecture inside the
+    contract; `zstd`'s output genuinely varies with the thread count. The CI guard catches a
+    regression here by building twice with `--cpus=2`; this catches it in 3 ms."""
+    assert verify.check_pinned_parallelism({"script.sh": line}) != []
+
+
+def test_a_pinned_constant_is_accepted_directly_or_through_a_name() -> None:
+    assert verify.check_pinned_parallelism({"s": "make -j4 all\nzstd -T1 -o x"}) == []
+    assert (
+        verify.check_pinned_parallelism({"s": "MAKE_JOBS=4\nmake -j\"$MAKE_JOBS\" all"}) == []
+    )
+
+
+def test_a_comment_mentioning_nproc_is_not_a_violation() -> None:
+    """The rule is about what the build *does*, and `mkiso.sh` explains at length why it does not
+    call `nproc` — a check that could not survive its own documentation is a check nobody keeps."""
+    assert verify.check_pinned_parallelism({"s": "# never nproc, see the contract"}) == []
+
+
 def test_the_verifier_never_raises_on_a_violation() -> None:
     """Reading is the caller's job and judging is the verifier's; a violation is a return value.
 
@@ -537,3 +985,9 @@ def test_the_verifier_never_raises_on_a_violation() -> None:
     """
     assert verify.check_kernel_config("") != []
     assert verify.check_rootfs(["/sbin/getty"]) != []
+    assert verify.check_inputs({}, "") != []
+    assert verify.check_toolchain_list("gcc") != []
+    assert _judge_release("") != []
+    assert verify.check_release_preflight(_facts(dirty=True), source_date_epoch="", manifest_commit=None) != []
+    assert _judge_manifest("") != []
+    assert verify.check_pinned_parallelism({"s": "make -j$(nproc)"}) != []

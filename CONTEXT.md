@@ -205,3 +205,26 @@ An independent rebuild of a release by someone other than the builder, published
 party can see the two hashes agree. Not a signature and not an approval: a witness asserts only
 that the same inputs produced the same output on a machine the builder does not control, which is
 the single observation that turns a reproducibility claim into a checkable one.
+
+## Manifest
+
+The plain-text, line-oriented file a release signature covers. It names the release, the commit, the
+inputs, and the sha256 of every file published beside it. The manifest is what is signed and the ISO
+is not, and the reason is one sentence: a signature over the ISO says who vouches for those bytes,
+while a signature over a file that *names the inputs* also says which inputs produced them — which
+is what an independent reproduction needs.
+
+## Attestation
+
+A statement by an identified party about an artifact, which a reader can check without trusting the
+artifact. A signed manifest is an attestation. **The version row the appliance shows on its first
+screen is not one** — it is an identification aid, self-reported by an image that could have been
+modified, and the distinction is load-bearing everywhere the row is described.
+
+## Advisory
+
+A signed, dated entry in `ADVISORIES.txt` saying that a released version could have produced a wrong
+or unsafe result its user could not have seen. Distinguished from a release note by one test — *could
+this have cost someone money without them noticing* — and from most advisory formats by one field:
+whether upgrading is sufficient, or whether keys generated on the affected build are permanently
+compromised and the funds must move.

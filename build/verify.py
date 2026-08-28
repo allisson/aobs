@@ -1252,4 +1252,16 @@ def check_pinned_parallelism(sources: Mapping[str, str]) -> list[Violation]:
                             f"{name}:{number}: {line}",
                         )
                     )
+                elif flag == "-T" and value == "0":
+                    # The one literal that is not a constant: `zstd -T0` *means* "as many threads as
+                    # there are cores", so it is the core-count dependence spelled as a digit — and
+                    # it is the specific divergence source `docs/reproducible-build.md` lists sixth.
+                    violations.append(
+                        Violation(
+                            "zstd -T names a thread count and never 0: `-T0` means one thread per "
+                            "core, so the compressed output varies with the machine "
+                            "(`docs/reproducible-build.md` divergence source 6)",
+                            f"{name}:{number}: {line}",
+                        )
+                    )
     return violations

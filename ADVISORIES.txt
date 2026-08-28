@@ -1,0 +1,47 @@
+aobs security advisories
+========================
+
+Append-only. Signed as `ADVISORIES.txt.asc` by the key in `SECURITY.md`, and re-attached as an asset
+to every subsequent release, so the copy you are holding is dated and a stale one is recognisably
+stale.
+
+    gpg --verify ADVISORIES.txt.asc ADVISORIES.txt
+
+Get that key's fingerprint from a channel that is not the one that served you this file. `SECURITY.md`
+names two that do not resolve to GitHub, and explains why that matters.
+
+**This file is the source of truth.** GitHub Security Advisories is a mirror for reach; a reader who
+distrusts GitHub verifies the signature instead.
+
+**The appliance does not check this list, and cannot.** There is no trustworthy clock on an offline
+machine, and a modified image would lie about it. The static line on the appliance's first screen
+points here; it never claims to have looked.
+
+An advisory is published when the appliance could have produced a wrong or unsafe result the user
+could not have seen — *could this have cost someone money without them noticing.* Everything else is
+a note in the next release's notes. `SECURITY.md` holds the full threshold and the field definitions.
+
+Entry format
+------------
+
+    ADVISORY:   aobs-YYYY-NNN
+    DATE:       YYYY-MM-DD
+    AFFECTED:   the versions as the appliance displays them, e.g. `v1.0`, `v1.0 through v1.2`
+    WHAT:       what is wrong
+    DO:         what an owner of an affected stick should do
+    SIGNED:     what funds already signed on that build imply
+    KEYS:       UPGRADE SUFFICIENT — or — KEYS COMPROMISED, MOVE FUNDS
+
+`KEYS` is the field most advisory formats omit, and it is the reason this one exists. Coldcard's
+entropy defect generated seeds with roughly 72 bits instead of 128 between 2021 and July 2026, and a
+firmware update does not repair an already-generated seed. A format with no slot for that distinction
+silently tells a user to upgrade when what they need to do is move their coins.
+
+Newest entries at the bottom, so that a diff of this file only ever adds lines at the end — and an
+edit to a past entry is visible as one.
+
+Advisories
+----------
+
+None. No release has been cut yet; this file exists so that the first one ships with the mechanism
+already in place, rather than with a page created during an incident.

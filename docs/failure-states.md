@@ -18,6 +18,17 @@ Reused verbatim from [#19](https://github.com/allisson/aobs/issues/19), which ar
   thumb on a choice it cannot make.
 - **Never pretend to an interpretation it does not have.**
 - No error codes without words. **No traceback, ever** (#15).
+- **The release identity row** — the same two lines the keymap picker carries
+  (`boot-pipeline.md`): `aobs v1.0 · 4f1c8a6e2b90 · 2026-09-14`, and where advisories live.
+
+The identity row is here for the same reason the condition name is, and it is the same trade: **a bug
+report carrying no build identity is a bug report about nothing.** A user typing up what they saw on a
+different machine can copy a version and a commit prefix off the screen, and neither costs anything
+or carries anything off the machine. It is one shape for every failure screen, so it is one line in
+one widget — not a decision each screen makes for itself.
+
+It **identifies, it does not attest**: a modified image can print anything, and nothing here should be
+read as the appliance vouching for itself.
 
 ## A QR that decodes but is not ours
 

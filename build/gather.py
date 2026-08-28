@@ -160,7 +160,7 @@ def main(argv: list[str]) -> int:
                 _read(manifest),
                 release_text=_read(release_file),
                 inputs_list_sha256=_sha256(Path(source) / "build" / "inputs.sha256"),
-                published=_hashes(published),
+                published=_published(published),
             )
         )
 
@@ -191,6 +191,41 @@ def _hashes(directory: str) -> dict[str, str]:
         for path in sorted(base.rglob("*"))
         if path.is_file()
     }
+
+
+def _published(directory: str) -> dict[str, str]:
+    """What the manifest's checksum block covers: every published file **except** two kinds.
+
+    The manifest cannot list itself — it would have to contain its own hash — and it does not list a
+    `.asc`, because a signature is what verifies the manifest rather than something the manifest
+    verifies. Everything else is in, `verify-release.sh` and `ADVISORIES.txt` included: a tampered
+    verifier is a real attack, and user story 4 asks for *one* command that checks every published
+    file's hash at once.
+    """
+    return {
+        name: value
+        for name, value in _hashes(directory).items()
+        if not (name.startswith("manifest-") and name.endswith(".txt"))
+        and not name.endswith(".asc")
+    }
+
+
+def _closures(inputs: Path) -> dict[str, list[str]]:
+    """`build/inputs/CLOSURES.txt`, written by the fetcher and archived with the bytes it describes.
+
+    The appliance/toolchain split is not recoverable from the `.apk` files alone — the two closures
+    overlap — and re-resolving it would need the network the build does not have. So the fetcher
+    records it, the archive carries it, and `build/inputs.sha256` pins it like everything else.
+    """
+    found: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    for raw in _read(str(inputs / "CLOSURES.txt")).splitlines():
+        line = raw.strip()
+        if line.startswith("# @closure "):
+            current = found.setdefault(line.split()[-1], [])
+        elif line and current is not None:
+            current.append(line)
+    return found
 
 
 def _tree_manifest(root: str) -> str:
@@ -368,9 +403,8 @@ def _manifest(source: str, release_file: str, published: str) -> str:
             ("kernel", next(inputs.glob("linux-*.tar.xz"))),
         )
     ]
-    for group, directory in (("main", "main"), ("community", "community")):
-        count = len(list((inputs / "apks" / directory / "x86_64").glob("*.apk")))
-        input_lines.append(f"input-apks-{group}: {count} packages")
+    for closure, packages in _closures(inputs).items():
+        input_lines.append(f"input-apks-{closure}: {len(packages)} packages")
 
     aports = subprocess.run(
         [sys.executable, str(root / "build" / "apkindex.py"), str(inputs),
@@ -380,7 +414,7 @@ def _manifest(source: str, release_file: str, published: str) -> str:
         check=True,
     ).stdout.strip()
 
-    files = _hashes(published)
+    files = _published(published)
     iso = next((name for name in files if name.endswith(".iso")), "bitcoin-signer-amd64.iso")
 
     return _MANIFEST_HEADER.format(
