@@ -81,7 +81,8 @@ judge cmdline bios "$SRC/build/isolinux.cfg"
 judge cmdline uefi "$SRC/build/grub.cfg"
 judge vendored-tree "$SRC/aobs/core/vendor"
 judge toolchain-list "$SRC/build/toolchain-versions.txt"
-judge pinned-parallelism "$SRC/build/mkiso.sh" "$SRC/build/Dockerfile.iso"
+judge pinned-parallelism "$SRC/build/mkiso.sh" "$SRC/build/Dockerfile.iso" \
+	"$SRC/build/fetch-inputs.sh"
 note "kernel.config, cmdlines, vendored tree, toolchain list, pinned parallelism: no violations"
 
 # `build/inputs/` against `build/inputs.sha256`, on hash **and on set equality**. The enforcement is
