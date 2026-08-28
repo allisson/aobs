@@ -24,8 +24,11 @@ judges the result independently either way, so an applet nobody listed fails the
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import os
+import stat
+import subprocess
 import sys
 from pathlib import Path
 
@@ -96,8 +99,314 @@ def main(argv: list[str]) -> int:
     if command == "prune-busybox-applets":
         return _prune_busybox_applets(arguments[0])
 
+    # --- The release engineering half (#54's eight tickets) ---------------------------------------
+
+    if command == "inputs":
+        directory, listing = arguments
+        return _report(verify.check_inputs(_hashes(directory), _read(listing)))
+
+    if command == "toolchain-list":
+        return _report(verify.check_toolchain_list(_read(arguments[0])))
+
+    if command == "pinned-parallelism":
+        return _report(
+            verify.check_pinned_parallelism({path: _read(path) for path in arguments})
+        )
+
+    if command == "tree-manifest":
+        print(_tree_manifest(arguments[0]))
+        return 0
+
+    if command == "write-release":
+        source, destination = arguments
+        return _write_release(source, destination)
+
+    if command == "embedded-release":
+        source, release_file = arguments
+        git = _git_facts(source)
+        return _report(
+            verify.check_embedded_release(
+                _read(release_file),
+                tag=git.tag,
+                head_commit=git.head_commit,
+                dirty=git.dirty,
+                source_date_epoch=_source_date_epoch(source),
+            )
+        )
+
+    if command == "release-preflight":
+        source, manifest = arguments[0], (arguments[1] if len(arguments) > 1 else None)
+        return _report(
+            verify.check_release_preflight(
+                _git_facts(source),
+                source_date_epoch=os.environ.get("SOURCE_DATE_EPOCH", ""),
+                manifest_commit=(
+                    verify.parse_fields(_read(manifest)).get("git-commit", "")
+                    if manifest
+                    else None
+                ),
+            )
+        )
+
+    if command == "write-manifest":
+        source, release_file, published = arguments
+        print(_manifest(source, release_file, published), end="")
+        return 0
+
+    if command == "manifest":
+        source, manifest, release_file, published = arguments
+        return _report(
+            verify.check_manifest(
+                _read(manifest),
+                release_text=_read(release_file),
+                inputs_list_sha256=_sha256(Path(source) / "build" / "inputs.sha256"),
+                published=_hashes(published),
+            )
+        )
+
     sys.stderr.write(f"unknown command: {command}\n")
     return 2
+
+
+# --- Hashing and listing -------------------------------------------------------------------------
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _hashes(directory: str) -> dict[str, str]:
+    """`{path relative to the directory: sha256}` for every regular file under it.
+
+    Symlinks are followed by `is_file()` and there are none in an input archive; a directory is not
+    a file and contributes nothing, which is why the set equality in `check_inputs` is over files.
+    """
+    base = Path(directory)
+    return {
+        str(path.relative_to(base)): _sha256(path)
+        for path in sorted(base.rglob("*"))
+        if path.is_file()
+    }
+
+
+def _tree_manifest(root: str) -> str:
+    """One line per path: mode, owner, and either a content hash or a symlink target.
+
+    The first rung of `docs/reproducible-build.md`'s failure ladder. A single hash of the initramfs
+    says two builds differ; this says *which file*, and whether it differs in content or in a
+    permission bit — which is the difference between a useful bug report and "the hashes differ".
+    """
+    base = Path(root)
+    lines = []
+    for path in sorted(base.rglob("*")):
+        info = path.lstat()
+        relative = str(path.relative_to(base))
+        if stat.S_ISLNK(info.st_mode):
+            content = "-> " + os.readlink(path)
+        elif path.is_dir():
+            content = "dir"
+        else:
+            content = _sha256(path)
+        lines.append(f"{info.st_mode:06o} {info.st_uid}:{info.st_gid} {content} /{relative}")
+    return "\n".join(lines)
+
+
+# --- What git says ------------------------------------------------------------------------------
+
+
+def _git(source: str, *arguments: str) -> tuple[int, str]:
+    """One git command against the tree being built, and never a write.
+
+    `-c safe.directory` because the build reads a bind-mounted repository owned by another uid, and
+    git's ownership check would otherwise refuse to look at it at all.
+    """
+    result = subprocess.run(
+        ["git", "-C", source, "-c", f"safe.directory={source}", *arguments],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode, result.stdout.strip()
+
+
+def _git_facts(source: str):
+    """The five facts the release-mode refusals and the stage-3 assertion are decided from.
+
+    Gathered here, judged in `verify.py`. That is the whole reason the four refusals are pure
+    functions rather than shell conditions: a hostile set of facts is a value object away.
+    """
+    _, head = _git(source, "rev-parse", "HEAD")
+    status_code, status = _git(source, "status", "--porcelain")
+    tag_code, tag = _git(source, "describe", "--exact-match", "--tags", "HEAD")
+    tag = tag if tag_code == 0 else ""
+    signed = _git(source, "tag", "-v", tag)[0] == 0 if tag else False
+    date = _git(source, "log", "-1", "--format=%ct", f"{tag}^{{commit}}")[1] if tag else ""
+    return verify.GitFacts(
+        head_commit=head,
+        dirty=bool(status) or status_code != 0,
+        tag=tag,
+        tag_signed=signed,
+        tag_commit_date=date,
+    )
+
+
+def _source_date_epoch(source: str) -> str:
+    """`SOURCE_DATE_EPOCH` as the build set it, or the commit date of HEAD if nothing set it.
+
+    The fallback is not a second contract: it is the same derivation `build/mkiso.sh` performs, in
+    one place, so that a subcommand run by hand judges what a build would have judged.
+    """
+    return os.environ.get("SOURCE_DATE_EPOCH") or _git(source, "log", "-1", "--format=%ct")[1]
+
+
+def _write_release(source: str, destination: str) -> int:
+    """Generate `/etc/aobs-release`, and print the row the appliance will show.
+
+    A mutation in a module otherwise about reading, and here for the same reason
+    `prune-busybox-applets` is: it is a *policy* — what a build is allowed to call itself — and a
+    policy that decides whether an image looks like a release is exactly the kind that must be
+    tested. `build/verify.py`'s `check_embedded_release` is the independent judge of the result, so
+    a generator that gets this wrong fails the build in stage 3 rather than shipping.
+    """
+    git = _git_facts(source)
+    epoch = _source_date_epoch(source)
+    is_release = bool(git.tag) and not git.dirty
+    fields = {
+        "release": git.tag if is_release else verify.DEVELOPMENT,
+        "released": verify.utc_date(epoch),
+        "git-commit": git.head_commit,
+        "source-date-epoch": epoch,
+        "dirty": "yes" if git.dirty else "no",
+    }
+    text = "".join(f"{key}: {value}\n" for key, value in fields.items())
+    output = Path(destination)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(text, encoding="utf-8")
+
+    label = "DEVELOPMENT BUILD" if not is_release else fields["release"]
+    commit = fields["git-commit"][:12] + ("-dirty" if git.dirty else "")
+    print(f"aobs {label} · {commit} · {fields['released']}")
+    return 0
+
+
+# --- The manifest ------------------------------------------------------------------------------
+
+_MANIFEST_HEADER = """\
+# aobs release manifest — {release}
+#
+# This file is what the signature covers. The ISO is not signed directly: it is named here, so
+# verifying this file and then hashing the ISO tells you *which inputs produced that ISO* — which is
+# what independent reproduction needs and what a bare signature over the ISO cannot say.
+#
+# Read it with `cat`. Check the files published beside it with:
+#
+#     grep -E '^[0-9a-f]{{64}}  ' {manifest_name} | sha256sum -c -
+#
+# The `grep` is not decoration: `sha256sum -c` reads this whole file as a checksum list and fails on
+# every comment and `key: value` line. Measured against busybox coreutils — without the grep, exit
+# status 1 and a `comment line: FAILED` for every one of them.
+
+format: {format}
+release: {release}
+released: {released}
+
+# What was built, and from what.
+
+git-tag: {git_tag}
+git-commit: {git_commit}
+source-date-epoch: {source_date_epoch}
+iso-name: {iso_name}
+
+# The sha256 of `build/inputs.sha256` as committed at the tag above. This is the field that binds the
+# archive to the source: without it, an archive replaced in place on GitHub Releases would still
+# match its own hash. With it, the archive is pinned to a list a reader can regenerate from a
+# `git checkout` of the tag.
+
+inputs-list-sha256: {inputs_list_sha256}
+
+# The inputs. These live inside the archive named in the file list below, so their hashes are
+# recorded as fields rather than as checksum lines: a reader running the `sha256sum -c` one-liner has
+# the archive on disk, not its contents.
+#
+# `aports-commit` is the aports recipe commit of `alpine-release`, the branch's release-marker
+# package. It is a pointer into a history that does not expire, not the whole record — the complete
+# per-package licence and aports commit is the `NOTICE` inside the archive.
+
+alpine-branch: {alpine_branch}
+aports-commit: {aports_commit}
+{inputs}
+# Who is expected to have signed this file. Listed here so a verifier can tell "one of two signers"
+# from "one signer, and I have no idea whether there should be another" — the manifest cannot list
+# the signatures over itself, but it can list who was supposed to make them. **A verifier must not
+# trust these lines to decide who may sign**; `verify-release.sh` hardcodes the fingerprints it
+# accepts, because trusting the manifest to say who may sign it is circular.
+
+{signers}
+# The published files. This block is `sha256sum -c` format on purpose.
+
+{published}"""
+
+
+def _manifest(source: str, release_file: str, published: str) -> str:
+    """The manifest, generated from the release file and the archive rather than assembled by hand.
+
+    `release` and `git-commit` come from `/etc/aobs-release` (#61) — one source, so there is nothing
+    for the image and the manifest to disagree about. Everything else is read off files.
+    """
+    root = Path(source)
+    embedded = verify.parse_fields(_read(release_file))
+    release = embedded["release"]
+    inputs = root / "build" / "inputs"
+
+    input_lines = [
+        f"input-{name}: {path.name} sha256={_sha256(path)}"
+        for name, path in (
+            ("base-rootfs", next(inputs.glob("alpine-minirootfs-*.tar.gz"))),
+            ("kernel", next(inputs.glob("linux-*.tar.xz"))),
+        )
+    ]
+    for group, directory in (("main", "main"), ("community", "community")):
+        count = len(list((inputs / "apks" / directory / "x86_64").glob("*.apk")))
+        input_lines.append(f"input-apks-{group}: {count} packages")
+
+    aports = subprocess.run(
+        [sys.executable, str(root / "build" / "apkindex.py"), str(inputs),
+         "--aports-commit", "alpine-release"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    files = _hashes(published)
+    iso = next((name for name in files if name.endswith(".iso")), "bitcoin-signer-amd64.iso")
+
+    return _MANIFEST_HEADER.format(
+        format=verify.MANIFEST_FORMAT,
+        manifest_name=f"manifest-{release}.txt",
+        release=release,
+        released=embedded["released"],
+        git_tag=release,
+        git_commit=embedded["git-commit"],
+        source_date_epoch=embedded["source-date-epoch"],
+        iso_name=iso,
+        inputs_list_sha256=_sha256(root / "build" / "inputs.sha256"),
+        alpine_branch=_alpine_branch(root),
+        aports_commit=aports,
+        inputs="".join(f"{line}\n" for line in input_lines),
+        signers="".join(f"signer: {fingerprint} {who}\n" for fingerprint, who in verify.SIGNERS),
+        published="".join(f"{files[name]}  {name}\n" for name in sorted(files)),
+    )
+
+
+def _alpine_branch(root: Path) -> str:
+    """`ALPINE_BRANCH` as `build/fetch-inputs.sh` declares it. One declaration, read twice."""
+    for line in _read(str(root / "build" / "fetch-inputs.sh")).splitlines():
+        if line.startswith("ALPINE_BRANCH="):
+            return line.split("=", 1)[1].strip()
+    return ""
 
 
 def _prune_busybox_applets(rootfs: str) -> int:

@@ -2,6 +2,8 @@
 #
 # `bitcoin-signer-amd64.iso`, in four stages, from a container.
 #
+#     docker run --rm --platform=linux/amd64 -v "$PWD:/src" -w /src \
+#         alpine:3.24 sh build/fetch-inputs.sh          # once, or when a pin changes
 #     docker build -f build/Dockerfile.iso -t aobs-iso .
 #     docker run --rm --privileged -v "$PWD:/src" -v "$PWD/out:/out" aobs-iso
 #
@@ -17,33 +19,45 @@
 # It **fails, it does not warn**, and it stops at the first stage that violates: nobody should ever
 # read a passing log for stage 4 above a broken stage 1.
 #
-# Out of scope, deliberately and stated in `docs/boot-pipeline.md`: reproducible builds (nothing
-# here forecloses them — every input is a pinned version with a checksum), release engineering, and
-# Secure Boot. The image is unsigned and stays unsigned.
+# **Every byte comes from `build/inputs/`, and nothing here touches a network.** There is no second
+# build path: `build/fetch-inputs.sh` populates that directory — from Alpine's CDN today, from the
+# unpacked release asset in 2030 — and the divergence between the two is confined to *fetching*.
+#
+# **The output is byte-identical on any host.** `docs/reproducible-build.md` states the claim
+# numbered and checkable, lists the six divergence sources that were fixed, and names the CI guard
+# that builds twice under hostile variation and fails on any differing byte. Release engineering is
+# `docs/release.md`. Secure Boot remains out of scope: the image is unsigned and stays unsigned.
 
 set -eu
+
+# What a deterministic build needs from its environment, forced **here** and not only in
+# `Dockerfile.iso`. The guard runs the second build with `-e TZ=`, `-e LC_ALL=` and a different
+# umask precisely to prove the build ignores them, and `docker run -e` overrides an `ENV` — so the
+# Dockerfile holds the defaults and this holds the enforcement.
+export LC_ALL=C
+export LANG=C
+export TZ=UTC
+umask 022
 
 SRC=${SRC:-/src}
 OUT=${OUT:-/out}
 WORK=${WORK:-/build}
+INPUTS=$SRC/build/inputs
 ROOTFS=$WORK/rootfs
 ISOROOT=$WORK/isoroot
 ARTIFACT=$OUT/bitcoin-signer-amd64.iso
 
-#: The one input that does not come from Alpine, pinned as tightly as the ones that do: by version
-#: and by SHA-256 against the tarball kernel.org publishes. 6.12 is a longterm line.
-#:
-#: The checksum was taken from kernel.org's own published `sha256sums.asc` for `v6.x`. That file is
-#: PGP-signed and **this build does not verify the signature** — it verifies the tarball against
-#: the checksum committed here, which moves the trust to this repository's git history where a
-#: reviewer can see it change.
-KERNEL_VERSION=6.12.106
-KERNEL_SHA256=0392555761d99c7604503f6178951e2df77e978b92cc96d11e248423e48ed785
-KERNEL_TARBALL=linux-$KERNEL_VERSION.tar.xz
-KERNEL_URL=https://cdn.kernel.org/pub/linux/kernel/v6.x/$KERNEL_TARBALL
+#: Fixed constants, never `nproc`. `docs/reproducible-build.md` claim 1 puts CPU count and host
+#: architecture inside the contract, and this is the price: `zstd`'s output genuinely varies with the
+#: thread count, `make`'s does not, and both are pinned anyway — because "nothing in the build reads
+#: the machine" is checkable and "only the one that matters" is a judgement made afresh every time.
+#: `build/verify.py`'s `check_pinned_parallelism` is what keeps it true.
+MAKE_JOBS=4
+ZSTD_THREADS=1
 
 stage() { printf '\n=== %s\n' "$1"; }
 note() { printf '    %s\n' "$1"; }
+rung() { printf '    sha256 %-18s %s\n' "$1" "$(sha256sum "$2" | cut -d' ' -f1)"; }
 
 # Every violation the verifier returns, printed, and then a non-zero exit. `verify.py` never
 # raises on a violation and never reads a file: reading is this script's job, judging is its own,
@@ -57,19 +71,42 @@ judge() {
 
 # --- Stage 0. The checked-in inputs, before any work happens -------------------------------------
 #
-# The kernel config, both bootloader command lines, and the vendored tree are all readable right
-# now. Judging them first means a config edit that breaks a published claim costs seconds rather
-# than a full kernel compile.
+# The kernel config, both bootloader command lines, the vendored tree and the input set are all
+# readable right now. Judging them first means a config edit that breaks a published claim costs
+# seconds rather than a full kernel compile.
 
 stage "Stage 0 — the checked-in inputs"
 judge kernel-config "$SRC/build/kernel.config"
 judge cmdline bios "$SRC/build/isolinux.cfg"
 judge cmdline uefi "$SRC/build/grub.cfg"
 judge vendored-tree "$SRC/aobs/core/vendor"
-note "kernel.config, isolinux.cfg, grub.cfg, vendored tree: no violations"
+judge toolchain-list "$SRC/build/toolchain-versions.txt"
+judge pinned-parallelism "$SRC/build/mkiso.sh" "$SRC/build/Dockerfile.iso"
+note "kernel.config, cmdlines, vendored tree, toolchain list, pinned parallelism: no violations"
+
+# `build/inputs/` against `build/inputs.sha256`, on hash **and on set equality**. The enforcement is
+# here rather than in the fetcher because a hand-populated directory — which is exactly what the
+# 2030 rebuild path is — would walk straight past a check that lived only there.
+judge inputs "$INPUTS" "$SRC/build/inputs.sha256"
+note "$(grep -c . "$SRC/build/inputs.sha256") archived inputs: every hash matches, no extra file"
+
+#: The commit date of HEAD, and **derived here rather than passed in**. Not the tag date — an
+#: untagged working build has none, and a fallback is a second contract nobody tests. Not a constant
+#: — a commit date makes the ISO's internal timestamps an assertion about *which commit built it*.
+#:
+#: **Consequence, written down because it will surprise someone: a rebase that rewrites commit dates
+#: changes the ISO hash.** That is correct. The hash is a claim about a commit, and a rewritten
+#: commit is a different commit.
+SOURCE_DATE_EPOCH=$(git -C "$SRC" -c safe.directory="$SRC" log -1 --format=%ct)
+export SOURCE_DATE_EPOCH
+note "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH (the commit date of HEAD)"
 
 rm -rf "$WORK"
 mkdir -p "$ROOTFS" "$ISOROOT/boot/isolinux" "$OUT"
+
+# The local repository, written here rather than committed: it is the absolute path of the bind
+# mount, so it is a fact about this container and not about the repository.
+printf '%s\n' "$INPUTS/apks/main" "$INPUTS/apks/community" >"$WORK/repositories"
 
 # --- Stage 1. Userland ---------------------------------------------------------------------------
 #
@@ -79,17 +116,17 @@ mkdir -p "$ROOTFS" "$ISOROOT/boot/isolinux" "$OUT"
 # squashfs of modules an all-built-in kernel does not have.
 #
 # The **appliance group only** of `build/apk-versions.txt`. The harness group — pytest, hypothesis,
-# and `py3-pip` — is what the test container installs and what must never reach the image.
+# gnupg, git and `py3-pip` — is what the test container installs and what must never reach the image.
 
 stage "Stage 1 — userland"
 PACKAGES=$(python3 "$SRC/build/gather.py" pins-of-group appliance "$SRC/build/apk-versions.txt")
-note "installing $(echo "$PACKAGES" | wc -w) pinned packages"
+note "installing $(echo "$PACKAGES" | wc -w) pinned packages from build/inputs/"
 
 mkdir -p "$ROOTFS/etc/apk"
-cp "$SRC/build/apk-repositories" "$ROOTFS/etc/apk/repositories"
+cp "$WORK/repositories" "$ROOTFS/etc/apk/repositories"
 # shellcheck disable=SC2086
 apk --root "$ROOTFS" --initdb --no-cache \
-	--repositories-file "$SRC/build/apk-repositories" \
+	--repositories-file "$WORK/repositories" \
 	--keys-dir /etc/apk/keys \
 	add $PACKAGES
 
@@ -136,6 +173,12 @@ note "app tree installed at $SITE/aobs"
 install -m 0755 "$SRC/build/init" "$ROOTFS/init"
 install -m 0644 "$SRC/build/assert_in_rootfs.py" "$ROOTFS/assert_in_rootfs.py"
 
+# `/etc/aobs-release`: what the appliance says about itself on the first screen (#61). A stage-1
+# output and a file a human can open, so that the stage-3 assertion below has something to be about.
+# The manifest's `release` and `git-commit` are generated from this same file, which is what leaves
+# the image and the manifest nothing to disagree over.
+note "embedded release line: $(python3 "$SRC/build/gather.py" write-release "$SRC" "$ROOTFS/etc/aobs-release")"
+
 find "$ROOTFS" | sed "s|^$ROOTFS||" | sort >"$WORK/rootfs-listing.txt"
 judge rootfs "$WORK/rootfs-listing.txt"
 note "no getty, no login, no inittab, no network utility, no package manager, no test runner"
@@ -147,20 +190,22 @@ rm -f "$ROOTFS/assert_in_rootfs.py"
 
 # --- Stage 2. Kernel -----------------------------------------------------------------------------
 #
-# Vanilla kernel.org source, not Alpine's `linux-lts`: no stock Alpine kernel satisfies the shape,
+# Vanilla kernel source, not Alpine's `linux-lts`: no stock Alpine kernel satisfies the shape,
 # its APKBUILD exists to emit a `-modules` package this appliance must not have, and — decisively —
 # #10 and #14 promise claims checkable *by reading the config*, which is only true if the config is
 # one file in this repository.
+#
+# The tarball comes from `build/inputs/`, whose every hash was checked in stage 0 against the list in
+# git. Its version is read off the filename rather than pinned a second time here: two pins for one
+# fact is one pin that can be wrong.
+
+KERNEL_TARBALL=$(cd "$INPUTS" && ls linux-*.tar.xz)
+KERNEL_VERSION=${KERNEL_TARBALL#linux-}
+KERNEL_VERSION=${KERNEL_VERSION%.tar.xz}
 
 stage "Stage 2 — kernel $KERNEL_VERSION"
 cd "$WORK"
-if [ ! -f "$KERNEL_TARBALL" ]; then
-	wget -q -O "$KERNEL_TARBALL" "$KERNEL_URL"
-fi
-echo "$KERNEL_SHA256  $KERNEL_TARBALL" | sha256sum -c -
-note "tarball matches the pinned SHA-256"
-
-tar -xf "$KERNEL_TARBALL"
+tar -xf "$INPUTS/$KERNEL_TARBALL"
 cd "linux-$KERNEL_VERSION"
 
 # `allnoconfig` with this repository's file as the preset: the base is "everything off", so nothing
@@ -174,7 +219,7 @@ KCONFIG_ALLCONFIG="$SRC/build/kernel.config" make ARCH=x86_64 allnoconfig >/dev/
 judge kernel-config .config
 note "the generated .config violates nothing either"
 
-make ARCH=x86_64 -j"$(nproc)" bzImage >/dev/null
+make ARCH=x86_64 -j"$MAKE_JOBS" bzImage >/dev/null
 cp arch/x86/boot/bzImage "$ISOROOT/boot/vmlinuz"
 note "vmlinuz: $(du -h "$ISOROOT/boot/vmlinuz" | cut -f1)"
 
@@ -185,7 +230,30 @@ note "vmlinuz: $(du -h "$ISOROOT/boot/vmlinuz" | cut -f1)"
 # `docs/boot-checklist.md` asks a reviewer to confirm by doing exactly that.
 
 stage "Stage 3 — initramfs"
-(cd "$ROOTFS" && find . | cpio --quiet -o -H newc) | zstd -q -19 -T0 -o "$ISOROOT/boot/initramfs.zst"
+
+# **Before `cpio`, and stage 3 rather than stage 4** (#61): after `cpio` the value is inside an
+# archive and the failure message stops being about a file a human can open. The assertion binds the
+# embedded version to `git describe --exact-match --tags` and refuses a dirty tree claiming a
+# version — and it is *skipped, not faked,* for a development build.
+judge embedded-release "$SRC" "$ROOTFS/etc/aobs-release"
+note "the embedded release line agrees with the tag and the commit"
+
+# Two of `docs/reproducible-build.md`'s six divergence sources, both here. `find | cpio` with no sort
+# leaks directory order into the archive; cpio member mtimes come from the filesystem. So every
+# member's mtime is set to `SOURCE_DATE_EPOCH` — GNU `touch`, because busybox's does not accept the
+# `@` form and a `touch` that silently does nothing is a defect that passes every test until two
+# builders compare hashes — and the listing is sorted under `LC_ALL=C`.
+#
+# `--reproducible` zeroes the device and inode numbers cpio would otherwise copy off the filesystem.
+find "$ROOTFS" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
+(cd "$ROOTFS" && find . -print0 | LC_ALL=C sort -z |
+	cpio --null --quiet --reproducible -o -H newc) |
+	zstd -q -19 -T"$ZSTD_THREADS" -o "$ISOROOT/boot/initramfs.zst"
+
+# The first rung of the failure ladder, and it is a *tree manifest* rather than a hash of the
+# archive: when two builds diverge, the question is which file differs, and a manifest of mode, owner
+# and content hash per path answers it where a single number cannot.
+python3 "$SRC/build/gather.py" tree-manifest "$ROOTFS" >"$WORK/rootfs-manifest.txt"
 
 # The RAM floor is **derived, not asserted** — `docs/boot-pipeline.md` puts the numbers on the
 # record and PID 1 refuses below 512 MiB. These two measurements are what keep the figure derived
@@ -209,19 +277,39 @@ done
 
 # A standalone GRUB with the config embedded, so the UEFI path needs nothing on the ESP but one
 # binary. `grub.cfg`'s `search --file` is what points GRUB at the ISO rather than at the ESP.
-mkdir -p "$WORK/efi/EFI/BOOT"
+#
+# Divergence source three: `grub-mkstandalone` builds the embedded memdisk as a tar whose member
+# mtimes come from the source file. So the config is staged and touched rather than passed from the
+# repository, where its mtime is whatever `git checkout` happened to set.
+mkdir -p "$WORK/efi/EFI/BOOT" "$WORK/grub/boot/grub"
+cp "$SRC/build/grub.cfg" "$WORK/grub/boot/grub/grub.cfg"
+touch -d "@$SOURCE_DATE_EPOCH" "$WORK/grub/boot/grub/grub.cfg"
 grub-mkstandalone -O x86_64-efi -o "$WORK/efi/EFI/BOOT/BOOTX64.EFI" \
-	"boot/grub/grub.cfg=$SRC/build/grub.cfg"
+	"boot/grub/grub.cfg=$WORK/grub/boot/grub/grub.cfg"
 
 # El Torito needs the UEFI bootloader inside a FAT image, not loose on the ISO9660 tree.
+#
+# Divergence source four: `mkfs.vfat` takes the volume ID from the clock unless `-i` names one, and
+# mtools writes each file's mtime into the FAT directory entry — in *local* time, which is why `TZ`
+# is forced to UTC at the top of this script rather than left to the environment.
+EFI_VOLUME_ID=$(printf '%08X' $((SOURCE_DATE_EPOCH % 4294967296)))
 dd if=/dev/zero of="$ISOROOT/boot/efi.img" bs=1M count=8 status=none
-mkfs.vfat -n AOBSEFI "$ISOROOT/boot/efi.img" >/dev/null
+mkfs.vfat -n AOBSEFI -i "$EFI_VOLUME_ID" "$ISOROOT/boot/efi.img" >/dev/null
+touch -d "@$SOURCE_DATE_EPOCH" "$WORK/efi/EFI/BOOT/BOOTX64.EFI"
 mmd -i "$ISOROOT/boot/efi.img" ::/EFI ::/EFI/BOOT
 mcopy -i "$ISOROOT/boot/efi.img" "$WORK/efi/EFI/BOOT/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
+
+# Divergence source five: `xorriso` writes ISO9660 creation, modification, expiration and effective
+# timestamps from the clock, and derives the volume UUID from them. `--modification-date` sets all of
+# them at once, which is the documented reproducible-builds form. Every file's own date comes from
+# its mtime, and every mtime in the tree was set above.
+find "$ISOROOT" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
+ISO_DATE=$(date -u -d "@$SOURCE_DATE_EPOCH" +%Y%m%d%H%M%S00)
 
 xorriso -as mkisofs \
 	-o "$ARTIFACT" \
 	-V AOBS \
+	--modification-date="$ISO_DATE" \
 	-isohybrid-mbr /usr/share/syslinux/isohdpfx.bin \
 	-c boot/isolinux/boot.cat \
 	-b boot/isolinux/isolinux.bin \
@@ -232,7 +320,17 @@ xorriso -as mkisofs \
 	-quiet \
 	"$ISOROOT"
 
+# --- The failure ladder --------------------------------------------------------------------------
+#
+# `docs/reproducible-build.md` claim 8: a rebuild that diverges says *where*. The hashes are printed
+# here, from the build that already produced every intermediate, rather than re-derived by a CI
+# script — a ladder that lives in the CI job is a ladder that goes stale the day the build changes.
+
 stage "Done"
+rung "rootfs tree" "$WORK/rootfs-manifest.txt"
+rung bzImage "$ISOROOT/boot/vmlinuz"
+rung initramfs.zst "$ISOROOT/boot/initramfs.zst"
+rung efi.img "$ISOROOT/boot/efi.img"
+rung iso "$ARTIFACT"
 note "$ARTIFACT — $(du -h "$ARTIFACT" | cut -f1)"
-note "sha256: $(sha256sum "$ARTIFACT" | cut -d' ' -f1)"
 note "Write it with dd, disable Secure Boot in firmware, and boot the offline machine."

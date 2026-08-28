@@ -20,6 +20,7 @@ from aobs.core.constants import ENTROPY_CAMERA_FRAMES, ENTROPY_OUTPUT_BYTES
 from aobs.core.entropy import Entropy, MixingReport, mix
 from aobs.core.entropy import report as mixing_report
 from aobs.core.failure import describe
+from aobs.core.release import UNKNOWN, Release
 from aobs.core.wallet import Network, Wallet
 from aobs.core.wallet_qr import ExportedWallet
 from aobs.ports.entropy_source import EntropySource
@@ -76,6 +77,7 @@ class SignerApp(App[None]):
         power: Power,
         keymap: Keymap,
         network: Network = Network.MAINNET,
+        release: Release = UNKNOWN,
         scan_frame_interval: float | None = 1 / INBOUND_FRAME_RATE,
         emit_animated: bool = True,
         entropy_poll_interval: float | None = ENTROPY_POLL_INTERVAL,
@@ -85,6 +87,11 @@ class SignerApp(App[None]):
         self.entropy = entropy
         self.power = power
         self.keymap = keymap
+        #: What the image says about itself, read once by `aobs/__main__.py` and never again. It is
+        #: **not** a fifth port: reading one file has one implementation, and the seam the tests
+        #: need is this value being passed in. The default is the development build a source tree
+        #: is, so nothing can accidentally look like a release by omitting the argument.
+        self.release = release
         #: How often the scan screen pulls a frame. `None` means no timer at all, which is how the
         #: suite drives frames itself: pacing twenty-seven frames in real time would cost the suite
         #: seven seconds to assert something that is not Textual's clock.

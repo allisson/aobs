@@ -10,6 +10,7 @@ and pass on a wrong address.
 from __future__ import annotations
 
 import importlib
+import re
 import socket
 from collections.abc import Iterator
 from pathlib import Path
@@ -25,6 +26,7 @@ from aobs.adapters.fake import (
     RecordingPower,
 )
 from aobs.core.failure import FAILURE_MESSAGE
+from aobs.core.release import ADVISORIES_URL, Release
 from aobs.core.wallet import Network, Wallet
 from aobs.core.wallet_qr import export_wallet
 from aobs.ports.frame_source import Frame
@@ -702,3 +704,98 @@ async def test_the_running_app_installs_no_logging_handler_that_writes_anywhere(
     async with app.run_test(size=CONSOLE) as pilot:
         await reach_home(app, pilot)
         assert handlers() - before == set()
+
+
+# --- The release identity footer (#61) ----------------------------------------------------------
+#
+# The claim is narrow and worth stating: this row **identifies, it does not attest**. A modified
+# image can print anything. What is tested here is that a user who did not think to look is shown
+# the version and the commit anyway, before they type a mnemonic — and that a development build
+# cannot be mistaken for a release.
+
+RELEASED = Release(
+    release="v1.0",
+    released="2026-09-14",
+    commit="4f1c8a6e2b90d7c35a18ef04b6d2917c0ae53b81",
+    dirty=False,
+)
+
+
+def footer(app: SignerApp) -> str:
+    return str(app.screen.query_one("#release-identity", Static).content)
+
+
+async def test_the_first_screen_names_the_version_the_commit_and_the_date() -> None:
+    """All three parts, on the screen the user cannot avoid, before any secret exists."""
+    app = build(release=RELEASED)
+    async with app.run_test(size=CONSOLE):
+        assert isinstance(app.screen, KeymapScreen)
+        assert footer(app) == "aobs v1.0 · 4f1c8a6e2b90 · 2026-09-14"
+
+
+async def test_the_footer_carries_a_commit_prefix_and_not_only_a_version() -> None:
+    """The prefix is what makes the line checkable against a manifest the user has verified.
+
+    A version alone cannot distinguish a rebuild from the published build, which is the whole
+    reason #61 put twelve hex characters on the screen.
+    """
+    app = build(release=RELEASED)
+    async with app.run_test(size=CONSOLE):
+        assert "4f1c8a6e2b90" in footer(app)
+        assert RELEASED.commit not in footer(app), "the full 40 hex would not fit the column cap"
+
+
+async def test_the_footer_row_fits_the_column_cap() -> None:
+    app = build(release=RELEASED)
+    async with app.run_test(size=CONSOLE):
+        assert len(footer(app)) <= MAX_COLUMNS
+
+
+async def test_a_development_build_says_so_and_never_a_version_shaped_string() -> None:
+    """The one that matters: a developer must not sign months later with a build they took for a
+    release, so `DEVELOPMENT BUILD` replaces the version rather than annotating it."""
+    development = Release(
+        release="development",
+        released="2026-08-28",
+        commit="0123456789abcdef0123456789abcdef01234567",
+        dirty=False,
+    )
+    app = build(release=development)
+    async with app.run_test(size=CONSOLE):
+        row = footer(app)
+        assert "DEVELOPMENT BUILD" in row
+        assert not re.search(r"\bv\d+\.\d+\b", row), row
+
+
+async def test_a_dirty_tree_carries_a_dirty_suffix() -> None:
+    dirty = Release(
+        release="development", released="2026-08-28", commit="0123456789ab" + "0" * 28, dirty=True
+    )
+    app = build(release=dirty)
+    async with app.run_test(size=CONSOLE):
+        assert "0123456789ab-dirty" in footer(app)
+
+
+async def test_the_footer_says_where_advisories_live_and_does_not_claim_to_have_checked() -> None:
+    """#62: the appliance attempts no detection of its own, and the row must not look like it did.
+
+    There is no trustworthy clock offline, a wrong *this build is old* is worse than silence, and a
+    modified image would lie about it anyway.
+    """
+    app = build(release=RELEASED)
+    async with app.run_test(size=CONSOLE):
+        line = str(app.screen.query_one("#release-advisories", Static).content)
+        assert ADVISORIES_URL in line
+        assert "cannot check" in line
+
+
+async def test_the_same_line_appears_on_the_failure_screen() -> None:
+    """A bug report carrying no build identity is a bug report about nothing.
+
+    The console-too-small screen is the failure screen reachable without a session, and it uses the
+    one `FailurePanel` shape every other failure screen uses.
+    """
+    app = build(release=RELEASED)
+    async with app.run_test(size=(MIN_COLUMNS - 1, MIN_ROWS)):
+        assert isinstance(app.screen, ConsoleTooSmallScreen)
+        assert footer(app) == "aobs v1.0 · 4f1c8a6e2b90 · 2026-09-14"

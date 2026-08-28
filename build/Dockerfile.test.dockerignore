@@ -1,0 +1,12 @@
+# Build context exclusions for `build/Dockerfile.test` only — BuildKit reads
+# `<dockerfile>.dockerignore` in preference to the root `.dockerignore`, which is what lets the ISO
+# tier keep the one directory the test tier must not carry.
+#
+# `build/inputs/` is 317 MB of archived `.apk` files, a minirootfs and a kernel tarball. The ISO
+# build needs every byte of it; the test tier needs none of it, and `COPY . /src` would otherwise
+# bake it into the harness image.
+build/inputs
+out
+.git
+.hypothesis
+**/__pycache__

@@ -49,10 +49,13 @@ def real_adapters() -> dict:
 def main() -> int:
     failure_handler.install()
 
+    from aobs.adapters import release as release_file
     from aobs.ui.app import SignerApp
 
     adapters = real_adapters()
-    app = SignerApp(**adapters)
+    # `/etc/aobs-release`, read once, here, because this is the module that knows what machine it
+    # is on. An absent file is a development build and says so on the first screen (#61).
+    app = SignerApp(**adapters, release=release_file.read())
     app.run()
 
     # `F12` does not return on the appliance — `Power.power_off` stops the machine — so reaching

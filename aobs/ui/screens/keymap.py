@@ -12,6 +12,11 @@ picker costs nothing to the great majority who do not know or care what a keymap
 echoed as typed**, because a list of layout names proves nothing — the user has to be able to press
 `q` and `a` and `;` and see what actually arrives, and this is the only moment in the session when
 doing that is free of consequence.
+
+It also carries the **release identity footer** (#61), and it carries it for a reason that has
+nothing to do with keymaps: this is the screen a user cannot avoid, and *before you type a mnemonic
+into it* is the only moment at which knowing what you booted is worth anything. It is not a
+dedicated About screen, because a screen you must navigate to is a screen nobody visits.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ from textual.screen import Screen
 from textual.widgets import Static
 
 from aobs.ports.keymap import DEFAULT_LAYOUT
+from aobs.ui.widgets.release import ReleaseFooter
 
 #: How much of what the user typed stays on screen. Long enough to check a handful of keys,
 #: short enough never to wrap inside the column budget.
@@ -75,6 +81,8 @@ class KeymapScreen(Screen):
                     yield Static(name, classes="layout", id=f"layout-{index}")
             yield Static("Type anything here to check the layout:", id="echo-prompt")
             yield Static("", id="echo")
+            # Last, and reserved: `docs/review-screen.md` counts it against the 85×43 floor.
+            yield ReleaseFooter(self.app.release)  # type: ignore[attr-defined]
 
     def on_mount(self) -> None:
         self._repaint()
