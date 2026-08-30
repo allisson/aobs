@@ -3,8 +3,10 @@
 How `bitcoin-signer-amd64.iso` is built, what it contains, and what happens between power-on and the
 first screen.
 
-Producing the ISO — release engineering, hosting, signing keys — is out of scope for this effort.
-Deciding how it works is this document, written precisely enough that building it is mechanical.
+Release engineering — the reproducibility contract, the input archive, signing keys, the release
+ritual — is `docs/reproducible-build.md`, `docs/release.md` and `SECURITY.md`. This document is how
+the image is built and what happens between power-on and the first screen, written precisely enough
+that building it is mechanical.
 
 **Where each decision below now lives**, since a decision readable only in a diff is invisible to
 the next session:
@@ -64,8 +66,15 @@ A checked-in build script running in an `alpine:3.24` container. Four stages:
 3. **Initramfs.** `find /rootfs | cpio -H newc | zstd`.
 4. **Image.** `xorriso` into a hybrid ISO: `isolinux` for legacy BIOS, `grub-efi` for UEFI.
 
-Reproducible builds are out of scope, but nothing here forecloses them: every input is a pinned
-version with a checksum and no step needs Alpine's release machinery.
+Every input is a pinned version with a checksum, no step needs Alpine's release machinery, and
+every byte comes from `build/inputs/` over no network at all. The output is **byte-identical on any
+host**: `docs/reproducible-build.md` states that claim numbered and checkable, lists the six
+divergence sources that were fixed, and names the CI guard that fails on any differing byte.
+
+Stage 1 also writes **`/etc/aobs-release`** — the version, the commit, the formatted build date and
+whether the tree was dirty. It is a stage-1 output specifically so that stage 3, before `cpio`, can
+assert it against `git describe --exact-match --tags` while it is still a file a human can open. What
+the appliance does with it is the footer row below.
 
 ### Why vanilla kernel source, not Alpine's APKBUILD
 
@@ -129,6 +138,33 @@ With `vga=791` (1024×768) `vesafb` provides a graphical framebuffer and `fbcon`
 
 `CONFIG_FB_DEVICE=y` is set: it is independent of fbcon and is what creates `/dev/fb0`, needed only if
 #3's framebuffer-viewfinder escape hatch is ever taken.
+
+#### The release identity footer
+
+The picker carries **one reserved row** at the bottom, and a second line pointing at the advisories:
+
+```
+aobs v1.0 · 4f1c8a6e2b90 · 2026-09-14
+Advisories are published at github.com/allisson/aobs/blob/main/ADVISORIES.txt — this appliance cannot check.
+```
+
+Here rather than on an About screen because **a screen you must navigate to is a screen nobody
+visits**, and this is meant to reach someone who booted a stick found in a drawer and did not think
+to look. The same row is repeated by every failure screen, because a bug report carrying no build
+identity is a bug report about nothing.
+
+The **12-hex commit prefix** is what makes the row worth showing: a version alone cannot distinguish
+a rebuild from the published build, while the prefix can be matched against a manifest the user has
+already verified.
+
+**It identifies, it does not attest.** A modified image can print anything, and the README says so in
+those words. Nothing derived from the image can be embedded in it — not the ISO hash, not the manifest
+hash, and not the initramfs hash either, since the initramfs *is* the whole system — so version,
+commit and `SOURCE_DATE_EPOCH` are the complete embeddable set.
+
+A build that is not at a clean tag shows `DEVELOPMENT BUILD` in place of the version, never a
+version-shaped string, plus a `-dirty` suffix on the commit when the tree was not clean. The stage-3
+assertion is **skipped for those, not faked.**
 
 ### Keyboard layout
 
@@ -291,7 +327,24 @@ line below is a published claim, checked before an image exists.
   the native backend, and then fails at taproot signing — mid-session, with a wallet loaded, on
   BIP86 only. A signature that verifies proves the symbols bound, the modules were compiled in, and
   the ABI matches; a symbol check only approximates all three.
-- Emit measured initramfs and rootfs sizes into the build log.
+- **`build/inputs/` matches `build/inputs.sha256` on hash and on set equality**, before stage 1
+  runs. An unexpected extra file is a failure, not an ignore — `docs/reproducible-build.md` claim 5.
+- **Nothing in the build derives its parallelism from the host's core count.** `make -j` and
+  `zstd -T` are literal constants, and `zstd -T0` is rejected specifically because it is a digit that
+  *means* one thread per core.
+- **`build/toolchain-versions.txt` carries exactly one group.** `Dockerfile.iso` and
+  `fetch-inputs.sh` read it as every non-comment line, which is correct only while that holds.
+- **`/etc/aobs-release` agrees with the tag and with `HEAD`**, checked in stage 3 *before* `cpio`,
+  while it is still a file a human can open. A build that is not at a clean tag must say
+  `development` and never a version-shaped string; the assertion is skipped for those, not faked.
+- Emit measured initramfs and rootfs sizes into the build log, and the **hash ladder**: the sha256 of
+  the rootfs tree manifest, `bzImage`, `initramfs.zst`, `efi.img` and the ISO, so that a rebuild which
+  diverges says where.
+
+Four further assertions run only when a release is being cut, in `build/release-preflight.sh` rather
+than in `mkiso.sh`, and `docs/release.md` says why the split falls there: a dirty tree, an unsigned or
+absent `vMAJOR.MINOR` tag, a hand-set `SOURCE_DATE_EPOCH`, and a manifest whose `git-commit` is not
+`HEAD`. A development build trips none of them.
 
 ## The artifact
 

@@ -14,6 +14,12 @@ the machine — a **short stable name for the condition**: a name, not a code an
 location, so the user can describe accurately what they saw in a bug report typed on a different
 machine. That costs nothing and carries nothing.
 
+Alongside it, the **release identity footer** (#61) — the same row the keymap picker shows. It is
+here rather than on one particular screen because `docs/failure-states.md` fixes *one* shape for
+every failure, and a bug report carrying no build identity is a bug report about nothing. It is the
+other half of the same trade as the condition name: what a report needs, at no cost and carrying
+nothing off the machine.
+
 One widget, parameterised, because failure screens are the screens users reach while confused and
 learning to read them once is worth more than tailoring each one.
 """
@@ -27,6 +33,7 @@ from textual.containers import Vertical
 from textual.widgets import Static
 
 from aobs.core.text import inert
+from aobs.ui.widgets.release import ReleaseFooter
 
 
 @dataclass(frozen=True)
@@ -82,3 +89,4 @@ class FailurePanel(Vertical):
             # answer is the appliance recommending one of them.
             yield Static(step, classes="failure-next-step", id=f"failure-next-step-{index}")
         yield Static(f"condition: {self.failure.condition}", id="failure-condition")
+        yield ReleaseFooter(self.app.release)  # type: ignore[attr-defined]

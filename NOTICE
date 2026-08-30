@@ -1,0 +1,59 @@
+Third-party binaries redistributed with this project
+===================================================
+
+`aobs` itself is licensed under `LICENSE`. This file is about the binaries the **input archive**
+carries, because those are what a release redistributes.
+
+What is redistributed
+---------------------
+
+`aobs-inputs-vMAJOR.MINOR.tar`, published as a release asset, carries:
+
+- the **appliance apk closure** and the **toolchain apk closure** — Alpine Linux `.apk` packages,
+  **unmodified**, exactly as Alpine published them, with their upstream signatures intact;
+- Alpine's **verbatim** `APKINDEX.tar.gz` for `main` and `community`;
+- `alpine-minirootfs-<version>-x86_64.tar.gz`, Alpine's own release tarball;
+- `linux-<version>.tar.xz`, the vanilla kernel.org source tarball.
+
+That the packages are unmodified is not a promise, it is a consequence: `build/mkiso.sh` installs
+them without `--allow-untrusted`, which is only possible because neither the packages nor Alpine's
+own index was regenerated here. A rebuilt index is refused as `UNTRUSTED signature`.
+
+Licences
+--------
+
+Several of the packages are under the GPL — busybox, kbd and grub among them. **The per-package
+licence, origin aport and aports git commit are recorded in the `NOTICE` file inside the archive
+itself**, generated from Alpine's own metadata by `build/apkindex.py`, so the record travels with
+the bytes rather than living only in a file a redistributor may not have kept.
+
+The manifest's `aports-commit:` field names one commit as a pointer — the aports recipe commit of
+`alpine-release`, the branch's release-marker package. The complete per-package record is the
+archive's own `NOTICE`.
+
+Written offer
+-------------
+
+The corresponding build recipes for each redistributed package are those in the Alpine aports tree
+<https://gitlab.alpinelinux.org/alpine/aports> at the commit named for that package in the archive's
+`NOTICE`.
+
+**Buildable upstream sources are explicitly not promised.** Alpine's distfiles retention is
+unverified and plausibly as lossy as its `.apk` retention — the CDN keeps only the current version of
+each package, confirmed against 7/7 official mirrors, with no archive host in existence. A claim that
+the sources remain downloadable is a claim nobody has checked, and this project does not make claims
+of that kind. What the recorded commits do guarantee is **locatable recipes in a history that does not
+expire.**
+
+Vendored source
+---------------
+
+Two libraries are vendored into the application tree as source, not as binaries, and carry their own
+licences beside them:
+
+- `aobs/core/vendor/embit/` — see `aobs/core/vendor/embit/LICENSE`
+- `aobs/core/vendor/ur2/` — see `aobs/core/vendor/ur2/LICENSE`
+
+`aobs/core/vendor/README.md` records which upstream commit each was taken from and why they are
+vendored rather than installed. No binary artifact is present in either tree, and
+`build/verify.py`'s `check_vendored_tree` fails the build if one appears.

@@ -1,0 +1,153 @@
+# The reproducibility guard: build the ISO **twice in one job** and fail on any differing byte.
+#
+# `docs/reproducible-build.md` holds the contract this defends. Claim 1 is that build path, hostname,
+# user, uid, clock, locale, timezone, umask, CPU count, host kernel version and host architecture do
+# not affect the ISO — and a claim with no instrument decays the next time somebody adds a build step.
+#
+# **The second build varies six things at once**, deliberately hostile and all together, because a
+# guard that varies one thing per run costs six builds to say what one build can say:
+#
+#   - the build path            a differently named host directory mounted at a different path
+#                               *inside* the container too, with SRC and WORK set to match — mounting
+#                               a renamed host directory back at /src would vary nothing the build
+#                               can see, which is the trap
+#   - the hostname              --hostname
+#   - the clock                 the container's clock, pushed 37 hours forward
+#   - TZ, LC_ALL, LANG          set to values that would reach mtools and xorriso if unforced
+#   - the umask                 022 -> 077, which mkiso.sh must override to 022 itself
+#   - the CPU count             --cpus=2 against the runner's full count
+#
+# **The uid is deliberately *not* varied here, and the contract still claims it.** Stage 1 chroots
+# into the rootfs to run the in-rootfs signature assertions, so the build needs root inside the
+# container; a non-root uid would fail for a reason that has nothing to do with reproducibility. The
+# uid is a fact about paths and ownership that `cpio --reproducible` and the `touch` pass already
+# neutralise, and `docs/boot-checklist.md` item 27 — the maintainer's arm64 build against this
+# witness — crosses a genuinely different uid, user and host at release time.
+#
+# The first four are free. **The CPU count costs real time and stays**, because it is what catches the
+# `zstd -T0` hazard — the one divergence source whose fix a future edit could undo with no other
+# symptom.
+#
+# **Architecture is in the contract but not here.** An arm64 runner would emulate for hours. It moves
+# to `docs/boot-checklist.md` item 27 as a release-time human check, which is free, because the ritual
+# already compares the maintainer's arm64 build against the witness build's x86_64 hash.
+#
+# **Trigger: every release tag, and every pull request touching `build/`.** A tags-only guard learns
+# about decay at the worst possible moment — during a release, when the person who broke it is not the
+# person cutting it. The `on:` block below says why the two halves cannot live in one `push` filter.
+#
+# **Written fallback, decided in advance rather than during the annoyance:** if this job's first run
+# exceeds 40 minutes, the trigger drops to tags plus `workflow_dispatch`. A guard slow enough to be
+# resented does not get made faster; it gets disabled. Its runtime, and whether a native amd64 kernel
+# build fits the free-runner 6h ceiling, are **estimates until this has run once.**
+#
+# Every action is pinned to a commit SHA, not a tag. A tag is a movable pointer, and a repository
+# whose entire selling point is that every input is pinned cannot make an exception for the thing that
+# builds it.
+
+name: reproducible
+
+# `push.tags` carries no `paths` filter, and that is not an oversight. GitHub applies a `paths`
+# filter to **tag** pushes too, and requires both filters to be satisfied — so `tags: ['v*']` plus
+# `paths: ['build/**']` in one `push` block would silently skip the guard for exactly the release
+# tags it exists to protect. The `build/**` half therefore lives on `pull_request`, which is where a
+# change under `build/` reaches `main` in this repository, and is also the earlier of the two places
+# to learn about decay.
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths: ['build/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  twice:
+    name: two builds, byte-identical
+    runs-on: ubuntu-latest
+    timeout-minutes: 330 # under the free-runner 6h ceiling, with room to report rather than be killed
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `SOURCE_DATE_EPOCH` is the commit date of HEAD, and the four release-mode refusals are
+          # facts about the tree, so the build needs real history — not a shallow clone whose tags
+          # and dates are absent.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Fetch the inputs
+        # From the live CDN, against `build/inputs.sha256` as committed — never `--refresh`. That is
+        # what keeps this an independent reproduction rather than a replay of the builder's own
+        # bytes, and it is what makes a dead pin fail loudly on the day it dies.
+        run: |
+          docker run --rm --platform=linux/amd64 -v "$PWD:/src" -w /src \
+            alpine:3.24 sh build/fetch-inputs.sh
+
+      - name: Build the builder
+        run: docker build -f build/Dockerfile.iso -t aobs-iso .
+
+      - name: Build once, ordinarily
+        run: |
+          mkdir -p out-a
+          docker run --rm --privileged \
+            -v "$PWD:/src" -v "$PWD/out-a:/out" aobs-iso | tee ladder-a.txt
+
+      - name: Build again, under hostile variation
+        # A differently named build path, another hostname and uid, a clock 37 hours ahead, a
+        # different timezone and locale, a tighter umask, and two CPUs.
+        run: |
+          # Outside the workspace, because `cp -a . ./somewhere` copies the destination into itself.
+          elsewhere="$RUNNER_TEMP/a-rather-differently-named-build-directory"
+          mkdir -p out-b "$elsewhere"
+          cp -a . "$elsewhere/"
+          docker run --rm --privileged \
+            --hostname a-different-host \
+            --cpus=2 \
+            -e TZ=Pacific/Kiritimati \
+            -e LC_ALL=tr_TR.UTF-8 \
+            -e LANG=tr_TR.UTF-8 \
+            -v "$elsewhere:/a/quite/differently/named/source/tree" \
+            -v "$PWD/out-b:/out" \
+            -e SRC=/a/quite/differently/named/source/tree \
+            -e WORK=/somewhere/else/entirely \
+            aobs-iso sh -c 'date -s "+37 hours" >/dev/null; umask 077; \
+                            exec /bin/sh "$SRC/build/mkiso.sh"' | tee ladder-b.txt
+
+      - name: Compare
+        # The ladder first, because it names *where* a divergence began; the ISO comparison is the
+        # verdict. `mkiso.sh` prints both, so nothing is re-derived here — a ladder that lives in a
+        # CI script goes stale the day the build changes.
+        run: |
+          echo '--- rung-by-rung'
+          diff <(grep '^    sha256' ladder-a.txt) <(grep '^    sha256' ladder-b.txt) && \
+            echo 'every rung agrees'
+          echo '--- the artifact'
+          sha256sum out-a/bitcoin-signer-amd64.iso out-b/bitcoin-signer-amd64.iso
+          cmp out-a/bitcoin-signer-amd64.iso out-b/bitcoin-signer-amd64.iso
+
+      - name: Explain a divergence
+        # `diffoscope` is for the maintainer and never for a verifier: the "tools the reader already
+        # has" rule governs verification UX, and debugging is not on that path. So it is installed
+        # here, on failure, and never named in the README.
+        if: failure()
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq diffoscope
+          diffoscope --text diffoscope.txt \
+            out-a/bitcoin-signer-amd64.iso out-b/bitcoin-signer-amd64.iso || true
+
+      - name: Upload the divergence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: divergence
+          path: |
+            ladder-a.txt
+            ladder-b.txt
+            diffoscope.txt
+          if-no-files-found: warn

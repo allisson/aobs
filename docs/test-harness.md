@@ -243,6 +243,33 @@ So: build a real PSBT with `walletcreatefundedpsbt`, sign it with the core, then
 **`testmempoolaccept`**. Not broadcast-and-confirm — mempool acceptance asserts the same thing without
 generating blocks. Opt-in, so a contributor with no node still gets the full default suite.
 
+## The verifier a stranger runs
+
+`verify-release.sh` is the one deliberate exception to the script–judge split, and the exception is
+the point: it must be auditable by somebody who does not trust its author as `sha256sum` and `gpg`
+and nothing else, so **it cannot delegate to `build/verify.py`**. That puts it out of reach of the
+primary seam, and the one artifact aimed at people who trust nobody is the last artifact that should
+go untested.
+
+So it gets a seam of its own. `tests/test_verify_release.py` builds a fixture release in a temporary
+directory — an ISO stand-in, an archive stand-in, and a manifest carrying their real hashes — signs it
+with **two scratch Ed25519 keys in a throwaway `GNUPGHOME`**, and drives the real script:
+
+- both signatures present → exit 0, both fingerprints reported;
+- builder only → exit 0, and the report says how many signers the manifest named;
+- one byte appended to the manifest → `BADSIG`, exit 1, and the hash check never runs;
+- a good signature appended over an altered manifest → still exit 1, because a `BADSIG` cannot be
+  diluted;
+- archive absent → exit 1, and exit 0 with `--iso-only`.
+
+Two things this seam deliberately does **not** do. It does not fake `gpg`: a stand-in would be a test
+of our own mock, and `--status-fd` parsing is precisely what would pass against one and fail against
+the real tool — which is why `gnupg` is in the harness group of `build/apk-versions.txt`, and why
+`check_apk_manifest` fails the build if it ever reaches the rootfs. And it does not let the script read
+its accepted fingerprints from the environment: an override would be a hole, since a copy-pasted
+command could carry one. The test copies the script and rewrites the two hardcoded lines, and a
+separate assertion in `tests/test_build_verifier.py` checks that the *shipped* copy names the real key.
+
 ## What only a boot can check
 
 Everything above runs without an ISO. The rest is [`boot-checklist.md`](boot-checklist.md), **published
@@ -250,4 +277,6 @@ with the ISO rather than kept internal** — the items there are precisely the o
 as *verifiable*, and a claim whose verification procedure is unwritten is not really verifiable.
 
 #10 committed to the first of them going in the published README. That checklist is what keeps the
-promise, and running it is what a release means, given release engineering itself is out of scope.
+promise, and running it is a step in `docs/release.md`'s ritual — item 8 of the checklist and the
+release-time arm64/x86_64 cross-architecture comparison are both there because no runner can perform
+either.

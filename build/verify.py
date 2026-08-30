@@ -20,12 +20,39 @@ before anything is installed.
 
 from __future__ import annotations
 
+import datetime
 import re
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Mapping
 
 APPLIANCE = "appliance"
 HARNESS = "harness"
+TOOLCHAIN = "toolchain"
+
+#: The maintainer's own key, used as it is: Ed25519, personal UID, no invented org identity (#58).
+#: Custody is **stated rather than engineered away** — it lives on an ordinary networked computer,
+#: and `SECURITY.md` and the README both say so.
+BUILDER_FINGERPRINT = "C8532ED68A596CFBB7F92D04360718E309BEAA9F"
+
+#: CI's witness key. **Empty, because no such key exists yet**, and a placeholder fingerprint in a
+#: file strangers read to learn whom to trust would be the worst possible kind of invention. The
+#: witness signature is already non-fatal to verification and the `signer:` lines make its absence
+#: visible rather than silent, so adding it later is a one-line change here and in
+#: `verify-release.sh` — with no format change and no re-verification of anything already published.
+WITNESS_FINGERPRINT = ""
+
+#: Who a manifest declares was expected to sign it. **A verifier must never trust this to decide who
+#: may sign** — trusting the manifest to say who may sign it is circular, so `verify-release.sh`
+#: hardcodes its own copy. This list exists for one narrow purpose: telling *"one of two"* from
+#: *"one, and no idea whether more were coming"*.
+SIGNERS: tuple[tuple[str, str], ...] = tuple(
+    entry
+    for entry in (
+        (BUILDER_FINGERPRINT, "builder"),
+        (WITNESS_FINGERPRINT, "witness-ci"),
+    )
+    if entry[0]
+)
 
 #: The marker that makes `build/apk-versions.txt` machine-readable. Before it, the two halves of
 #: that file were separated by a prose comment and `py3-pip` sat in the second half — so a parser
@@ -151,6 +178,38 @@ def _parse_manifest(manifest_text: str) -> dict[str, str]:
         name, version, release = parts
         installed[name] = f"{version}-{release}"
     return installed
+
+
+def check_toolchain_list(pins_text: str) -> list[Violation]:
+    """`build/toolchain-versions.txt` carries exactly one group, named `toolchain`.
+
+    Not a style rule. `build/Dockerfile.iso` and `build/fetch-inputs.sh` read that file as *every
+    non-comment line*, which is correct only while it has one group — and a naive reader of a
+    two-group file is precisely the hazard the `# @group` markers were introduced to close, when
+    `py3-pip` sat on the far side of a prose comment and a parser would have put a package manager in
+    the rootfs. The check is here so that adding a second group fails the build instead of quietly
+    installing it.
+    """
+    try:
+        groups = parse_pins(pins_text)
+    except ValueError as error:
+        return [
+            Violation(
+                "every package in build/toolchain-versions.txt follows a `# @group` marker and is "
+                "pinned `name=version`",
+                str(error),
+            )
+        ]
+    if sorted(groups) != [TOOLCHAIN]:
+        return [
+            Violation(
+                "build/toolchain-versions.txt carries exactly one group, named toolchain: "
+                "Dockerfile.iso and fetch-inputs.sh read it as every non-comment line, which is "
+                "correct only while that is true",
+                f"groups: {', '.join(sorted(groups)) or 'none'}",
+            )
+        ]
+    return []
 
 
 # --- The kernel configuration -------------------------------------------------------------------
@@ -501,6 +560,10 @@ FORBIDDEN_BASENAMES: dict[str, str] = {
     "rc-service": "PID 1 is our script: there is no init system, no OpenRC, no supervisor",
     "rc-status": "PID 1 is our script: there is no init system, no OpenRC, no supervisor",
     "apk": "no package manager in the rootfs",
+    # `/var/log/apk.log` survives the `apk` entry above, because its basename is not `apk`. It is
+    # named separately rather than matched by prefix because the claim it breaks is two claims: it
+    # is package-manager residue, and it carries the wall clock and the builder's absolute paths.
+    "apk.log": "no package manager in the rootfs",
     "pip": "no package manager in the rootfs",
     "pip3": "no package manager in the rootfs",
     "easy_install": "no package manager in the rootfs",
@@ -519,6 +582,10 @@ FORBIDDEN_BASENAMES: dict[str, str] = {
     "scp": "no network utility in the rootfs",
     "sshd": "no network utility in the rootfs",
     "dropbear": "no network utility in the rootfs",
+    # In the harness group since the release work needed it there, and named here for the same
+    # reason `wget` is: `git fetch` is a network utility, and the harness landing in the rootfs must
+    # fail on the path as well as on the package name.
+    "git": "no network utility in the rootfs",
     "udhcpc": "no network utility in the rootfs",
     "udhcpd": "no network utility in the rootfs",
     "ntpd": "no network utility in the rootfs",
@@ -628,4 +695,599 @@ def check_vendored_tree(paths: Iterable[str]) -> list[Violation]:
                     text,
                 )
             )
+    return violations
+
+
+# --- The shared `key: value` reading ------------------------------------------------------------
+#
+# Two files use it here: `/etc/aobs-release` and the release manifest. One reader for both, so the
+# manifest cannot mean by `git-commit:` something other than what the embedded release file means by
+# it.
+#
+# **There is a second reader of `/etc/aobs-release`, and it is not this one.** `aobs/core/release.py`
+# parses the same file for display, because this module cannot import the appliance and the appliance
+# cannot import `build/`. That duplication is real and deliberate; what keeps the two from drifting is
+# `tests/test_build_verifier.py::test_the_appliance_and_the_build_parse_the_release_file_the_same_way`,
+# which feeds both the same text and asserts they agree. The risk was never that either parser is
+# hard — it is that one gets changed and the other does not.
+
+#: `<sha256>  <name>`, exactly as `sha256sum` writes it and as `sha256sum -c` reads it back. Two
+#: spaces, not one: one space is the `--text`/`--binary` marker position and busybox is strict
+#: about it.
+_CHECKSUM_LINE = re.compile(r"^([0-9a-f]{64})  (\S.*)$")
+
+
+def parse_fields(text: str) -> dict[str, str]:
+    """Every `key: value` line, last one winning. Comments and blank lines ignored.
+
+    Repeated keys are the manifest's `signer:` and `input-*:` lines; those are read by
+    `parse_repeated_field` instead, which is why this one may collapse them without losing
+    anything a caller here needs.
+    """
+    fields: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, separator, value = line.partition(":")
+        if separator and " " not in key:
+            fields[key.strip()] = value.strip()
+    return fields
+
+
+def parse_repeated_field(text: str, key: str) -> list[str]:
+    """Every value of a key that may legitimately appear more than once — `signer:`, `input-*:`."""
+    prefix = f"{key}:"
+    return [
+        line.strip()[len(prefix) :].strip()
+        for line in text.splitlines()
+        if line.strip().startswith(prefix)
+    ]
+
+
+def parse_checksum_list(text: str) -> dict[str, str]:
+    """The contiguous `<sha256>  <name>` block of a checksum list, as `{name: sha256}`.
+
+    Every other line is skipped rather than rejected: `build/inputs.sha256` is a bare list, but the
+    manifest carries this same block among comments and metadata, and the whole point of the
+    documented `grep` one-liner is that the block is extractable from the noise around it.
+    """
+    listed: dict[str, str] = {}
+    for raw in text.splitlines():
+        match = _CHECKSUM_LINE.match(raw.rstrip("\n"))
+        if match:
+            listed[match.group(2).strip()] = match.group(1)
+    return listed
+
+
+# --- The input archive --------------------------------------------------------------------------
+
+
+def check_inputs(present: Mapping[str, str], committed_text: str) -> list[Violation]:
+    """`build/inputs/` against `build/inputs.sha256`, on hash **and on set equality**.
+
+    `present` is `{relative path: sha256}` for every file actually in the directory;
+    `build/gather.py` walks and hashes, this decides. `docs/reproducible-build.md` claim 7.
+
+    **The extra file is the case that matters**, and it is the one a naive implementation ignores.
+    A rebuilder in 2030 unpacks a release asset into `build/inputs/`; if an unexpected `.apk` in
+    that directory were merely unused rather than refused, an attacker who can write there has a
+    place to put one — and `apk` resolving a closure against a local repository is exactly the kind
+    of thing that would pick it up. So the check is an equality, not a containment.
+
+    This runs in `build/mkiso.sh` and **not** in `build/fetch-inputs.sh`, which is the other half
+    of the same decision: verification only in the fetcher is verification a hand-populated
+    directory walks straight past.
+    """
+    committed = parse_checksum_list(committed_text)
+    violations: list[Violation] = []
+    if not committed:
+        return [
+            Violation(
+                "build/inputs.sha256 lists the sha256 of every file the build consumes",
+                "the list is empty or has no `<sha256>  <name>` lines at all",
+            )
+        ]
+    for name in sorted(committed):
+        if name not in present:
+            violations.append(
+                Violation(
+                    f"every file build/inputs.sha256 lists is present in build/inputs/: "
+                    f"{name} is not",
+                    "absent — run build/fetch-inputs.sh, or unpack the release's input archive",
+                )
+            )
+        elif present[name] != committed[name]:
+            violations.append(
+                Violation(
+                    f"{name} matches the sha256 committed in build/inputs.sha256",
+                    f"{present[name]}, expected {committed[name]}",
+                )
+            )
+    for name in sorted(set(present) - set(committed)):
+        violations.append(
+            Violation(
+                "build/inputs/ contains nothing build/inputs.sha256 does not list: the input set "
+                "is an equality, so a file smuggled into the directory is a failure and not an "
+                f"ignore — {name} is unexpected",
+                f"{present[name]}  {name}",
+            )
+        )
+    return violations
+
+
+# --- The embedded release line ------------------------------------------------------------------
+
+#: What `/etc/aobs-release` says instead of a version when the build is not a release build. It is
+#: deliberately not version-shaped: a developer must not be able to sign with a build months later
+#: believing it was a release, and `DEVELOPMENT BUILD` on screen is what makes that impossible to
+#: misread. #61.
+DEVELOPMENT = "development"
+
+#: The only version shape a release may carry. `vMAJOR.MINOR` and nothing else — the release ritual
+#: (#65) matches the tag against this, and `docs/release.md` names no other form.
+RELEASE_TAG = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+
+#: The fields `/etc/aobs-release` must carry. Version, commit and `SOURCE_DATE_EPOCH` are the
+#: **complete embeddable set** — #61's finding is that nothing derived from the image can be
+#: embedded in it, the initramfs hash included, since the initramfs is the whole system.
+#:
+#: `released` is the **formatted** date and not a second source of truth: the appliance may not
+#: import `datetime` (`tests/test_structure.py::test_core_reads_no_ambient_state`), so the one place
+#: an epoch can become a date is the build, and the appliance displays the string it was handed.
+#: The check below is what keeps the two halves of that arrangement honest.
+_RELEASE_FIELDS = ("release", "released", "git-commit", "source-date-epoch", "dirty")
+
+_COMMIT = re.compile(r"^[0-9a-f]{40}$")
+
+
+def utc_date(epoch: str) -> str:
+    """`1773446400` → `2026-09-14`, in UTC and nowhere else. Empty for anything that is not one.
+
+    Pure: a conversion, not a clock reading. Nothing in this module or in the appliance ever asks
+    what time it is now.
+    """
+    try:
+        seconds = int(epoch)
+    except ValueError:
+        return ""
+    return (
+        datetime.datetime.fromtimestamp(seconds, tz=datetime.timezone.utc)
+        .date()
+        .isoformat()
+    )
+
+
+def check_embedded_release(
+    release_text: str,
+    *,
+    tag: str,
+    head_commit: str,
+    dirty: bool,
+    source_date_epoch: str,
+) -> list[Violation]:
+    """`/etc/aobs-release`, as stage 1 wrote it, against what git says about the tree.
+
+    Run in **stage 3, before `cpio`** — #61: after `cpio` the value is inside an archive and the
+    failure message stops being about a file a human can open.
+
+    `tag` is `git describe --exact-match --tags`, empty when HEAD carries no tag. A build that is
+    not at a clean tag is a development build, and the assertion is then **skipped rather than
+    faked**: the only thing checked is that it does not claim to be a release.
+    """
+    fields = parse_fields(release_text)
+    violations: list[Violation] = []
+    for field in _RELEASE_FIELDS:
+        if field not in fields:
+            violations.append(
+                Violation(
+                    f"/etc/aobs-release carries {field}: the appliance names itself on the first "
+                    f"screen, and the manifest's own fields are generated from this file",
+                    "absent",
+                )
+            )
+    if violations:
+        return violations
+
+    release, released, commit, epoch, dirty_field = (fields[field] for field in _RELEASE_FIELDS)
+
+    if not _COMMIT.match(commit):
+        violations.append(
+            Violation(
+                "/etc/aobs-release names the full 40-hex commit: the 12-hex prefix on screen is "
+                "what makes the line checkable against the manifest",
+                commit or "empty",
+            )
+        )
+    elif commit != head_commit:
+        violations.append(
+            Violation(
+                "the embedded git-commit is HEAD: the image and the manifest are generated from "
+                "this one file so that they cannot disagree",
+                f"{commit}, HEAD is {head_commit}",
+            )
+        )
+
+    if epoch != source_date_epoch:
+        violations.append(
+            Violation(
+                "the embedded source-date-epoch is the one the build ran under: the ISO's internal "
+                "timestamps are an assertion about which commit built it "
+                "(`docs/reproducible-build.md` claim 2)",
+                f"{epoch or 'empty'}, the build ran under {source_date_epoch or 'nothing'}",
+            )
+        )
+
+    if dirty_field != ("yes" if dirty else "no"):
+        violations.append(
+            Violation(
+                "the embedded dirty flag is what git says about the tree: it is the `-dirty` "
+                "suffix the first screen shows, and a wrong one is the appliance lying about "
+                "itself",
+                f"dirty: {dirty_field or 'empty'}, git says {'yes' if dirty else 'no'}",
+            )
+        )
+
+    if released != utc_date(epoch):
+        violations.append(
+            Violation(
+                "the embedded released date is source-date-epoch formatted as UTC `YYYY-MM-DD`: "
+                "the appliance may not import `datetime`, so the build is the only place that "
+                "conversion can happen and this is the only thing keeping the two consistent",
+                f"released: {released or 'empty'}, source-date-epoch {epoch} is "
+                f"{utc_date(epoch) or 'not an integer'}",
+            )
+        )
+
+    if is_release_build(tag, dirty):
+        if release != tag:
+            violations.append(
+                Violation(
+                    "a release image's embedded version is the signed tag it was built at: the "
+                    "image and the manifest cannot be allowed to disagree (#61)",
+                    f"release: {release or 'empty'}, git describe says {tag}",
+                )
+            )
+    elif release != DEVELOPMENT:
+        violations.append(
+            Violation(
+                f"a build that is not at a clean tag says {DEVELOPMENT!r} and never a "
+                f"version-shaped string: a developer must not sign months later with a build they "
+                f"took for a release (#61)",
+                f"release: {release or 'empty'}"
+                + (" on a dirty tree" if dirty else " with no tag at HEAD"),
+            )
+        )
+    return violations
+
+
+# --- The four release-mode refusals -------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class GitFacts:
+    """What git says about the tree the release is being cut from. Gathered, never decided here.
+
+    `build/gather.py` runs the four commands. Keeping the *facts* in a value object is what lets
+    `tests/test_build_verifier.py` feed each refusal a hostile one in milliseconds — the whole
+    reason the four refusals are not shell conditions in `build/release-preflight.sh`.
+    """
+
+    #: `git rev-parse HEAD`.
+    head_commit: str
+    #: `git status --porcelain` produced output.
+    dirty: bool
+    #: `git describe --exact-match --tags HEAD`, empty when HEAD carries no tag.
+    tag: str
+    #: `git tag -v <tag>` exited zero, i.e. the tag is annotated **and** its signature verified.
+    tag_signed: bool
+    #: `git log -1 --format=%ct <tag>^{commit}`, as text. Empty when there is no tag.
+    tag_commit_date: str
+
+
+def is_release_build(tag: str, dirty: bool) -> bool:
+    """Whether a build may call itself a version. The one definition, used by both sides.
+
+    `build/gather.py` asks it to decide what to write into `/etc/aobs-release`, and
+    `check_embedded_release` asks it to decide what that file was allowed to say. Those two are
+    deliberately a generator and an independent judge — but they must not be allowed to disagree
+    about *what a release build is*, which is what this being one function prevents.
+    """
+    return bool(tag) and not dirty
+
+
+def check_release_preflight(
+    git: GitFacts,
+    *,
+    source_date_epoch: str,
+    manifest_commit: str | None,
+    release_mode: bool = True,
+) -> list[Violation]:
+    """The four things a human passes without noticing, made things a human cannot skip. #65.
+
+    **A development build trips none of them**, which is not a loophole but the design: a guard that
+    fires during ordinary work gets disabled, and then it guards nothing on the day it mattered.
+
+    `release_mode` is that decision, made a parameter rather than left implicit in who calls this.
+    Today the only caller is the release ritual and it passes `True` explicitly; the reason the
+    parameter exists at all is that *"in release mode only"* is a claim the suite has to be able to
+    check, and `tests/test_build_verifier.py` checks it by driving each of the four hostile inputs
+    through `release_mode=False` and asserting silence. A guard nobody has confirmed is quiet during
+    ordinary work is a guard nobody will keep.
+
+    `manifest_commit` is the manifest's `git-commit:` field, or `None` when no manifest exists yet —
+    the preflight runs before the manifest is written as well as after it.
+    """
+    if not release_mode:
+        return []
+
+    violations: list[Violation] = []
+
+    if git.dirty:
+        violations.append(
+            Violation(
+                "a release is cut from a clean working tree: an uncommitted edit is in the image "
+                "and in nothing a stranger can check out",
+                "git status --porcelain is not empty",
+            )
+        )
+
+    if not git.tag:
+        violations.append(
+            Violation(
+                "HEAD is at an annotated tag matching vMAJOR.MINOR — the stage-3 assertion binds "
+                "the embedded version to it, so the tag exists before the build",
+                "git describe --exact-match --tags found no tag at HEAD",
+            )
+        )
+    elif not RELEASE_TAG.match(git.tag):
+        violations.append(
+            Violation(
+                "the release tag is vMAJOR.MINOR and nothing else: `docs/release.md` names no "
+                "other form and the manifest's file names are built from it",
+                git.tag,
+            )
+        )
+    if git.tag and not git.tag_signed:
+        violations.append(
+            Violation(
+                "the tag is signed by the maintainer's own key and tagged locally, never through "
+                "the GitHub UI — main's HEAD is otherwise signed by GitHub's key",
+                f"git tag -v {git.tag} did not verify",
+            )
+        )
+
+    # No tag means no date to compare against, and the missing tag is already reported above.
+    if git.tag_commit_date and source_date_epoch != git.tag_commit_date:
+        violations.append(
+            Violation(
+                "SOURCE_DATE_EPOCH is the commit date of HEAD, derived and never passed in: a "
+                "mismatch means it was set by hand, and the ISO's timestamps would then assert "
+                "something about no commit at all",
+                f"SOURCE_DATE_EPOCH={source_date_epoch or 'unset'}, the tagged commit is dated "
+                f"{git.tag_commit_date}",
+            )
+        )
+
+    if manifest_commit is not None and manifest_commit != git.head_commit:
+        violations.append(
+            Violation(
+                "the manifest's git-commit is HEAD: the signature covers the manifest because the "
+                "manifest names the inputs, so a manifest describing another commit signs nothing",
+                f"{manifest_commit or 'empty'}, HEAD is {git.head_commit}",
+            )
+        )
+    return violations
+
+
+# --- The manifest -------------------------------------------------------------------------------
+
+#: The manifest's own format marker. Bumped only if the *shape* changes, never for a new field: a
+#: verifier that hard-fails on an added field is a verifier that breaks the next release.
+MANIFEST_FORMAT = "aobs-manifest-1"
+
+_MANIFEST_REQUIRED = (
+    "format",
+    "release",
+    "released",
+    "git-tag",
+    "git-commit",
+    "source-date-epoch",
+    "iso-name",
+    "alpine-branch",
+    "aports-commit",
+    "inputs-list-sha256",
+)
+
+
+def check_manifest(
+    manifest_text: str,
+    *,
+    release_text: str,
+    inputs_list_sha256: str,
+    published: Mapping[str, str],
+) -> list[Violation]:
+    """The manifest against the three things it must not be allowed to disagree with.
+
+    `/etc/aobs-release` — because #61 settled that the manifest's `release` and `git-commit` are
+    *generated from that file* rather than assembled independently, so there is nothing for the
+    image and the manifest to disagree about. The sha256 of `build/inputs.sha256` as committed at
+    the tag — `inputs-list-sha256` is the field doing the real work, pinning the archive to a list a
+    reader can regenerate from a `git checkout`, so an asset replaced in place is still caught. And
+    the files published beside it, whose block must be `sha256sum -c` format exactly, because the
+    documented one-liner is `grep … | sha256sum -c -` and a hash the manifest gets wrong is a
+    verification failure for every reader.
+    """
+    fields = parse_fields(manifest_text)
+    embedded = parse_fields(release_text)
+    violations: list[Violation] = []
+
+    for field in _MANIFEST_REQUIRED:
+        if field not in fields:
+            violations.append(
+                Violation(
+                    f"the manifest carries {field}: a reader learns which inputs produced this "
+                    f"file, not merely that somebody signed it",
+                    "absent",
+                )
+            )
+    if fields.get("format") not in (None, MANIFEST_FORMAT):
+        violations.append(
+            Violation(
+                f"the manifest declares format: {MANIFEST_FORMAT}",
+                fields.get("format", ""),
+            )
+        )
+
+    for field in ("release", "git-commit", "source-date-epoch"):
+        if field in fields and field in embedded and fields[field] != embedded[field]:
+            violations.append(
+                Violation(
+                    f"the manifest's {field} is generated from /etc/aobs-release, so the image and "
+                    f"the manifest cannot disagree (#61)",
+                    f"manifest says {fields[field]}, the image says {embedded[field]}",
+                )
+            )
+
+    if fields.get("git-tag") is not None and fields.get("release") != fields.get("git-tag"):
+        violations.append(
+            Violation(
+                "the manifest's release and git-tag are the same string: the appliance displays "
+                "one of them and the advisories name the other",
+                f"release: {fields.get('release')}, git-tag: {fields.get('git-tag')}",
+            )
+        )
+
+    if "inputs-list-sha256" in fields and fields["inputs-list-sha256"] != inputs_list_sha256:
+        violations.append(
+            Violation(
+                "inputs-list-sha256 is the sha256 of build/inputs.sha256 as committed at the tag: "
+                "it is what pins the archive to the source, so an archive replaced in place on "
+                "GitHub Releases is still caught",
+                f"{fields['inputs-list-sha256']}, the committed list hashes to {inputs_list_sha256}",
+            )
+        )
+
+    if not parse_repeated_field(manifest_text, "signer"):
+        violations.append(
+            Violation(
+                "the manifest names who was expected to sign it: the verifier can then tell "
+                "`one of two signers` from `one, and no idea whether more were coming`",
+                "no signer: line",
+            )
+        )
+
+    listed = parse_checksum_list(manifest_text)
+    if not listed:
+        violations.append(
+            Violation(
+                "the manifest carries a contiguous block of `<sha256>  <name>` lines in "
+                "`sha256sum -c` format: the documented command is "
+                "`grep -E '^[0-9a-f]{64}  ' manifest.txt | sha256sum -c -`",
+                "no checksum lines at all",
+            )
+        )
+    for name in sorted(published):
+        if name not in listed:
+            violations.append(
+                Violation(
+                    f"every file published beside the manifest is named in it: {name} is not",
+                    "absent from the checksum block",
+                )
+            )
+        elif listed[name] != published[name]:
+            violations.append(
+                Violation(
+                    f"the manifest's hash for {name} is the hash of the file being published",
+                    f"{listed[name]}, the file hashes to {published[name]}",
+                )
+            )
+    for name in sorted(set(listed) - set(published)):
+        violations.append(
+            Violation(
+                f"the manifest names only files that are actually published: {name} is not one of "
+                f"them, and a reader's `sha256sum -c` would fail on it",
+                "named in the manifest, absent from the release",
+            )
+        )
+    return violations
+
+
+# --- The pinned parallelism ----------------------------------------------------------------------
+
+#: `make -j` and `zstd -T`, the two places a core count could reach the build. `zstd`'s output
+#: genuinely varies with the thread count; `make`'s does not, and it is pinned anyway, because a
+#: contract that says "host architecture must not matter" cannot have one of its two parallelism
+#: knobs read the machine and the other not — and the rule "nothing in the build calls `nproc`" is
+#: checkable, while "only the one that matters" is a judgement call made afresh every time.
+_PARALLELISM_FLAG = re.compile(r"(?:^|\s)(-j|-T)\s*(\S*)")
+
+#: `MAKE_JOBS=4` at the top of a script, so the flag below may say `-j"$MAKE_JOBS"` and still be a
+#: literal constant. Only a bare integer counts: `MAKE_JOBS=$(nproc)` is caught by the `nproc` rule
+#: and `MAKE_JOBS=$OTHER` does not resolve, so neither can launder a core count through a name.
+_LITERAL_ASSIGNMENT = re.compile(r"^(\w+)=(\d+)$")
+
+_VARIABLE = re.compile(r'^"?\$\{?(\w+)\}?"?$')
+
+
+def _constants(text: str) -> dict[str, str]:
+    found: dict[str, str] = {}
+    for line in text.splitlines():
+        match = _LITERAL_ASSIGNMENT.match(line.strip())
+        if match:
+            found[match.group(1)] = match.group(2)
+    return found
+
+
+def check_pinned_parallelism(sources: Mapping[str, str]) -> list[Violation]:
+    """No build step derives its parallelism from the machine it runs on.
+
+    `docs/reproducible-build.md` claim 1 puts **CPU count** and **host architecture** inside the
+    reproducibility contract, and this is the cost of including them: `-j` and `zstd -T` are fixed
+    constants. The guard that actually catches a regression here is CI building twice with
+    `--cpus=2` against the runner's full count; this function is what catches it in 3 ms while
+    somebody is editing the build.
+    """
+    violations: list[Violation] = []
+    for name, text in sorted(sources.items()):
+        constants = _constants(text)
+        for number, raw in enumerate(text.splitlines(), start=1):
+            line = raw.strip()
+            if line.startswith("#"):
+                continue
+            if "nproc" in line:
+                violations.append(
+                    Violation(
+                        "no build step derives its parallelism from the host's core count: "
+                        "`make -j` and `zstd -T` are pinned constants "
+                        "(`docs/reproducible-build.md` claim 1)",
+                        f"{name}:{number}: {line}",
+                    )
+                )
+                continue
+            for flag, value in _PARALLELISM_FLAG.findall(line):
+                variable = _VARIABLE.match(value)
+                if variable:
+                    value = constants.get(variable.group(1), "")
+                if not value.isdigit():
+                    violations.append(
+                        Violation(
+                            f"every {flag} in the build names a literal integer, directly or "
+                            f"through a constant assigned in the same file: an empty or computed "
+                            f"one is the host's core count by another route",
+                            f"{name}:{number}: {line}",
+                        )
+                    )
+                elif flag == "-T" and value == "0":
+                    # The one literal that is not a constant: `zstd -T0` *means* "as many threads as
+                    # there are cores", so it is the core-count dependence spelled as a digit — and
+                    # it is the specific divergence source `docs/reproducible-build.md` lists sixth.
+                    violations.append(
+                        Violation(
+                            "zstd -T names a thread count and never 0: `-T0` means one thread per "
+                            "core, so the compressed output varies with the machine "
+                            "(`docs/reproducible-build.md` divergence source 6)",
+                            f"{name}:{number}: {line}",
+                        )
+                    )
     return violations

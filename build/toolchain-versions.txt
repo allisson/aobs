@@ -1,0 +1,51 @@
+# The exact apk versions the ISO **builder** installs, from Alpine v3.24, x86_64.
+#
+# Separate from `build/apk-versions.txt` and that separation is load-bearing. That file's contract
+# is "what goes into the image, read by both tiers", and `build/Dockerfile.test` installs **every**
+# non-comment line of it on purpose, because the harness runs on the appliance's own libraries. A
+# compiler in that list would land in the test tier, which needs none of it — so the toolchain gets
+# its own file rather than a third `@group` marker in that one.
+#
+# The consequence is a file with **exactly one group**, which is what makes it safe for
+# `build/Dockerfile.iso` and `build/fetch-inputs.sh` to read it as "every non-comment line". A
+# second group here would recreate exactly the hazard the marker was introduced to close, so
+# `build/verify.py` fails the build if one ever appears.
+#
+# Nothing below is installed into `/rootfs`, and `build/verify.py`'s rootfs check is what proves it.
+#
+# Pinning does not make the build reproducible on its own and never claimed to: the same compiler
+# version can still emit a different binary. `docs/reproducible-build.md` holds the claim, the
+# divergence sources that were fixed, and the CI guard that fails on any differing byte.
+
+# @group toolchain
+build-base=0.5-r4
+bison=3.8.2-r3
+flex=2.6.4-r8
+perl=5.42.2-r0
+bc=1.08.2-r1
+elfutils-dev=0.195-r0
+openssl-dev=3.5.8-r0
+linux-headers=7.0.0-r1
+xz=5.8.3-r0
+zstd=1.5.7-r2
+cpio=2.15-r0
+tar=1.35-r5
+xorriso=1.5.8-r0
+syslinux=6.04_pre1-r19
+grub=2.14-r0
+grub-efi=2.14-r0
+mtools=4.0.49-r0
+dosfstools=4.2-r2
+python3=3.14.7-r1
+# GNU coreutils rather than busybox's applets, for one reason: the initramfs is made reproducible by
+# setting every member's mtime to `SOURCE_DATE_EPOCH`, and `touch -h -d @<seconds>` is the form that
+# does it. Busybox `touch` does not accept the `@` form, and a `touch` that silently does nothing is
+# a reproducibility defect that passes every test until two builders compare hashes.
+coreutils=9.11-r0
+# `SOURCE_DATE_EPOCH` is the commit date of HEAD and the four release-mode refusals are facts about
+# the tree, so the builder reads the repository it is building. It never writes to it, and it never
+# reaches the network — `docs/reproducible-build.md` states both.
+git=2.54.0-r0
+# `wget` is deliberately absent. Every byte the build consumes comes from `build/inputs/`, verified
+# against `build/inputs.sha256` before stage 1 runs; the builder has nothing left to download, and
+# a downloader in the image that builds the ISO is a downloader somebody will eventually use.

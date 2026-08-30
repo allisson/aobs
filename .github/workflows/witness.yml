@@ -1,0 +1,120 @@
+# The witness build: an independent reproduction, from the pushed tag, before strangers rely on it.
+#
+# `docs/release.md` step 6. What this job is for, in one sentence: **the first independent
+# reproduction of a release should happen before anybody outside the project depends on it**, and the
+# only way to make that true is to do it in the ritual rather than to hope somebody does it later.
+#
+# **A witness that disagrees blocks the release — and the thing that blocks is the ritual, not this
+# job.** No CI job can block a publication CI does not perform: this workflow builds, hashes, and
+# publishes what it saw as an artifact. `docs/release.md` step 7 does not happen until a human has
+# read that artifact and found it identical to the builder's hash ladder. If the hashes differ, that is
+# a reproducibility defect, and the contract's position — a stranger who rebuilds and gets a different
+# hash has found a defect, not a difference of opinion — has to bind us before it binds anyone else.
+# No agreement, no publication: fix it and re-tag.
+#
+# **A witness that cannot run is a different case from one that disagrees**, and the distinction is
+# load-bearing. On an infrastructure outage the maintainer may publish single-signed: the witness
+# signature is already non-fatal to verification and the manifest's `signer:` lines make its absence
+# visible rather than silent. **Publishing over a witness that ran and disagreed is never permitted.**
+# Nothing here can enforce that; it is a rule in `docs/release.md`, addressed to a person.
+#
+# **This job does not sign yet, and does not pretend to.** #58 created no witness key: signing would
+# need one in GitHub's secret store, and `verify-release.sh` hardcodes an empty `KNOWN_WITNESS` rather
+# than a placeholder fingerprint in the file strangers read to learn whom to trust. When a key exists
+# this job gains a signing step, `verify-release.sh` gains one line, and the manifest gains one
+# `signer:` line — with nothing already published needing re-verification. Until then the witness
+# publishes its hashes as an artifact, which is the observation the ritual actually compares.
+#
+# **The witness fetches from the live CDN against the committed list, never `--refresh`.** That is
+# what keeps it an independent reproduction rather than a replay of the builder's own bytes.
+#
+# It is also worth less than the builder's word, and the README says so: a runner's key would live in
+# GitHub's secret store, so a witness corroborates the build and not the platform.
+#
+# **Unmeasured, and flagged as such:** how long a native amd64 kernel build takes on a GitHub runner
+# is unknown — the only recorded figure is that arm64 emulation makes it hours — and the free-runner
+# 6h ceiling is worth confirming rather than assuming.
+
+name: witness
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: the tag to witness
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  witness:
+    name: independent reproduction from the tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 330 # under the free-runner 6h ceiling, with room to report rather than be killed
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          # The build derives `SOURCE_DATE_EPOCH` from HEAD's commit date and asserts the embedded
+          # version against `git describe --exact-match --tags`. Both need real history.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: The tag is a release tag, and the tree is clean
+        # **Not `build/release-preflight.sh`.** Its second refusal needs `git tag -v` to exit zero,
+        # which needs the maintainer's public key in the runner's keyring — and importing it here
+        # would make CI's check of the signature depend on a channel CI is meant to corroborate
+        # rather than to trust. The signature on the tag is the maintainer's instrument, checked
+        # locally in `docs/release.md` step 2 and by any stranger who clones. What the witness can
+        # check for itself, it checks:
+        run: |
+          test -z "$(git status --porcelain)"
+          git describe --exact-match --tags HEAD | grep -Eq '^v[0-9]+\.[0-9]+$'
+
+      - name: Fetch the inputs from the live CDN
+        run: |
+          docker run --rm --platform=linux/amd64 -v "$PWD:/src" -w /src \
+            alpine:3.24 sh build/fetch-inputs.sh
+
+      - name: Build
+        run: |
+          docker build -f build/Dockerfile.iso -t aobs-iso .
+          mkdir -p out
+          docker run --rm --privileged \
+            -v "$PWD:/src" -v "$PWD/out:/out" aobs-iso | tee ladder.txt
+
+      - name: The input archive
+        # Deterministic by the same rules as the ISO, so that a witness confirms the archive and not
+        # only the image — `docs/reproducible-build.md` claim 7.
+        run: |
+          mkdir -p release
+          tar --sort=name --owner=0 --group=0 --numeric-owner \
+            --mtime="@$(git log -1 --format=%ct)" --format=gnu \
+            -C build -cf "release/aobs-inputs-$(git describe --exact-match --tags).tar" inputs
+
+      - name: What the witness saw
+        run: |
+          {
+            echo "tag:    $(git describe --exact-match --tags)"
+            echo "commit: $(git rev-parse HEAD)"
+            echo "epoch:  $(git log -1 --format=%ct)"
+            echo
+            grep '^    sha256' ladder.txt
+            echo
+            sha256sum out/bitcoin-signer-amd64.iso release/*.tar
+          } | tee witness.txt
+
+      - name: Upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: witness
+          # The ladder, not only the ISO hash: if the two builds disagree, the first rung that
+          # differs is where the divergence began, and that is the difference between a useful report
+          # and "the hashes differ".
+          path: |
+            witness.txt
+            ladder.txt
+          if-no-files-found: error

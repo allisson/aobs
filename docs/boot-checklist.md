@@ -126,3 +126,47 @@ boot" must not be read as "no device is ever authorized".
     both discovered by reading their source, and both the kind of thing only a real device confirms.
     Note also that **testnet4 interop holds for Sparrow only**; Green has mainnet plus testnet3 and
     Blue Wallet is mainnet-only.
+
+## What the image says about itself
+
+23. **The first screen names the version, the commit prefix and the build date**, and the row matches
+    the manifest you verified before booting. `aobs v1.0 · 4f1c8a6e2b90 · 2026-09-14`, on the keymap
+    picker, without navigating anywhere. *(#61)*
+
+    **This is an identification aid and not an attestation.** A modified image can print anything.
+    What is being checked here is that the row is present, correct and unavoidable — not that the
+    image is honest, which no on-screen text could establish.
+
+24. **A development build says `DEVELOPMENT BUILD` and never a version-shaped string.** Build from an
+    untagged commit and boot it: the row says so, and a dirty tree adds `-dirty` to the commit. The
+    failure this prevents is a developer signing months later with a build they took for a release.
+    *(#61)*
+
+25. **A failure screen repeats the same row.** Reach any of them — the console-too-small screen is
+    the cheapest, boot in a small terminal — and confirm the two footer lines are there. A bug report
+    carrying no build identity is a bug report about nothing. *(#61)*
+
+26. **The advisory line points and does not claim to have checked.** It names where advisories live
+    and says the appliance cannot check. There is no trustworthy clock offline and a wrong *this build
+    is old* is worse than silence. *(#62)*
+
+## What only a release can check
+
+27. **The maintainer's arm64 build and CI's x86_64 witness build produce the same sha256.** This is
+    the cross-architecture half of `docs/reproducible-build.md` claim 1, and it is here rather than in
+    the CI guard because an arm64 runner would emulate for hours — while the release ritual compares
+    the two builds anyway, at no extra cost.
+
+    Compare the **hash ladder**, not only the ISO: `mkiso.sh` prints five rungs, and the first one
+    that differs is where the divergence began. *(#59, #65)*
+
+28. **The published verification command, run from the published instructions, against the published
+    assets.** Downloaded from the release rather than copied out of the build directory:
+
+    ```sh
+    gpg --verify manifest-v1.0.txt.asc manifest-v1.0.txt
+    grep -E '^[0-9a-f]{64}  ' manifest-v1.0.txt | sha256sum -c -
+    ```
+
+    SeedSigner's first signed release shipped a file that gave `gpg: not a detached signature`, and an
+    outsider found it. This item costs thirty seconds. *(#60, #65)*

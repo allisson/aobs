@@ -40,13 +40,19 @@ construction.
 
 ### Tier 2 — acknowledged, with stated limits. Not "defended"
 
-**4. Evil maid — a tampered boot medium between two boots.** **Not defended.** Reproducible builds
-and release signing are out of scope for this effort, and a generic amd64 machine offers no measured
-boot or TPM to anchor to. The appliance therefore claims nothing about its own integrity.
+**4. Evil maid — a tampered boot medium between two boots.** **Not defended.** A generic amd64
+machine offers no measured boot or TPM to anchor to, and the appliance claims nothing about its own
+integrity.
 
-*User-side mitigation, the only one that works:* keep custody of the boot medium, and verify its
-checksum on a machine you trust **before** booting it. Verification that happens on the possibly
-tampered appliance itself proves nothing.
+*User-side mitigation, the only one that works:* keep custody of the boot medium, and verify it on a
+machine you trust **before** booting it. Verification that happens on the possibly tampered appliance
+itself proves nothing — which is also why the version row on the first screen is an identification
+aid and never an attestation.
+
+Release signing and byte-reproducible builds now exist (`SECURITY.md`,
+`docs/reproducible-build.md`) and they raise the floor for *this* adversary without defending against
+it: they let you establish that the ISO you downloaded is the one the maintainer published and the one
+this source produces. They say nothing about the stick after it left your hands.
 
 **5. Cold-boot recovery of RAM after power-off.** **Partially mitigated at best.** What the
 appliance does: wipes key material on the shutdown path, configures no swap and no hibernation,
@@ -272,11 +278,15 @@ only the claim.
 
 The appliance performs **no self-attestation at boot**, and displays no integrity indicator.
 
-With evil maid in Tier 2 and reproducible builds out of scope, any self-check is code the tamperer
-also controls: a check that passes proves nothing, and an "integrity OK" message actively misleads.
-The verification that does work is the user-side one in Tier 2 item 4 — checksum the ISO on a
-machine you trust, before booting it — and that instruction belongs on the boot screen alongside the
-appliance's claims.
+With evil maid in Tier 2, any self-check is code the tamperer also controls: a check that passes
+proves nothing, and an "integrity OK" message actively misleads. The verification that does work is
+the user-side one in Tier 2 item 4 — verify the ISO against the signed manifest on a machine you
+trust, before booting it — and that instruction belongs on the boot screen alongside the appliance's
+claims.
 
-Adding a real self-check later is cheap if reproducible builds ever come into scope. The harm of
-shipping a meaningless green tick is not recoverable.
+**Byte-reproducible builds have not changed this.** They make the *published* bytes checkable by
+anyone; they give the running image no way to say anything true about itself. The version row the
+appliance now shows is deliberately an identification aid and not an integrity indicator, and #61's
+decisive finding is why nothing stronger is possible: nothing derived from the image can be embedded
+in it, the initramfs hash included, because the initramfs is the whole system. The harm of shipping a
+meaningless green tick is not recoverable.
