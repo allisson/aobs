@@ -55,12 +55,18 @@ RUN --mount=type=bind,source=build/inputs/apks,target=/inputs/apks \
 # `-e LC_ALL=...` and a different umask precisely to prove the build ignores them, and a `docker run
 # -e` overrides an `ENV`. So these are the defaults, and `mkiso.sh` is the enforcement.
 #
-# `KBUILD_BUILD_USER` and `KBUILD_BUILD_HOST` are the two Kbuild reads from the machine; without
-# them the builder's user and hostname end up inside `bzImage`.
+# `KBUILD_BUILD_USER`, `KBUILD_BUILD_HOST` and `KBUILD_BUILD_TIMESTAMP` are the three Kbuild reads
+# from the machine; without them the builder's user, hostname and clock end up inside `bzImage`.
+#
+# The timestamp is a **parseable date and not a label**. `usr/Makefile` hands it to
+# `gen_initramfs.sh` as `-d "$KBUILD_BUILD_TIMESTAMP"`, which runs `date -d"$1" +%s || :` and, given
+# a string that is not a date, silently falls back to the wall clock for the built-in initramfs's
+# mtimes. `mkiso.sh` replaces this default with the `SOURCE_DATE_EPOCH` date; the constant here only
+# has to keep a bare `docker run` of this image out of the same trap.
 ENV LC_ALL=C
 ENV LANG=C
 ENV TZ=UTC
-ENV KBUILD_BUILD_TIMESTAMP="aobs"
+ENV KBUILD_BUILD_TIMESTAMP="1970-01-01 00:00:00 UTC"
 ENV KBUILD_BUILD_USER=aobs
 ENV KBUILD_BUILD_HOST=aobs
 

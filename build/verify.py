@@ -560,6 +560,10 @@ FORBIDDEN_BASENAMES: dict[str, str] = {
     "rc-service": "PID 1 is our script: there is no init system, no OpenRC, no supervisor",
     "rc-status": "PID 1 is our script: there is no init system, no OpenRC, no supervisor",
     "apk": "no package manager in the rootfs",
+    # `/var/log/apk.log` survives the `apk` entry above, because its basename is not `apk`. It is
+    # named separately rather than matched by prefix because the claim it breaks is two claims: it
+    # is package-manager residue, and it carries the wall clock and the builder's absolute paths.
+    "apk.log": "no package manager in the rootfs",
     "pip": "no package manager in the rootfs",
     "pip3": "no package manager in the rootfs",
     "easy_install": "no package manager in the rootfs",

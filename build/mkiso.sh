@@ -24,7 +24,7 @@
 # unpacked release asset in 2030 — and the divergence between the two is confined to *fetching*.
 #
 # **The output is byte-identical on any host.** `docs/reproducible-build.md` states the claim
-# numbered and checkable, lists the six divergence sources that were fixed, and names the CI guard
+# numbered and checkable, lists the ten divergence sources that were fixed, and names the CI guard
 # that builds twice under hostile variation and fails on any differing byte. Release engineering is
 # `docs/release.md`. Secure Boot remains out of scope: the image is unsigned and stays unsigned.
 
@@ -102,6 +102,18 @@ SOURCE_DATE_EPOCH=$(git -C "$SRC" -c safe.directory="$SRC" log -1 --format=%ct)
 export SOURCE_DATE_EPOCH
 note "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH (the commit date of HEAD)"
 
+# The three values Kbuild otherwise reads off the machine, and the timestamp is the subtle one.
+# `Dockerfile.iso` holds defaults for all three, but a default cannot know `SOURCE_DATE_EPOCH` — and
+# **the value must be a date `date -d` can parse, not a label.** `usr/Makefile` passes it to
+# `gen_initramfs.sh` as `-d "$KBUILD_BUILD_TIMESTAMP"`, which runs `date -d"$1" +%s || :` and, on a
+# string that is not a date, silently drops the `-t` argument and stamps the built-in initramfs with
+# the wall clock. `include/generated/compile.h` accepts any string, so an unparseable one looks
+# correct in every place a reader would check. That is divergence source 9.
+KBUILD_BUILD_TIMESTAMP=$(date -u -d "@$SOURCE_DATE_EPOCH" '+%Y-%m-%d %H:%M:%S UTC')
+export KBUILD_BUILD_TIMESTAMP
+export KBUILD_BUILD_USER=aobs
+export KBUILD_BUILD_HOST=aobs
+
 rm -rf "$WORK"
 mkdir -p "$ROOTFS" "$ISOROOT/boot/isolinux" "$OUT"
 
@@ -159,9 +171,27 @@ done
 rm -f "$ROOTFS/etc/inittab"
 rm -rf "$ROOTFS/etc/udhcpc" "$ROOTFS/usr/share/udhcpc"
 
-# apk's own database and keys. A database with no package manager to read it is inert, but the
+# apk's own database, keys and log. A database with no package manager to read it is inert, but the
 # claim is "no package manager in the rootfs" and residue invites the argument.
+#
+# `/var/log/apk.log` is the seventh divergence source, and it is two failures at once: apk writes the
+# wall clock into it, and it writes the `--root` and `--repositories-file` arguments — which are
+# `$WORK` and the bind-mount path, so the builder's directory layout ships inside the image. It is
+# named on its own line rather than folded into the list above because its basename is `apk.log`,
+# which `check_rootfs`'s `apk` entry does not match; `verify.py` names it there for the same reason.
 rm -rf "$ROOTFS/etc/apk" "$ROOTFS/lib/apk" "$ROOTFS/var/cache/apk"
+rm -f "$ROOTFS/var/log/apk.log"
+
+# The eighth: Alpine's `busybox` post-install creates the `klogd` system user, and `adduser` stamps
+# `/etc/shadow`'s last-change field with *today* in days since the epoch. Two builds on opposite
+# sides of midnight — which is exactly what the guard's 37-hour clock push produces — differ in one
+# integer. Every non-empty last-change field is set to the `SOURCE_DATE_EPOCH` day instead. Written
+# through the existing file so the 0640 root:shadow mode survives.
+SHADOW_DAY=$((SOURCE_DATE_EPOCH / 86400))
+awk -F: -v OFS=: -v day="$SHADOW_DAY" '$3 != "" { $3 = day } { print }' \
+	"$ROOTFS/etc/shadow" >"$WORK/shadow"
+cat "$WORK/shadow" >"$ROOTFS/etc/shadow"
+rm -f "$WORK/shadow"
 
 # The app tree, as committed, where PID 1's `python3 -m aobs` will find it. No pip, no virtualenv,
 # no wheel: `docs/boot-pipeline.md` is explicit that a build whose selling point is that every
@@ -239,7 +269,7 @@ stage "Stage 3 — initramfs"
 judge embedded-release "$SRC" "$ROOTFS/etc/aobs-release"
 note "the embedded release line agrees with the tag and the commit"
 
-# Two of `docs/reproducible-build.md`'s six divergence sources, both here. `find | cpio` with no sort
+# Two of `docs/reproducible-build.md`'s ten divergence sources, both here. `find | cpio` with no sort
 # leaks directory order into the archive; cpio member mtimes come from the filesystem. So every
 # member's mtime is set to `SOURCE_DATE_EPOCH` — GNU `touch`, because busybox's does not accept the
 # `@` form and a `touch` that silently does nothing is a defect that passes every test until two
@@ -293,9 +323,14 @@ grub-mkstandalone -O x86_64-efi -o "$WORK/efi/EFI/BOOT/BOOTX64.EFI" \
 # Divergence source four: `mkfs.vfat` takes the volume ID from the clock unless `-i` names one, and
 # mtools writes each file's mtime into the FAT directory entry — in *local* time, which is why `TZ`
 # is forced to UTC at the top of this script rather than left to the environment.
+#
+# Divergence source ten, and `-i` alone does not cover it: `-n` makes `mkfs.fat` write a volume-label
+# *directory entry*, whose creation and write times come from its own clock — four bytes that no
+# amount of `touch`ing the payload reaches. `--invariant` replaces every random or time-based value
+# with a constant, and `-i` after it keeps the volume ID ours rather than the constant's.
 EFI_VOLUME_ID=$(printf '%08X' $((SOURCE_DATE_EPOCH % 4294967296)))
 dd if=/dev/zero of="$ISOROOT/boot/efi.img" bs=1M count=8 status=none
-mkfs.vfat -n AOBSEFI -i "$EFI_VOLUME_ID" "$ISOROOT/boot/efi.img" >/dev/null
+mkfs.vfat --invariant -n AOBSEFI -i "$EFI_VOLUME_ID" "$ISOROOT/boot/efi.img" >/dev/null
 touch -d "@$SOURCE_DATE_EPOCH" "$WORK/efi/EFI/BOOT/BOOTX64.EFI"
 mmd -i "$ISOROOT/boot/efi.img" ::/EFI ::/EFI/BOOT
 mcopy -i "$ISOROOT/boot/efi.img" "$WORK/efi/EFI/BOOT/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI

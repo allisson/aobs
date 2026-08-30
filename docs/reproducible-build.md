@@ -86,7 +86,7 @@ differ".
 a maintainer must obtain, never a verifier**: the "tools the reader already has" rule governs
 verification UX, and debugging is not on that path.
 
-## The six divergence sources, and what fixed each
+## The ten divergence sources, and what fixed each
 
 Every one of these was in the build before this contract existed. `SOURCE_DATE_EPOCH` was set
 nowhere, so two independent builders got two different files and neither could rebut a claim that the
@@ -100,11 +100,28 @@ other had shipped a backdoor.
 | 4 | `mkfs.vfat` stamps `efi.img` with a volume ID from the clock | `mkfs.vfat -i` with an ID derived from `SOURCE_DATE_EPOCH`; `BOOTX64.EFI` touched before `mcopy`, because mtools writes file dates into the FAT directory entry — in *local* time, which is why `TZ` is forced |
 | 5 | `xorriso` writes ISO9660 creation timestamps and derives the volume UUID from them | `--modification-date=`, which sets all four volume timestamps at once |
 | 6 | `zstd -T0` varies its output with the core count | `zstd -T1`, and `check_pinned_parallelism` rejects `-T0` |
+| 7 | `apk` writes `/var/log/apk.log`, carrying the wall clock *and* its own `--root` and `--repositories-file` arguments — so `$WORK` and the bind-mount path ship inside the image | the log is removed with the rest of the apk residue, and `check_rootfs` names `apk.log` separately, because its basename is not `apk` |
+| 8 | Alpine's `busybox` post-install creates the `klogd` user, and `adduser` stamps `/etc/shadow`'s last-change field with today in days since the epoch | every non-empty last-change field is rewritten to the `SOURCE_DATE_EPOCH` day |
+| 9 | `KBUILD_BUILD_TIMESTAMP` was pinned to the label `aobs`. `usr/Makefile` passes it to `gen_initramfs.sh` as `-d "$KBUILD_BUILD_TIMESTAMP"`, which runs `date -d"$1" +%s \|\| :`; on a string that is not a date it drops the `-t` argument and stamps the built-in initramfs with the wall clock, and that reaches `bzImage` through `vmlinux` | `mkiso.sh` exports it as the `SOURCE_DATE_EPOCH` date, in a form `date -d` parses |
+| 10 | `mkfs.fat`'s `-n` writes a volume-label *directory entry* whose creation and write times come from its own clock — four bytes inside `efi.img` that `-i` does not reach and that touching the payload cannot fix | `mkfs.vfat --invariant`, with `-i` after it so the volume ID stays derived from `SOURCE_DATE_EPOCH` rather than the constant |
 
 Two environment facts sit alongside them. `LC_ALL`, `LANG`, `TZ` and `umask` are forced **inside
 `mkiso.sh`** and not only in `Dockerfile.iso`, because `docker run -e` overrides an `ENV` and the
-guard below deliberately varies them. `KBUILD_BUILD_USER` and `KBUILD_BUILD_HOST` are pinned in the
-Dockerfile: without them the builder's user and hostname end up inside `bzImage`.
+guard below deliberately varies them. So are `KBUILD_BUILD_USER`, `KBUILD_BUILD_HOST` and
+`KBUILD_BUILD_TIMESTAMP`, the three values Kbuild otherwise reads off the machine: without them the
+builder's user, hostname and clock end up inside `bzImage`. The timestamp cannot live in the
+Dockerfile alone, because a default cannot know `SOURCE_DATE_EPOCH` — and source 9 is the reason it
+must be a **date and not a label**. `include/generated/compile.h` accepts any string, so an
+unparseable value looks correct in every place a reader would check; the only thing that catches it
+is the guard's 37-hour clock push.
+
+**What stays different between two builds, and why it does not matter.** `arch/x86/boot/*.o`,
+`arch/x86/realmode/rm/{reboot,trampoline_64}.o` and all of `tools/objtool/` carry the absolute build
+path in their debug info — those Makefiles set `KBUILD_CFLAGS` themselves and lose Kbuild's prefix
+maps. None of it reaches the artifact: the boot objects are flattened by `objcopy -O binary` into
+`setup.bin`, and `objtool` is a host tool whose own bytes are never shipped. Measured directly: with
+the nine sources above fixed, two builds under the guard's full variation produce 79 differing files
+in the kernel tree and an identical `bzImage`.
 
 ## The guard
 

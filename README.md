@@ -154,7 +154,7 @@ CI walks it on every commit.
 **The output is byte-identical on any host** — build path, hostname, user, uid, clock, locale,
 timezone, umask, CPU count, host kernel version and host architecture do not affect it, and CI builds
 twice under deliberately hostile variation and fails on any differing byte.
-`docs/reproducible-build.md` states the claims, the six divergence sources that were fixed, and what
+`docs/reproducible-build.md` states the claims, the ten divergence sources that were fixed, and what
 is deliberately *not* claimed.
 
 Four stages — a pinned apk userland into `/rootfs`, a vanilla kernel.org LTS tarball pinned by
