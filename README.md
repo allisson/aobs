@@ -69,7 +69,7 @@ coreutils, not assumed.
 `verify-release.sh` in the release does the same thing and, more usefully, prints what it could
 *not* check. It is a **convenience, not an authority**: it is under 120 lines, it shells out only to
 the two commands above, and you should read it before you run it. `--iso-only` exists so that
-declining the 360 MB input archive is not reported as a failure.
+declining the ~360 MB input archive and the ~456 MB source archive is not reported as a failure.
 
 ### What this proves, and what it does not
 

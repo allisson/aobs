@@ -54,9 +54,25 @@ the file the build wrote, which is the form that bites.
 ```sh
 docker run --rm --platform=linux/amd64 -v "$PWD:/src" -w /src \
     alpine:3.24 sh build/fetch-inputs.sh
+docker run --rm --platform=linux/amd64 -v "$PWD:/src" -w /src \
+    alpine:3.24 sh build/fetch-sources.sh
 docker build -f build/Dockerfile.iso -t aobs-iso .
 mkdir -p out && docker run --rm --privileged -v "$PWD:/src" -v "$PWD/out:/out" aobs-iso
 ```
+
+`fetch-sources.sh` populates `build/sources/` — ~456 MB, 48 origin aports, the corresponding source
+for everything copyleft-touched the release redistributes (#71). It reads `build/inputs/`, so it runs
+after `fetch-inputs.sh` and not before. **The build never opens it**: it is a release asset, not a
+build input, which is why it has its own list rather than joining `build/inputs.sha256` — putting it
+there would make every witness build and every 2030 rebuild download 456 MB the build is required to
+have and required never to read.
+
+Every file it fetches is checked against the `sha512sums` in the APKBUILD that named it, at the
+commit the package's own `.PKGINFO` records — the same check `abuild` makes, against a list out of a
+git history rather than off the host serving the bytes. Without `--refresh` it leaves
+`build/sources.sha256` alone, so a source whose bytes moved shows up as a checksum failure during the
+fetch; with `--refresh` it also rewrites the list, and a human commits that diff for the same reason
+`build/inputs.sha256`'s is committed by hand.
 
 The stage-3 assertion binds `/etc/aobs-release` to that tag. **Record the hash ladder the build
 prints** — CI's witness build prints the same five rungs, and the first one that differs is where a
@@ -81,6 +97,11 @@ cp out/bitcoin-signer-amd64.iso verify-release.sh ADVISORIES.txt release/
 tar --sort=name --owner=0 --group=0 --numeric-owner \
     --mtime="@$(git log -1 --format=%ct)" --format=gnu \
     -C build -cf release/aobs-inputs-v1.0.tar inputs
+
+# The source archive, same shape, same reasons. Separate asset because the build never reads it.
+tar --sort=name --owner=0 --group=0 --numeric-owner \
+    --mtime="@$(git log -1 --format=%ct)" --format=gnu \
+    -C build -cf release/aobs-sources-v1.0.tar sources
 
 python3 build/gather.py write-manifest . "$RELEASE_FILE" release >release/manifest-v1.0.txt
 python3 build/gather.py manifest . release/manifest-v1.0.txt "$RELEASE_FILE" release
@@ -139,8 +160,16 @@ published needing re-verification.
 
 **7. Publish the Release — once.**
 
-Assets: `bitcoin-signer-amd64.iso`, `aobs-inputs-v1.0.tar`, `manifest-v1.0.txt`,
-`manifest-v1.0.txt.asc`, `verify-release.sh`, `ADVISORIES.txt` and `ADVISORIES.txt.asc`.
+Assets: `bitcoin-signer-amd64.iso`, `aobs-inputs-v1.0.tar`, `aobs-sources-v1.0.tar`,
+`manifest-v1.0.txt`, `manifest-v1.0.txt.asc`, `verify-release.sh`, `ADVISORIES.txt` and
+`ADVISORIES.txt.asc`.
+
+**`aobs-sources-v1.0.tar` is not optional and not a convenience.** It is the accompanying source
+GPLv2 §3(a) requires for the 18 GPL-2.0-only `.apk` files in the input archive — §3(b) and §3(c) are
+both unavailable to this project, and §3 grants no fourth route (#71). Publishing the input archive
+without it redistributes those binaries under no permitted term. It carries the rest of the
+copyleft-touched set too, so that no source claim in `NOTICE` depends on a host this project does not
+control.
 
 Everything but the manifest and the `.asc` files is named in the manifest's checksum block, so the
 documented one-liner really does check every published file at once — **the verifier included**, which
@@ -195,8 +224,8 @@ One plain-text, line-oriented `manifest-vMAJOR.MINOR.txt`, readable with `cat`, 
 line:
 
 - **`key: value` metadata** — `format`, `release`, `released`, `git-tag`, `git-commit`,
-  `source-date-epoch`, `iso-name`, `alpine-branch`, `aports-commit`, `inputs-list-sha256`, and
-  `signer:` lines.
+  `source-date-epoch`, `iso-name`, `alpine-branch`, `aports-commit`, `inputs-list-sha256`,
+  `sources-list-sha256`, and `signer:` lines.
 - **`input-*` fields** for upstream inputs. These live *inside* the archive, so a reader running the
   checksum command does not have them on disk; recording them as checksum lines would produce a
   spurious failure for everyone.
@@ -217,6 +246,10 @@ manifest *because* the manifest names the inputs.
 
 `inputs-list-sha256` does the real work: it pins the archive to `build/inputs.sha256` **as committed at
 the tag**, so a swapped archive is caught even if the asset were replaced in place.
+
+`sources-list-sha256` is the same binding for `aobs-sources-vMAJOR.MINOR.tar` against
+`build/sources.sha256`. #71 made the corresponding source an *accompaniment* rather than a pointer,
+and an accompaniment nobody can pin is a pointer again — at whoever last uploaded the asset.
 
 **Signers cannot disagree.** They sign the same file, so a divergence is CI declining to sign —
 absence, not conflict. One good builder signature is the bar; a missing witness signature is reported,

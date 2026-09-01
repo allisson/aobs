@@ -7,7 +7,7 @@
 # it is meant to be read before it is run.
 #
 #     ./verify-release.sh                 # verifies the files in this directory
-#     ./verify-release.sh --iso-only      # skip the 360 MB input archive
+#     ./verify-release.sh --iso-only      # skip the input and source archives
 #
 # It is a **convenience, not an authority**. The README gives the two raw commands first, and they
 # are the whole of the verification:
@@ -115,11 +115,14 @@ HASHLINES=$(grep -E '^[0-9a-f]{64}  ' "$MANIFEST")
 [ -n "$HASHLINES" ] || fail "$MANIFEST carries no checksum lines"
 
 # `sha256sum -c` already fails on a file it cannot open, so a missing file needs no separate loop. But
-# a reader who wants only the ISO and not the 360 MB input archive would get a hard failure here,
-# which is the wrong answer to a reasonable choice. Hence `--iso-only`.
+# a reader who wants only the ISO, and not the ~360 MB input archive or the ~456 MB source archive,
+# would get a hard failure here — which is the wrong answer to a reasonable choice. Hence
+# `--iso-only`. It is a choice about what to *download*, not about what a release must publish: the
+# source archive is the accompanying source for the GPL binaries in the input archive (#71), and it
+# is attached whether or not any given reader fetches it.
 if [ "${1:-}" = "--iso-only" ]; then
 	HASHLINES=$(printf '%s\n' "$HASHLINES" | grep '\.iso$')
-	say "  checking the ISO only, at your request; the input archive is not checked"
+	say "  checking the ISO only, at your request; the input and source archives are not checked"
 fi
 
 printf '%s\n' "$HASHLINES" | sha256sum -c - ||

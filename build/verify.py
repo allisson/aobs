@@ -1097,6 +1097,7 @@ _MANIFEST_REQUIRED = (
     "alpine-branch",
     "aports-commit",
     "inputs-list-sha256",
+    "sources-list-sha256",
 )
 
 
@@ -1105,15 +1106,18 @@ def check_manifest(
     *,
     release_text: str,
     inputs_list_sha256: str,
+    sources_list_sha256: str,
     published: Mapping[str, str],
 ) -> list[Violation]:
-    """The manifest against the three things it must not be allowed to disagree with.
+    """The manifest against the four things it must not be allowed to disagree with.
 
     `/etc/aobs-release` — because #61 settled that the manifest's `release` and `git-commit` are
     *generated from that file* rather than assembled independently, so there is nothing for the
     image and the manifest to disagree about. The sha256 of `build/inputs.sha256` as committed at
     the tag — `inputs-list-sha256` is the field doing the real work, pinning the archive to a list a
-    reader can regenerate from a `git checkout`, so an asset replaced in place is still caught. And
+    reader can regenerate from a `git checkout`, so an asset replaced in place is still caught;
+    `sources-list-sha256` does the same for the source archive, which #71 made an accompaniment
+    under GPLv2 §3(a) rather than a pointer at Alpine's distfiles host. And
     the files published beside it, whose block must be `sha256sum -c` format exactly, because the
     documented one-liner is `grep … | sha256sum -c -` and a hash the manifest gets wrong is a
     verification failure for every reader.
@@ -1165,6 +1169,17 @@ def check_manifest(
                 "it is what pins the archive to the source, so an archive replaced in place on "
                 "GitHub Releases is still caught",
                 f"{fields['inputs-list-sha256']}, the committed list hashes to {inputs_list_sha256}",
+            )
+        )
+
+    if "sources-list-sha256" in fields and fields["sources-list-sha256"] != sources_list_sha256:
+        violations.append(
+            Violation(
+                "sources-list-sha256 is the sha256 of build/sources.sha256 as committed at the tag: "
+                "#71 made the corresponding source an accompaniment rather than a pointer, and an "
+                "accompaniment nobody can pin is a pointer again",
+                f"{fields['sources-list-sha256']}, the committed list hashes to "
+                f"{sources_list_sha256}",
             )
         )
 

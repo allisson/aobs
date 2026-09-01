@@ -114,6 +114,15 @@ function of that set: the `.apk` files, the minirootfs and the kernel tarball ar
 `CLOSURES.txt` and `NOTICE` are derived from them, and there is nothing left that Alpine can rewrite
 between two fetches. That was not true while the indexes were archived — see claim 5.
 
+**The source archive is deliberately outside this claim, and outside claim 5.**
+`aobs-sources-vMAJOR.MINOR.tar` (#71) is the corresponding source for the copyleft-touched packages, published
+beside the input archive. Every byte in it is pinned — the recipe files by aports commit, the
+tarballs by the `sha512sums` at that commit — and `build/sources.sha256` lists them, bound to the
+signed manifest by `sources-list-sha256`. But **no build reads it**, so it is not in `build/inputs/`
+and stage 0's set-equality check does not see it. Putting it there would have made every witness
+build and every 2030 rebuild fetch ~456 MB the build is required to possess and required never to
+open — and it would have made claim 5 a statement about bytes that cannot affect the ISO.
+
 **8. A rebuild that diverges says where.** `mkiso.sh` prints the sha256 of every intermediate it
 already produced — the rootfs tree manifest, `bzImage`, `initramfs.zst`, `efi.img`, the ISO — and the
 CI guard names the first rung that differs. The ladder lives in `mkiso.sh` rather than in a CI script

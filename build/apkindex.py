@@ -46,11 +46,60 @@ from __future__ import annotations
 
 import gzip
 import io
+import re
 import sys
 import tarfile
 from pathlib import Path
 
 REPOSITORIES = ("main", "community")
+
+#: The copyleft families whose sources #71 archives. Matched as whole tokens against Alpine's own
+#: `L:` field — the same string `--notice` prints — because that field is what #70's census was
+#: taken over and what makes the 446.3 MB figure reproducible from `build/inputs.sha256`.
+#:
+#: **This is Alpine's declaration, not an audit.** #70 was explicit that nobody read the packages'
+#: own `COPYING` files, so a package Alpine mislabels as permissive is a package whose source this
+#: predicate does not fetch. The predicate is deliberately wider than the strict obligation to leave
+#: room for that: GPLv2-only is the 18 `.apk` files with no other permitted route, and everything
+#: else here is fetched so that no copyleft claim in `NOTICE` rests on a host this project does not
+#: control. MPL is matched at 2.0 and later only, following the census that produced the figure.
+_COPYLEFT = re.compile(r"(?:^|[^A-Za-z0-9])(?:[AL]?GPL|MPL-[2-9]|EPL|CDDL)(?![A-Za-z])", re.I)
+
+
+def is_copyleft(licence: str) -> bool:
+    """Does this `L:` field oblige us to accompany the binary with its source?
+
+    A miss here is silent in the direction that matters: the release ships, the archive verifies
+    against its own list, and a GPL binary goes out with no source beside it. That is why the
+    predicate is a tested pure function and not a `grep -i gpl` in the fetch script.
+    """
+    return bool(_COPYLEFT.search(licence))
+
+
+def copyleft_origins(stanzas: list[dict[str, str]]) -> list[tuple[str, str, str]]:
+    """The distinct copyleft origins to fetch source for: `(origin, aports-commit, licence)`, sorted.
+
+    The fetcher walks *origins*, not packages — 18 `.apk` files come from 9 origin aports, and one
+    aport builds one set of tarballs however many subpackages it splits into.
+
+    **Two `.apk` files from one origin at two different commits is a hard failure.** It should not
+    happen inside a single branch snapshot, and if it does there is no single recipe to fetch:
+    picking either one archives source that did not build the other binary, which is worse than no
+    source at all because it looks like compliance.
+    """
+    found: dict[str, tuple[str, str]] = {}
+    for stanza in stanzas:
+        origin = stanza.get("origin", "")
+        if not origin or not is_copyleft(stanza.get("licence", "")):
+            continue
+        commit = stanza.get("aports-commit", "")
+        seen = found.setdefault(origin, (commit, stanza.get("licence", "")))
+        if seen[0] != commit:
+            raise SystemExit(
+                f"{origin} is recorded at two aports commits, {seen[0]} and {commit}: "
+                "there is no single recipe to archive source from"
+            )
+    return sorted((origin, commit, licence) for origin, (commit, licence) in found.items())
 
 #: `P:` name, `V:` version, `c:` aports commit. Alpine's index format is stanzas of `KEY:value`
 #: lines separated by blank lines, and apk's own filenames are `<P>-<V>.apk`. Only what the two
@@ -155,16 +204,26 @@ non-reproducible between two fetches of the same package set. `build/mkiso.sh` g
 index from the `.apk` files below and installs with `--allow-untrusted`, because the trust those
 files carry is the sha256 list in this repository's git history, checked before any of them is read.
 
-Several are under the GPL (busybox, kbd, grub among them). The per-package licence below is the one
-declared in each package's own `.PKGINFO` — the same file Alpine's index is generated from — and the
-**aports commit** is the commit of <https://gitlab.alpinelinux.org/alpine/aports> that built that
-package. Written offer: the corresponding build recipes are those in the aports tree at the commit
-named for each package.
+Several are under a copyleft licence. `busybox` is **GPL-2.0-only**, which is the hard case: GPLv2
+§3 offers no third-party-server route, so a pointer at somebody else's host is not one of the three
+things §3 permits. (`kbd` is GPL-2.0-**or-later** and `grub` GPL-3.0-or-later; both carry the "or
+later" escape and could have used GPLv3 §6(d). Only the first of those three is the hard case, and
+an earlier version of this file named all three as if they were alike.)
 
-**Buildable upstream sources are not promised.** Alpine's distfiles retention is unverified and
-plausibly as lossy as its `.apk` retention, so a claim that the sources remain downloadable is a
-claim nobody has checked. What the commits above do guarantee is locatable recipes in a history that
-does not expire.
+The per-package licence below is the one declared in each package's own `.PKGINFO` — the same file
+Alpine's index is generated from — and the **aports commit** is the commit of
+<https://gitlab.alpinelinux.org/alpine/aports> that built that package.
+
+**The corresponding source is published beside this archive**, as `aobs-sources-<release>.tar` on
+the same GitHub release, and its sha256 is bound by the signed manifest's `sources-list-sha256`.
+It carries, for every origin aport below whose licence names a GPL, LGPL, AGPL, MPL-2, EPL or CDDL
+term: the `APKBUILD` and every patch and local file at the exact commit recorded here, plus the
+upstream tarballs that recipe names. That is an accompaniment under GPLv2 §3(a) rather than an offer
+or a pointer — the bytes travel with the binaries instead of depending on a host nobody here
+controls.
+
+For a package whose licence names none of those terms, no source is archived and the recipe commit
+below is the record.
 
   package | licence | origin aport | aports commit
 """
@@ -194,6 +253,14 @@ def main(argv: list[str]) -> int:
 
     if rest[:1] == ["--notice"]:
         sys.stdout.write(notice(directory))
+        return 0
+
+    if rest[:1] == ["--copyleft-origins"]:
+        # One line per origin: `origin<TAB>aports-commit<TAB>licence`, for `build/fetch-sources.sh`
+        # to walk. Read from the archived `.apk` files rather than from an index, so it answers the
+        # same way in 2030 from an unpacked release asset with no network (#68).
+        for origin, commit, licence in copyleft_origins([pkginfo(p) for p in _archived(directory)]):
+            print(f"{origin}\t{commit}\t{licence}")
         return 0
 
     if rest[:1] == ["--aports-commit"]:
