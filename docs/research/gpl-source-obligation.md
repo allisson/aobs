@@ -5,8 +5,8 @@ Research for [#70](https://github.com/allisson/aobs/issues/70), under the map
 not make the decision the ticket blocks.**
 
 Every observation below was made on **2026-09-01** against `distfiles.alpinelinux.org`,
-`dl-cdn.alpinelinux.org`, `gitlab.alpinelinux.org`, `mirrors.alpinelinux.org` and the Internet
-Archive, using this repo's own `build/inputs.sha256` as the package set. Commands are given so a
+`dl-cdn.alpinelinux.org`, `gitlab.alpinelinux.org`, `mirrors.alpinelinux.org`, `www.gnu.org` and the
+Internet Archive, using this repo's own `build/inputs.sha256` as the package set. Commands are given so a
 reader can re-run them. Licence texts are quoted from the canonical texts, not paraphrased.
 
 ---
@@ -31,6 +31,12 @@ that it is available." GPLv2 §3 has **no such allowance**: its only network rou
 equivalent access to copy the source code **from the same place**." Nine of our origin aports (18
 `.apk` files) are GPLv2-only-family with no "or later" escape — **busybox among them** — and for those
 the third-party pointer is not one of the three permitted routes.
+
+**The FSF's own FAQ says the same, and only under GPLv3.** Asked our exact question — binaries on one
+server, source on another — it answers "Yes. **Section 6(d)** allows this", with clear instructions
+and a duty to keep the source available; it offers no GPLv2 route. And the one entry addressing a
+recipes-only pointer rejects it, for the reason this file measures: "a user that wants the source a
+year from now may be unable to get the proper version from another site at that time" (§2.3).
 
 Three further facts sharpen it:
 
@@ -289,7 +295,69 @@ And §1's definition of what must be available:
 
 Same shape as GPLv2: recipe *plus* upstream source, not recipe alone.
 
-### 2.3 `NOTICE`'s "Written offer" section is not a written offer
+### 2.3 The FSF's own reading agrees, and is narrower than the licence text alone
+
+`www.gnu.org/licenses/gpl-faq.html`, fetched 2026-09-01. Four entries are directly on point, and the
+striking thing is not any single answer but **which licence each answer is given under**.
+
+> **Can I put the binaries on my Internet server and put the source on a different Internet site?**
+> (`#SourceAndBinaryOnDifferentSites`)
+> Yes. **Section 6(d)** allows this. However, you must provide clear instructions people can follow to
+> obtain the source, and **you must take care to make sure that the source remains available for as
+> long as you distribute the object code.**
+
+This is our exact question, and the FSF answers it **only under GPLv3 §6(d)**. It offers no GPLv2
+equivalent — consistent with §2.1, where GPLv2 §3 has no such route to offer. The durability duty is
+restated in the FSF's own words, and it is unconditional on who runs the server.
+
+> **Am I complying with GPLv3 if I offer binaries on an FTP server and sources by way of a link to a
+> source code repository in a version control system, like CVS or Subversion?** (`#SourceInCVS`)
+> This is acceptable as long as the source checkout process does not become burdensome or otherwise
+> restrictive. […] Users should be provided with clear and convenient instructions for how to get the
+> source **for the exact object code they downloaded** — they may not necessarily want the latest
+> development code, after all.
+
+Good news for the GPLv3 half of the archive: a VCS link is explicitly blessed, and the "exact object
+code" requirement is precisely what the per-package `c:` commit in the archive's `NOTICE` satisfies
+(§1.3). Again scoped to GPLv3.
+
+> **Can I make binaries available on a network server, but send sources only to people who order
+> them?** (`#AnonFTPAndSendSources`)
+> […] you can alternatively provide instructions for getting the source from another server, or even
+> a version control system. No matter what you do, **the source should be just as easy to access as
+> the object code**, though. **This is all specified in section 6(d) of GPLv3.**
+
+A bar worth noting against §1.7: the object code is a GitHub release asset; the source would be one
+unmirrored nginx host. Whether that clears "just as easy to access" is arguable, and nobody has argued
+it.
+
+> **I want to distribute binaries, but distributing complete source is inconvenient. Is it ok if I
+> give users the diffs from the "standard" version along with the binaries?**
+> (`#DistributingSourceIsInconvenient`)
+> This is a well-meaning request, but this method of providing the source doesn't really do the job.
+> **A user that wants the source a year from now may be unable to get the proper version from another
+> site at that time.** […] So you need to provide complete sources, not just diffs, with the binaries.
+
+This is the closest thing in the FAQ to a verdict on our current posture, and it is unfavourable. The
+aports recipe **is** the diffs-and-scripts half; distfiles **is** the "another site"; and the FSF's
+stated reason for rejecting the arrangement is exactly the durability worry §1.6 and §1.7 measure.
+
+One more, confirming §2.1's third point:
+
+> **I downloaded just the binary from the net. If I distribute copies, do I have to get the source and
+> distribute that too?** (`#UnchangedJustBinary`)
+> Yes. The general rule is, if you distribute binaries, you must distribute the complete corresponding
+> source code too. **The exception for the case where you received a written offer for source code is
+> quite limited.**
+
+We fetched the `.apk` files from a CDN, with no written offer attached, so §3(c) is not available to
+us — the FSF's "quite limited" exception is the one we do not qualify for.
+
+**Net effect: the FAQ confirms the reading in §2.1 and §2.2 and tightens it.** Every permission the
+FSF grants for source-on-another-site is granted under GPLv3 §6(d); the one entry that addresses a
+recipes-only pointer rejects it, on third-party-site durability grounds.
+
+### 2.4 `NOTICE`'s "Written offer" section is not a written offer
 
 `NOTICE:41-53` is headed **Written offer** and reads, in full:
 
@@ -309,7 +377,7 @@ Read against §2.1, this is:
 The heading claims a licence route the body does not take. That is a documentation defect
 independent of whichever posture the project settles on.
 
-### 2.4 Which packages are actually affected, and by which licence
+### 2.5 Which packages are actually affected, and by which licence
 
 Licence census over the 182 `.apk` files in `build/inputs.sha256`, read from Alpine's own `L:` field:
 
@@ -349,7 +417,7 @@ toolchain package whose distfile is a vanilla kernel tarball, the same *kind* of
 already carries one of (`linux-6.12.106.tar.xz`, `build/inputs.sha256`). **Without it, the entire
 GPLv2-only-family source set is 23.7 MB** — under 7% of the 360 MB archive #57 was weighing.
 
-### 2.5 The one distributor whose practice was directly observed
+### 2.6 The one distributor whose practice was directly observed
 
 Alpine itself. It hosts the recipes (`gitlab.alpinelinux.org/alpine/aports`) **and** the
 corresponding sources (`distfiles.alpinelinux.org`), both on its own infrastructure, and both
@@ -379,22 +447,29 @@ Stated so the decision in #57 can be re-opened against evidence rather than assu
 
 3. **GPLv3 and GPLv2 diverge, and the split is measurable**: §6(d) allows a third-party server for the
    GPLv3 and "or later" packages; GPLv2 §3 allows it for none. **9 origins / 18 `.apk` files** are in
-   the GPLv2-only family, busybox among them (§2.4).
+   the GPLv2-only family, busybox among them (§2.5).
 
-4. **Even under §6(d), the durability duty stays with us** — "you remain obligated to ensure that it
+4. **The FSF's own FAQ confirms the split and rejects the recipes-only shape** (§2.3). Every
+   permission it grants for source-on-another-site is granted under GPLv3 §6(d), never under GPLv2;
+   and `#DistributingSourceIsInconvenient` refuses a diffs-and-scripts pointer precisely because the
+   other site may not have the right version later. It also *helps* the GPLv3 half: `#SourceInCVS`
+   blesses a VCS link, and asks for instructions naming "the exact object code" — which is what the
+   archive's per-package `c:` commit already provides.
+
+5. **Even under §6(d), the durability duty stays with us** — "you remain obligated to ensure that it
    is available" — and the host is a **single unmirrored nginx box** (§1.7) that was wholesale-pruned
    once, in a window between 2025-09-06 and 2026-01-20, on no published policy (§1.6).
 
-5. **The byte cost is now a number, not a fear.** 766.0 MB for everything; **446.3 MB** for the
+6. **The byte cost is now a number, not a fear.** 766.0 MB for everything; **446.3 MB** for the
    copyleft-touched subset; **180.8 MB** for the strict GPLv2-only family; **23.7 MB** for that family
-   minus the `linux-headers` kernel tarball (§2.4). #57 weighed "multiplying a 360 MB archive"; the
+   minus the `linux-headers` kernel tarball (§2.5). #57 weighed "multiplying a 360 MB archive"; the
    narrowest honest scope is **under 7%** of it.
 
-6. **`NOTICE`'s "Written offer" heading names a licence route its text does not take** (§2.3), and its
-   example trio mis-selects two easy cases as if they were hard (§2.4). Both are defects regardless of
+7. **`NOTICE`'s "Written offer" heading names a licence route its text does not take** (§2.4), and its
+   example trio mis-selects two easy cases as if they were hard (§2.5). Both are defects regardless of
    which posture is chosen.
 
-7. **Upstream is already lossy at t=0**: `ncurses-6.6-20260516.tgz` 404s upstream today and survives
+8. **Upstream is already lossy at t=0**: `ncurses-6.6-20260516.tgz` 404s upstream today and survives
    only on distfiles (§1.5). "The rebuilder can fetch from upstream" is false for at least one package
    on the day of release.
 
@@ -420,31 +495,22 @@ Recorded because these gaps bound how far the facts above can be pushed.
 - **No lawyer reviewed this.** §2 is a reading of the licence texts, quoted verbatim so the reading
   can be checked. It is not legal advice, and the "same place" phrase in GPLv2 §3 has no definition
   inside the licence.
-- **The FSF's own gloss was not obtained.** `www.gnu.org/licenses/gpl-faq.html` timed out on every
-  attempt from this network (the GPLv2 text itself was fetched successfully earlier in the same
-  session, so this is intermittent rather than a block). The FAQ has entries directly on point —
-  binaries and source on different sites — and they were **not read**. Anyone re-opening this should
-  start there.
-- **The prior-art survey was not completed.** Only Alpine's own practice was directly observed
-  (§2.5). `wiki.alpinelinux.org` returned **403** to scripted fetches, with a browser user-agent too;
-  the postmarketOS and OpenWrt pages that did fetch were not on point. What other redistributors of
-  Alpine binaries do — postmarketOS, the official Alpine Docker images, other appliance projects —
-  **is still an open question**, and it is half of what #70 asked for.
-- **Two of the sources that would settle §2 fastest were unreachable from this network, not
-  missing.** `www.gnu.org/licenses/gpl-faq.html` and `wiki.alpinelinux.org` both failed repeatedly
-  while `gitlab.alpinelinux.org`, `distfiles.alpinelinux.org`, `dl-cdn.alpinelinux.org` and
-  `web.archive.org` all answered normally throughout. A session on a different network should simply
-  retry those two before assuming anything.
+- **The prior-art survey was not completed — this is the one part of #70 still open.** Only Alpine's
+  own practice was directly observed (§2.6). `wiki.alpinelinux.org` returns **403** to scripted
+  fetches even with a browser user-agent, and `wiki.postmarketos.org` returns an identical 7448-byte
+  shell for every page, real or not — so neither was read. What other redistributors of Alpine
+  binaries do — postmarketOS, the official Alpine Docker images, other appliance projects — **is still
+  unanswered**, and it needs a browser or a different approach rather than another retry.
 - **No Alpine retention policy for distfiles was found.** The 2025 deletion window in §1.6 is
   inferred from Internet Archive snapshots, not from an Alpine announcement, and one event cannot
   distinguish a capacity cleanup from an EOL rule from a keep-last-N rule.
-- **Licences are as Alpine declares them.** The census in §2.4 reads the `L:` field of Alpine's own
+- **Licences are as Alpine declares them.** The census in §2.5 reads the `L:` field of Alpine's own
   `APKINDEX`, the same metadata `build/apkindex.py` uses. It was **not** audited against the packages'
   actual `COPYING` files. A declared SPDX expression can be wrong, stale, or incomplete — and for a
   compliance decision that is a real limitation, not a formality.
 - **The appliance/toolchain split of the byte figures was not separated.** Which package belongs to
   which closure is recorded in `CLOSURES.txt` *inside a built archive*, and this session did not build
-  one. Every figure in §2.4 is archive-scope — both closures — which is the right scope for the
+  one. Every figure in §2.5 is archive-scope — both closures — which is the right scope for the
   obligation, since the archive redistributes both, but it means "what would it cost for the ISO
   alone" is unanswered.
 - **Dependency-closure completeness was not re-derived.** The 182 `.apk` set is taken from
@@ -493,7 +559,7 @@ curl -s -o /dev/null -w '%{http_code}\n' \
   https://mirrors.sdu.edu.cn/distfiles/v3.24/definitely-not-a-real-file-xyz.tar.gz   # -> 200
 ```
 
-The §1.3 and §2.4 sweeps — 182 `.apk` → 114 origins → 123 tarballs → sizes and licences — were run as
+The §1.3 and §2.5 sweeps — 182 `.apk` → 114 origins → 123 tarballs → sizes and licences — were run as
 a script over `build/inputs.sha256`, the two `APKINDEX` files, the 114 APKBUILDs, and a `HEAD` of each
 tarball against both `distfiles/v3.24/` and its own upstream URL. Re-running it is the way to check
 whether any of the numbers above have moved.
