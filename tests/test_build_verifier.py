@@ -883,6 +883,8 @@ def test_a_preflight_with_no_manifest_yet_judges_the_other_three() -> None:
 _ISO_SHA = "a" * 64
 _ARCHIVE_SHA = "b" * 64
 _LIST_SHA = "c" * 64
+_SOURCES_SHA = "e" * 64
+_SOURCES_ARCHIVE_SHA = "1" * 64
 
 
 def _manifest(**overrides: str) -> str:
@@ -897,6 +899,7 @@ def _manifest(**overrides: str) -> str:
         "alpine-branch": "v3.24",
         "aports-commit": "0934530484bbcde7498e2c694c710a49616a450e",
         "inputs-list-sha256": _LIST_SHA,
+        "sources-list-sha256": _SOURCES_SHA,
     }
     fields.update(overrides)
     return (
@@ -906,12 +909,14 @@ def _manifest(**overrides: str) -> str:
         + "input-kernel: linux-6.12.106.tar.xz sha256=" + "d" * 64 + "\n"
         + f"{_ISO_SHA}  bitcoin-signer-amd64.iso\n"
         + f"{_ARCHIVE_SHA}  aobs-inputs-v1.0.tar\n"
+        + f"{_SOURCES_ARCHIVE_SHA}  aobs-sources-v1.0.tar\n"
     )
 
 
 _PUBLISHED = {
     "bitcoin-signer-amd64.iso": _ISO_SHA,
     "aobs-inputs-v1.0.tar": _ARCHIVE_SHA,
+    "aobs-sources-v1.0.tar": _SOURCES_ARCHIVE_SHA,
 }
 
 
@@ -919,6 +924,7 @@ def _judge_manifest(text: str, **overrides) -> list:
     arguments = {
         "release_text": _release_file(),
         "inputs_list_sha256": _LIST_SHA,
+        "sources_list_sha256": _SOURCES_SHA,
         "published": _PUBLISHED,
     }
     arguments.update(overrides)
@@ -943,7 +949,16 @@ def test_the_documented_one_liner_extracts_exactly_the_published_files() -> None
 
 
 @pytest.mark.parametrize(
-    "field", ["format", "release", "git-tag", "git-commit", "iso-name", "inputs-list-sha256"]
+    "field",
+    [
+        "format",
+        "release",
+        "git-tag",
+        "git-commit",
+        "iso-name",
+        "inputs-list-sha256",
+        "sources-list-sha256",
+    ],
 )
 def test_a_manifest_missing_a_field_says_which_one(field: str) -> None:
     text = "\n".join(
@@ -966,6 +981,14 @@ def test_a_manifest_naming_the_wrong_input_list_is_rejected() -> None:
     can regenerate from a `git checkout`, so an asset replaced in place is still caught."""
     violations = _judge_manifest(_manifest(**{"inputs-list-sha256": "f" * 64}))
     assert [v for v in violations if "inputs-list-sha256" in v.claim]
+
+
+def test_a_manifest_naming_the_wrong_source_list_is_rejected() -> None:
+    """#71: the source archive is an accompaniment under GPLv2 §3(a), not a pointer, so it needs the
+    same binding `inputs-list-sha256` gives the input archive. Without it a source asset replaced in
+    place still matches its own hash, and the accompaniment is whatever the last uploader said."""
+    violations = _judge_manifest(_manifest(**{"sources-list-sha256": "f" * 64}))
+    assert [v for v in violations if "sources-list-sha256" in v.claim]
 
 
 def test_a_manifest_with_a_wrong_published_hash_is_rejected() -> None:
@@ -1193,3 +1216,88 @@ def test_a_missing_aports_marker_is_a_hard_failure_and_not_an_empty_field() -> N
                                              encoding="utf-8")
         with pytest.raises(SystemExit):
             gather._aports_commit(inputs)
+
+
+# --- The source archive (#71) --------------------------------------------------------------------
+#
+# #71 settled that the copyleft-touched sources are archived rather than pointed at, and the scope
+# is a predicate over Alpine's own `L:` field. That predicate decides which of 113 origin aports get
+# their tarballs fetched, so it is the one place where a silent miss ships a release that redistributes
+# a GPL binary with no accompanying source — which is exactly the shape #70 measured and #57 assumed
+# away. Every string below is a licence Alpine actually declares for a package in `build/inputs.sha256`.
+
+apkindex = _load_by_path(BUILD / "apkindex.py")
+
+
+@pytest.mark.parametrize(
+    "licence",
+    [
+        "GPL-2.0-only",
+        "GPL-2.0-or-later",
+        "GPL-3.0-or-later",
+        "LGPL-2.1-or-later",
+        "AGPL-3.0-or-later",
+        "BSD-3-Clause AND GPL-2.0-only",
+        "BSD-3-Clause; LGPL-1.0-only; LGPL-2.1-or-later",
+        "GPL-2.0-only WITH Linux-syscall-note",
+        "MPL-2.0",
+        "MPL-2.0 AND MIT",
+        "EPL-1.0",
+        "CDDL-1.0",
+    ],
+)
+def test_a_copyleft_licence_puts_its_origin_in_the_source_archive(licence: str) -> None:
+    assert apkindex.is_copyleft(licence), licence
+
+
+@pytest.mark.parametrize(
+    "licence",
+    [
+        "MIT",
+        "BSD-3-Clause",
+        "ISC",
+        "Apache-2.0",
+        "Zlib",
+        "MIT AND BSD-2-Clause",
+        "Public-Domain",
+        "",
+    ],
+)
+def test_a_permissive_licence_is_left_to_its_own_terms(licence: str) -> None:
+    """766 MB is every origin; the archive is the 446 MB we owe source for, and no more."""
+    assert not apkindex.is_copyleft(licence), licence
+
+
+def test_the_predicate_reads_whole_tokens_and_not_substrings() -> None:
+    """`LGPL` must not be missed and a licence that merely spells `gpl` inside a longer word must not
+    be swept in. The failure mode is silent in both directions, which is why it is asserted."""
+    assert apkindex.is_copyleft("LGPL-3.0-or-later")
+    assert not apkindex.is_copyleft("Ungplish-1.0")
+
+
+def test_the_copyleft_origin_list_is_deduplicated_and_sorted() -> None:
+    """18 `.apk` files come from 9 origins; the fetcher walks origins, so a repeated origin would
+    fetch the same 157 MB tarball twice and a missing sort would make `build/sources.sha256` a
+    function of directory order rather than of the input set."""
+    stanzas = [
+        {"origin": "busybox", "licence": "GPL-2.0-only", "aports-commit": "c" * 40},
+        {"origin": "busybox", "licence": "GPL-2.0-only", "aports-commit": "c" * 40},
+        {"origin": "acl", "licence": "LGPL-2.1-or-later", "aports-commit": "a" * 40},
+        {"origin": "musl", "licence": "MIT", "aports-commit": "m" * 40},
+    ]
+    assert apkindex.copyleft_origins(stanzas) == [
+        ("acl", "a" * 40, "LGPL-2.1-or-later"),
+        ("busybox", "c" * 40, "GPL-2.0-only"),
+    ]
+
+
+def test_one_origin_at_two_commits_is_a_hard_failure() -> None:
+    """Two `.apk` files from the same origin must carry the same `c:`; if they do not, the fetcher
+    has no single recipe to fetch and picking either silently archives source for the wrong build."""
+    with pytest.raises(SystemExit):
+        apkindex.copyleft_origins(
+            [
+                {"origin": "busybox", "licence": "GPL-2.0-only", "aports-commit": "c" * 40},
+                {"origin": "busybox", "licence": "GPL-2.0-only", "aports-commit": "d" * 40},
+            ]
+        )

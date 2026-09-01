@@ -175,6 +175,7 @@ def main(argv: list[str]) -> int:
                 _read(manifest),
                 release_text=_read(release_file),
                 inputs_list_sha256=_sha256(Path(source) / "build" / "inputs.sha256"),
+                sources_list_sha256=_sha256(Path(source) / "build" / "sources.sha256"),
                 published=_published(published),
             )
         )
@@ -396,6 +397,14 @@ iso-name: {iso_name}
 
 inputs-list-sha256: {inputs_list_sha256}
 
+# The same binding for the source archive, `aobs-sources-<release>.tar`. #71 settled that the
+# corresponding source for every copyleft-touched origin is *published beside* the binaries rather
+# than pointed at on Alpine's distfiles host — GPLv2 §3 grants no third-party-server route, and even
+# where GPLv3 §6(d) does, the duty to keep it available stays here. An accompaniment nobody can pin
+# is a pointer again, so it gets the field the input archive gets.
+
+sources-list-sha256: {sources_list_sha256}
+
 # The inputs. These live inside the archive named in the file list below, so their hashes are
 # recorded as fields rather than as checksum lines: a reader running the `sha256sum -c` one-liner has
 # the archive on disk, not its contents.
@@ -457,6 +466,7 @@ def _manifest(source: str, release_file: str, published: str) -> str:
         source_date_epoch=embedded["source-date-epoch"],
         iso_name=iso,
         inputs_list_sha256=_sha256(root / "build" / "inputs.sha256"),
+        sources_list_sha256=_sha256(root / "build" / "sources.sha256"),
         alpine_branch=_alpine_branch(root),
         aports_commit=aports,
         inputs="".join(f"{line}\n" for line in input_lines),

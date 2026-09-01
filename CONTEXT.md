@@ -204,6 +204,17 @@ reproducible. A byte upstream can rewrite on its own schedule — Alpine's packa
 worked example — is not an input the archive can hold, because holding it makes two fetches of the
 same package set produce two different archives.
 
+## Source archive
+
+The corresponding source for every copyleft-touched package the input archive redistributes: each
+origin aport's recipe and patches at the exact commit that built the binary, plus the upstream
+tarballs that recipe names. Published beside the input archive as its own release asset.
+
+**It is an accompaniment, not an input.** No build reads a byte of it — which is why it is a second
+archive with a second list rather than a larger first one. What makes it the *corresponding* source
+is the pinning: the recipe half comes from a commit the binary's own metadata records, and the
+tarball half is verified against the checksums in that same commit.
+
 ## Witness build
 
 An independent rebuild of a release by someone other than the builder, published so that a third
