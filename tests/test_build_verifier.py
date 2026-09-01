@@ -611,7 +611,33 @@ def test_no_apkindex_is_pinned_because_alpine_rewrites_it_on_its_own_schedule() 
     )
 
 
-def test_the_generated_index_rewrites_the_arch_of_noarch_packages() -> None:
+#: Every file that installs `.apk` files out of `build/inputs/`. There are **two**, they are easy to
+#: change apart, and the second one is the one that got missed: `Dockerfile.iso` installs the
+#: toolchain closure into the builder before `mkiso.sh` exists to run, so it needs its own index and
+#: its own flags. CI caught it as `opening .../APKINDEX.tar.gz: No such file or directory` followed
+#: by `unable to select packages` — after a green test suite, because nothing here was looking.
+INSTALLS_FROM_INPUTS = ("mkiso.sh", "Dockerfile.iso")
+
+
+def _installer(name: str) -> str:
+    return (BUILD / name).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("name", INSTALLS_FROM_INPUTS)
+def test_every_place_that_installs_from_the_archive_generates_its_own_index(name: str) -> None:
+    """`apk` cannot resolve a local repository without an index, and none is archived (#68)."""
+    text = _installer(name)
+    assert "apk add" in text or "add $PACKAGES" in text, (
+        f"{name} is in INSTALLS_FROM_INPUTS but installs nothing — fix the list, not the test"
+    )
+    assert [line for line in text.splitlines() if line.strip().startswith("apk index")], (
+        f"{name} installs from build/inputs/ without generating an index first: no Alpine index is "
+        "archived, so `apk` has nothing to resolve against"
+    )
+
+
+@pytest.mark.parametrize("name", INSTALLS_FROM_INPUTS)
+def test_every_generated_index_rewrites_the_arch_of_noarch_packages(name: str) -> None:
     """`--rewrite-arch` is load-bearing, and without it the error names the wrong cause.
 
     Alpine's published index for an arch directory rewrites `A:noarch` to that arch. A plain
@@ -620,26 +646,25 @@ def test_the_generated_index_rewrites_the_arch_of_noarch_packages() -> None:
     subpackage — each reported as `package mentioned in index not found (try 'apk update')`, on a
     directory where the file is present and the index was generated a second earlier.
     """
-    mkiso = (BUILD / "mkiso.sh").read_text(encoding="utf-8")
-    assert "apk index" in mkiso, "the build generates its own local repository index"
-    index_calls = [line for line in mkiso.splitlines() if line.strip().startswith("apk index")]
-    assert index_calls, "the `apk index` call is code, not only prose"
-    assert all("--rewrite-arch x86_64" in line for line in index_calls), (
-        "apk index without --rewrite-arch leaves noarch packages unfindable, which reads as a "
-        "successful build missing a third of the rootfs"
+    calls = [line for line in _installer(name).splitlines() if line.strip().startswith("apk index")]
+    assert calls, "the `apk index` call is code, not only prose"
+    assert all("--rewrite-arch x86_64" in line for line in calls), (
+        f"{name} runs apk index without --rewrite-arch, which leaves every noarch package "
+        "unfindable under the arch directory it is actually in"
     )
 
 
-def test_the_install_states_that_it_allows_an_untrusted_index_rather_than_hiding_it() -> None:
+@pytest.mark.parametrize("name", INSTALLS_FROM_INPUTS)
+def test_every_install_states_that_it_allows_an_untrusted_index(name: str) -> None:
     """A locally generated index carries no Alpine signature, and the build says so out loud.
 
     The alternative considered and rejected was a self-signed index: it would satisfy `apk` with a
     key this build minted and read like a signature check to anyone who did not look. What replaces
     Alpine's install-time check is stage 0's, over every byte that index describes.
     """
-    mkiso = (BUILD / "mkiso.sh").read_text(encoding="utf-8")
-    assert "--allow-untrusted" in mkiso
-    assert "abuild-sign" not in mkiso, "a self-signed index is signature theatre, not a check"
+    text = _installer(name)
+    assert "--allow-untrusted" in text
+    assert "abuild-sign" not in text, "a self-signed index is signature theatre, not a check"
 
 
 # --- The toolchain list has exactly one group ---------------------------------------------------

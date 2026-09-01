@@ -49,9 +49,17 @@ today and 2030 is confined to *fetching*, and the *building* is the same code pa
 commit rather than one nobody has exercised since it was written.
 
 The one thing the build produces before it consumes is the local repository's `APKINDEX.tar.gz`,
-generated in `$WORK` from the archived `.apk` files themselves — `apk` cannot resolve a local
-repository without one. It is a function of the input set and not a further input, which is why it
-is not archived and not pinned.
+generated from the archived `.apk` files themselves — `apk` cannot resolve a local repository without
+one. It is a function of the input set and not a further input, which is why it is not archived and
+not pinned.
+
+**It is generated twice, because there are two installs from the archive**, and they are separate:
+`build/Dockerfile.iso` installs the toolchain closure into the builder, before `mkiso.sh` exists to
+run, and `mkiso.sh` installs the appliance closure into the rootfs. Missing the first is not a
+subtle failure — `opening .../APKINDEX.tar.gz: No such file or directory`, then
+`unable to select packages` — but it is a failure the test suite could not see, so
+`tests/test_build_verifier.py` now enumerates both files and asserts each generates an index, with
+the flags, rather than trusting that a change to one reached the other.
 
 **5. `build/inputs/` is checked against `build/inputs.sha256` on hash and on set equality before
 stage 1 runs, and the build refuses otherwise.**
