@@ -5,9 +5,10 @@ Research for [#70](https://github.com/allisson/aobs/issues/70), under the map
 not make the decision the ticket blocks.**
 
 Every observation below was made on **2026-09-01** against `distfiles.alpinelinux.org`,
-`dl-cdn.alpinelinux.org`, `gitlab.alpinelinux.org`, `mirrors.alpinelinux.org`, `www.gnu.org` and the
-Internet Archive, using this repo's own `build/inputs.sha256` as the package set. Commands are given so a
-reader can re-run them. Licence texts are quoted from the canonical texts, not paraphrased.
+`dl-cdn.alpinelinux.org`, `gitlab.alpinelinux.org`, `mirrors.alpinelinux.org`, `www.gnu.org`, GitHub
+and the Internet Archive, using this repo's own `build/inputs.sha256` as the package set. Commands
+are given so a reader can re-run them. Licence texts are quoted from the canonical texts, not
+paraphrased.
 
 ---
 
@@ -417,18 +418,47 @@ toolchain package whose distfile is a vanilla kernel tarball, the same *kind* of
 already carries one of (`linux-6.12.106.tar.xz`, `build/inputs.sha256`). **Without it, the entire
 GPLv2-only-family source set is 23.7 MB** — under 7% of the 360 MB archive #57 was weighing.
 
-### 2.6 The one distributor whose practice was directly observed
+### 2.6 What other redistributors of Alpine binaries actually do
 
-Alpine itself. It hosts the recipes (`gitlab.alpinelinux.org/alpine/aports`) **and** the
-corresponding sources (`distfiles.alpinelinux.org`), both on its own infrastructure, and both
-partitioned by the same release branch. That is the "same place" discharge, done by the party that
-has the standing to do it.
+**Alpine itself** hosts the recipes (`gitlab.alpinelinux.org/alpine/aports`) **and** the corresponding
+sources (`distfiles.alpinelinux.org`), both on its own infrastructure, both partitioned by the same
+release branch. That is the "same place" discharge, done by the party with the standing to do it.
+We are not in that position: we redistribute Alpine's binaries from GitHub release assets, and we
+control neither server.
 
-We are not in Alpine's position: we redistribute Alpine's binaries from GitHub release assets, and we
-control neither of the two servers the compliance story currently rests on.
+**The Docker Official Image for `alpine`** is the largest redistributor of these exact binaries there
+is, and it is the useful comparison because its distribution shape is ours — binaries in a release
+artifact, sources nowhere in it. Three primary sources, all fetched 2026-09-01:
 
-A wider survey of what *other* redistributors of Alpine binaries do was attempted and **not
-completed** — see §4.
+- **The Docker Hub page** (`docker-library/docs`, `alpine/README.md:86-94`) has a `# License` section
+  that offers a link to `pkgs.alpinelinux.org` for "license information for the software contained in
+  this image" — **licence information, not source**. It then says: *"As for any pre-built image usage,
+  it is the image user's responsibility to ensure that any use of this image complies with any
+  relevant licenses for all software contained within."*
+- **`alpinelinux/docker-alpine`**, the image's own repository, has **no licence or source section at
+  all** in its README.
+- **`docker-library/repo-info`** is the closest thing to our `NOTICE`: per tag, per package, it
+  records description, **`license:`** (the same SPDX string from the same `L:` field we read in
+  §2.5), installed size, and a `webpage:` link — `git.alpinelinux.org/cgit/aports/tree/main/<origin>`.
+  **That link carries no commit.** It resolves to the *current* recipe, not the one that built the
+  binary in the image.
+
+So the largest redistributor of Alpine binaries does **strictly less than our `NOTICE` already does**:
+no source, no written offer, and a recipe pointer that is not version-pinned — where ours pins the
+exact per-package commit and was measured at 114/114 resolving (§1.3). Its stated position is to push
+the compliance question onto the downstream user.
+
+**This is a fact about practice, not about legality, and it is not a defence.** "Everyone does it"
+does not appear in GPLv2 §3 or GPLv3 §6, and the FSF entries in §2.3 do not soften for scale. The
+finding is worth recording for exactly one reason: it establishes that no widely-followed convention
+exists for this distribution shape that we could adopt and rely on. There is no industry norm here to
+match — only a common practice of not addressing it, which this project's stated bar (a stranger boots
+this ISO with real funds) is a deliberate choice not to meet.
+
+**postmarketOS could not be observed.** Every postmarketOS host — `wiki.postmarketos.org` and
+`gitlab.postmarketos.org` alike — sits behind an Anubis proof-of-work bot gate that answers every
+scripted request, real page or not, with an identical challenge page. Its practice is **not** recorded
+here, and the 7448-byte responses noted in an earlier draft of this file were that gate, not content.
 
 ---
 
@@ -469,7 +499,13 @@ Stated so the decision in #57 can be re-opened against evidence rather than assu
    example trio mis-selects two easy cases as if they were hard (§2.5). Both are defects regardless of
    which posture is chosen.
 
-8. **Upstream is already lossy at t=0**: `ncurses-6.6-20260516.tgz` 404s upstream today and survives
+8. **There is no industry norm to adopt.** The Docker Official Image for `alpine` — the largest
+   redistributor of these binaries — offers no source, no written offer, and a recipe pointer with no
+   commit in it, and disclaims compliance onto the downstream user (§2.6). Our `NOTICE` already does
+   more than that. This is not a defence, and §2.3 does not soften for scale; it means only that
+   nothing widely-followed exists to copy.
+
+9. **Upstream is already lossy at t=0**: `ncurses-6.6-20260516.tgz` 404s upstream today and survives
    only on distfiles (§1.5). "The rebuilder can fetch from upstream" is false for at least one package
    on the day of release.
 
@@ -495,12 +531,12 @@ Recorded because these gaps bound how far the facts above can be pushed.
 - **No lawyer reviewed this.** §2 is a reading of the licence texts, quoted verbatim so the reading
   can be checked. It is not legal advice, and the "same place" phrase in GPLv2 §3 has no definition
   inside the licence.
-- **The prior-art survey was not completed — this is the one part of #70 still open.** Only Alpine's
-  own practice was directly observed (§2.6). `wiki.alpinelinux.org` returns **403** to scripted
-  fetches even with a browser user-agent, and `wiki.postmarketos.org` returns an identical 7448-byte
-  shell for every page, real or not — so neither was read. What other redistributors of Alpine
-  binaries do — postmarketOS, the official Alpine Docker images, other appliance projects — **is still
-  unanswered**, and it needs a browser or a different approach rather than another retry.
+- **The prior-art survey is partial.** Alpine's own practice and the Docker Official Image's are
+  recorded from primary sources (§2.6). **postmarketOS is not**: every postmarketOS host sits behind
+  an Anubis proof-of-work gate that returns an identical challenge page to any scripted request, so
+  nothing about its practice was read. `wiki.alpinelinux.org` likewise returns **403** to scripted
+  fetches, `action=raw` and `Special:Export` included, with a browser user-agent — which is why no
+  Alpine wiki page is cited anywhere in this file. Both need a real browser, not another retry.
 - **No Alpine retention policy for distfiles was found.** The 2025 deletion window in §1.6 is
   inferred from Internet Archive snapshots, not from an Alpine announcement, and one event cannot
   distinguish a capacity cleanup from an EOL rule from a keep-last-N rule.
