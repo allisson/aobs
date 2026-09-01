@@ -83,20 +83,31 @@ command -v python3 >/dev/null || apk add --no-cache --quiet python3
 rm -rf "$INPUTS"
 mkdir -p "$INPUTS/apks/main/x86_64" "$INPUTS/apks/community/x86_64"
 
-# --- The verbatim indexes ------------------------------------------------------------------------
+# --- The indexes, fetched and then thrown away ----------------------------------------------------
 #
-# Verbatim is the whole requirement: a locally regenerated index is refused as
-# `UNTRUSTED signature`, so only the upstream one installs without `--allow-untrusted` — and
-# `--allow-untrusted` in the build that produces a signing appliance is not a trade anyone should
-# make. They are also what tells the download step below which of the two repositories each
-# package came from, which is read off them rather than guessed.
+# They answer exactly one question — which of the two repositories each package came from — and the
+# answer is recorded in the archive as directory placement, not as a file. **They are deliberately
+# not archived** (#68). Alpine regenerates and re-signs them whenever anything lands in the branch,
+# so their bytes move with nothing this repository depends on having changed, and archiving them
+# cost two claims at once: `build/inputs.sha256` carried two hashes that died on their own, and
+# `aobs-inputs-vMAJOR.MINOR.tar` differed between two fetches of the same package set — which is
+# `docs/reproducible-build.md` claim 7, broken at release time, between the maintainer's build and
+# CI's witness.
+#
+# What the build installs from is an index `build/mkiso.sh` generates from the archived `.apk`
+# files, which is why that step installs with `--allow-untrusted`: the trust those files carry is
+# the sha256 list in git, checked on hash and on set equality before any of them is read.
 
-stage "verbatim indexes"
+INDEXES=$(mktemp -d)
+trap 'rm -rf "$INDEXES"' EXIT
+
+stage "repository indexes (not archived)"
 for repository in main community; do
-	wget -q -O "$INPUTS/apks/$repository/x86_64/APKINDEX.tar.gz" \
+	mkdir -p "$INDEXES/apks/$repository/x86_64"
+	wget -q -O "$INDEXES/apks/$repository/x86_64/APKINDEX.tar.gz" \
 		"$CDN/$ALPINE_BRANCH/$repository/x86_64/APKINDEX.tar.gz"
 done
-note "APKINDEX.tar.gz for main and community"
+note "APKINDEX.tar.gz for main and community — read for membership, then discarded, never archived"
 
 # --- The apk closures ----------------------------------------------------------------------------
 #
@@ -137,7 +148,15 @@ note "toolchain closure: $(printf '%s\n' "$TOOLCHAIN" | grep -c . || true) packa
 # bookkeeping: a 2030 rebuilder can tell what the appliance gets from what the builder gets without
 # re-resolving anything, and the manifest's `input-apks-appliance` / `input-apks-toolchain` counts are
 # then read off a file that was archived and hashed rather than recomputed from a network.
+#
+# The `@aports-commit` marker rides along for the same reason and is asked here rather than at
+# release time: the manifest's pointer is `alpine-release`'s recipe commit, and `alpine-release` is
+# the branch's release marker — a package this build neither installs nor archives. So it is
+# answerable only while an index is in hand (#68). It sits above the first `@closure` marker, where
+# `build/gather.py`'s closure reader ignores it.
+APORTS_COMMIT=$(python3 "$SRC/build/apkindex.py" "$INDEXES" --aports-commit alpine-release)
 {
+	printf '# @aports-commit alpine-release %s\n' "$APORTS_COMMIT"
 	printf '# @closure appliance\n'
 	printf '%s\n' "$APPLIANCE"
 	printf '# @closure toolchain\n'
@@ -145,7 +164,7 @@ note "toolchain closure: $(printf '%s\n' "$TOOLCHAIN" | grep -c . || true) packa
 } >"$INPUTS/CLOSURES.txt"
 
 printf '%s\n%s\n' "$APPLIANCE" "$TOOLCHAIN" | LC_ALL=C sort -u |
-	python3 "$SRC/build/apkindex.py" "$INPUTS" |
+	python3 "$SRC/build/apkindex.py" "$INDEXES" |
 	while read -r repository package; do
 		wget -q -O "$INPUTS/apks/$repository/x86_64/$package" \
 			"$CDN/$ALPINE_BRANCH/$repository/x86_64/$package"

@@ -117,9 +117,60 @@ export KBUILD_BUILD_HOST=aobs
 rm -rf "$WORK"
 mkdir -p "$ROOTFS" "$ISOROOT/boot/isolinux" "$OUT"
 
-# The local repository, written here rather than committed: it is the absolute path of the bind
-# mount, so it is a fact about this container and not about the repository.
-printf '%s\n' "$INPUTS/apks/main" "$INPUTS/apks/community" >"$WORK/repositories"
+# The local repository, generated here rather than archived (#68).
+#
+# `apk` resolves a local repository from `<repo>/<arch>/APKINDEX.tar.gz`, so an index has to exist
+# for the install below to resolve anything at all. Alpine's own index is not in `build/inputs/`:
+# its bytes are re-signed on Alpine's schedule and move with nothing this build depends on having
+# changed, which made it unpinnable by hash and made the input archive differ between two fetches of
+# the same package set. So the index is built here, from the `.apk` files the archive does carry.
+#
+# **That is what `--allow-untrusted` below is buying, and it is worth saying plainly rather than
+# dressing up.** A locally generated index carries no Alpine signature, so `apk` will not load it
+# otherwise. What replaces that signature is stage 0: every one of these files was checked against
+# `build/inputs.sha256` on hash *and* on set equality, against a list in this repository's git
+# history that a reviewer sees change. Alpine's signature still does real work — `apk` verifies it
+# during `build/fetch-inputs.sh --refresh`, resolving against the live CDN, which is where the
+# hashes in that list come from.
+#
+# **`--rewrite-arch x86_64` is not optional, and without it the error points at the wrong thing.**
+# Alpine's published index for an arch directory rewrites every `A:noarch` stanza to that arch; a
+# plain `apk index` leaves them, and `apk` then looks for those packages under `<repo>/noarch/`
+# instead of `<repo>/x86_64/`. Measured: 46 of 96 packages fail, each with
+# `package mentioned in index not found (try 'apk update')` — a message about a missing package and
+# a stale index, on a directory where the file is present and the index is fresh. It is at least
+# loud (`apk` exits 46, so `set -e` stops the build), and `judge apk-manifest` below is the second
+# net; what it is not is self-explaining, which is what this paragraph is for.
+#
+# **`apk index` warns on stderr that the repository may be broken, and it is right and irrelevant.**
+# `build/inputs/` is two dependency closures, not a mirror: a package outside them is absent by
+# design, so every dependency name reaching outside is unsatisfied inside the index. The warning is
+# about the index, not about the install, which resolves entirely within the closure — so it is held
+# back rather than left to teach a reader that build warnings here are normal. **Held back, not
+# discarded:** on a non-zero exit the captured stderr is printed and the build stops, because a
+# silenced stream that swallows the one message that mattered is the same defect one level down.
+#
+# The `.apk` files are symlinked rather than copied: 162 MB of duplication buys nothing, and `apk`
+# reads a symlink like any other file. Both the index and the links live in `$WORK`, so nothing
+# generated here is hashed, archived or shipped.
+for repository in main community; do
+	mkdir -p "$WORK/apks/$repository/x86_64"
+	ln -sf "$INPUTS/apks/$repository/x86_64/"*.apk "$WORK/apks/$repository/x86_64/"
+	if ! (
+		cd "$WORK/apks/$repository/x86_64" &&
+			apk index --rewrite-arch x86_64 -o APKINDEX.tar.gz -- *.apk
+	) >/dev/null 2>"$WORK/apk-index.err"; then
+		cat "$WORK/apk-index.err" >&2
+		printf 'apk index failed for %s\n' "$repository" >&2
+		exit 1
+	fi
+done
+rm -f "$WORK/apk-index.err"
+note "local repository index generated from build/inputs/ (no Alpine index is archived, #68)"
+
+# Written here rather than committed: it is the absolute path of the bind mount, so it is a fact
+# about this container and not about the repository.
+printf '%s\n' "$WORK/apks/main" "$WORK/apks/community" >"$WORK/repositories"
 
 # --- Stage 1. Userland ---------------------------------------------------------------------------
 #
@@ -141,6 +192,7 @@ cp "$WORK/repositories" "$ROOTFS/etc/apk/repositories"
 apk --root "$ROOTFS" --initdb --no-cache \
 	--repositories-file "$WORK/repositories" \
 	--keys-dir /etc/apk/keys \
+	--allow-untrusted \
 	add $PACKAGES
 
 # The manifest is captured *before* the apk database is removed, because it is the only record of

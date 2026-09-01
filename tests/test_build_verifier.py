@@ -591,6 +591,57 @@ def test_an_empty_input_list_is_rejected_rather_than_vacuously_satisfied() -> No
     assert verify.check_inputs({"anything": "0" * 64}, "# only a comment\n") != []
 
 
+# --- Nothing in the archive is pinned by a hash that moves on its own (#68) ----------------------
+
+
+def test_no_apkindex_is_pinned_because_alpine_rewrites_it_on_its_own_schedule() -> None:
+    """The regression this ticket exists to prevent: re-archiving Alpine's index.
+
+    Alpine regenerates and re-signs both indexes whenever anything lands in the branch, so a pin
+    over their bytes dies with no package version, no `.apk` and no closure having changed. That
+    cost two claims at once — claim 5 red on pull requests it has nothing to do with, and claim 7
+    false at release time, because two fetches of the same package set produced different archives.
+    A pin that comes back is caught here rather than a day before a release.
+    """
+    listed = verify.parse_checksum_list(_inputs_list())
+    assert [name for name in listed if name.endswith(".apk")], "the list still pins packages"
+    assert not [name for name in listed if "APKINDEX" in name], (
+        "build/inputs.sha256 pins an APKINDEX again: its bytes are Alpine's to rewrite, so the "
+        "build generates its own from the archived .apk files instead (#68)"
+    )
+
+
+def test_the_generated_index_rewrites_the_arch_of_noarch_packages() -> None:
+    """`--rewrite-arch` is load-bearing, and without it the error names the wrong cause.
+
+    Alpine's published index for an arch directory rewrites `A:noarch` to that arch. A plain
+    `apk index` leaves it, and `apk` then looks for those packages under `<repo>/noarch/`. Measured,
+    not supposed: 46 of 96 packages fail — `busybox-binsh`, `alpine-baselayout` and every `-pyc`
+    subpackage — each reported as `package mentioned in index not found (try 'apk update')`, on a
+    directory where the file is present and the index was generated a second earlier.
+    """
+    mkiso = (BUILD / "mkiso.sh").read_text(encoding="utf-8")
+    assert "apk index" in mkiso, "the build generates its own local repository index"
+    index_calls = [line for line in mkiso.splitlines() if line.strip().startswith("apk index")]
+    assert index_calls, "the `apk index` call is code, not only prose"
+    assert all("--rewrite-arch x86_64" in line for line in index_calls), (
+        "apk index without --rewrite-arch leaves noarch packages unfindable, which reads as a "
+        "successful build missing a third of the rootfs"
+    )
+
+
+def test_the_install_states_that_it_allows_an_untrusted_index_rather_than_hiding_it() -> None:
+    """A locally generated index carries no Alpine signature, and the build says so out loud.
+
+    The alternative considered and rejected was a self-signed index: it would satisfy `apk` with a
+    key this build minted and read like a signature check to anyone who did not look. What replaces
+    Alpine's install-time check is stage 0's, over every byte that index describes.
+    """
+    mkiso = (BUILD / "mkiso.sh").read_text(encoding="utf-8")
+    assert "--allow-untrusted" in mkiso
+    assert "abuild-sign" not in mkiso, "a self-signed index is signature theatre, not a check"
+
+
 # --- The toolchain list has exactly one group ---------------------------------------------------
 
 
@@ -991,3 +1042,129 @@ def test_the_verifier_never_raises_on_a_violation() -> None:
     assert verify.check_release_preflight(_facts(dirty=True), source_date_epoch="", manifest_commit=None) != []
     assert _judge_manifest("") != []
     assert verify.check_pinned_parallelism({"s": "make -j$(nproc)"}) != []
+
+
+# --- The two metadata sources, and which question each answers (#68) ----------------------------
+#
+# `build/apkindex.py` reads an `APKINDEX` for the one question only an index can answer — which
+# repository a package came from, and the recipe commit of a package the archive does not carry —
+# and each `.apk`'s own `.PKGINFO` for everything about the bytes the archive does carry. The two
+# agree field for field, because `apk index` generates the index from exactly that file.
+
+apkindex = _load_by_path(BUILD / "apkindex.py")
+
+
+def _fake_apk(path: Path, fields: dict[str, str]) -> Path:
+    """An `.apk`-shaped file: concatenated gzip streams, `.PKGINFO` in the second.
+
+    The shape is the point. A reader that opens only the first stream finds the signature segment
+    and no `.PKGINFO` at all, which is the bug this fixture exists to keep caught.
+    """
+    import gzip
+    import io
+    import tarfile
+
+    def segment(members: dict[str, bytes]) -> bytes:
+        raw = io.BytesIO()
+        with tarfile.open(fileobj=raw, mode="w") as archive:
+            for name, body in members.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(body)
+                archive.addfile(info, io.BytesIO(body))
+        return gzip.compress(raw.getvalue())
+
+    pkginfo = "".join(f"{key} = {value}\n" for key, value in fields.items()).encode()
+    path.write_bytes(
+        segment({".SIGN.RSA.alpine-devel@example-0000.rsa.pub": b"signature"})
+        + segment({".PKGINFO": pkginfo})
+    )
+    return path
+
+
+def test_pkginfo_is_read_past_the_signature_segment() -> None:
+    """The control segment is the *second* gzip stream, behind end-of-archive padding.
+
+    Without `ignore_zeros` `tarfile` stops at the first segment's padding and the licence, origin
+    and aports commit silently become the NOTICE's fallback strings — a written offer pointing
+    nowhere, on a file that still looks well-formed.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as directory:
+        apk = _fake_apk(
+            Path(directory) / "busybox-1.37.0-r31.apk",
+            {
+                "pkgname": "busybox",
+                "pkgver": "1.37.0-r31",
+                "license": "GPL-2.0-only",
+                "origin": "busybox",
+                "commit": "c3ef5d10e6ef6528852c51f0564963e2f8c1be19",
+            },
+        )
+        assert apkindex.pkginfo(apk) == {
+            "name": "busybox",
+            "version": "1.37.0-r31",
+            "licence": "GPL-2.0-only",
+            "origin": "busybox",
+            "aports-commit": "c3ef5d10e6ef6528852c51f0564963e2f8c1be19",
+        }
+
+
+def test_the_notice_records_every_archived_package_from_its_own_bytes() -> None:
+    """One row per `.apk` present, licence and aports commit included, both repositories walked."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as directory:
+        inputs = Path(directory)
+        for repository, name in (("main", "busybox"), ("community", "cpio")):
+            (inputs / "apks" / repository / "x86_64").mkdir(parents=True)
+            _fake_apk(
+                inputs / "apks" / repository / "x86_64" / f"{name}-1.0-r0.apk",
+                {"pkgname": name, "pkgver": "1.0-r0", "license": "GPL-2.0-only",
+                 "origin": name, "commit": "0" * 40},
+            )
+        text = apkindex.notice(inputs)
+
+    rows = [line for line in text.splitlines() if line.startswith("  ") and ".apk |" in line]
+    assert len(rows) == 2, "both repositories are walked, not only main"
+    assert all("GPL-2.0-only" in row and "0" * 40 in row for row in rows)
+    assert "declared by no metadata" not in text and "not recorded in .PKGINFO" not in text, (
+        "every row carries a real licence and a real commit: the fallbacks are what a written "
+        "offer pointing nowhere looks like"
+    )
+
+
+# --- The aports pointer survives having no index (#68) ------------------------------------------
+
+
+def test_the_aports_pointer_is_read_from_the_archive_and_not_from_an_index() -> None:
+    """`alpine-release` is the branch's release marker and this build neither installs nor archives
+    it, so its recipe commit is answerable only while an index is in hand. The fetcher records it
+    above the first `@closure` marker; the manifest reads it from there, offline."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as directory:
+        inputs = Path(directory)
+        (inputs / "CLOSURES.txt").write_text(
+            "# @aports-commit alpine-release 0934530484bbcde7498e2c694c710a49616a450e\n"
+            "# @closure appliance\nbusybox-1.37.0-r31.apk\n"
+            "# @closure toolchain\ngcc-15.2.0-r5.apk\n",
+            encoding="utf-8",
+        )
+        assert gather._aports_commit(inputs) == "0934530484bbcde7498e2c694c710a49616a450e"
+        assert gather._closures(inputs) == {
+            "appliance": ["busybox-1.37.0-r31.apk"],
+            "toolchain": ["gcc-15.2.0-r5.apk"],
+        }, "the marker sits where the closure reader ignores it"
+
+
+def test_a_missing_aports_marker_is_a_hard_failure_and_not_an_empty_field() -> None:
+    """A manifest that silently names no commit is a written offer pointing nowhere."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as directory:
+        inputs = Path(directory)
+        (inputs / "CLOSURES.txt").write_text("# @closure appliance\nbusybox-1.37.0-r31.apk\n",
+                                             encoding="utf-8")
+        with pytest.raises(SystemExit):
+            gather._aports_commit(inputs)

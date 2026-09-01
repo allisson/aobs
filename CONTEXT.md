@@ -194,10 +194,15 @@ the same commit and gets a different hash has found a defect rather than a diffe
 
 ## Input archive
 
-Every byte the build consumes that the build did not write: the two apk closures, Alpine's own
-signed package index, the base rootfs tarball, and the kernel source tarball. Named as one thing
-because it is fetched, verified and published as one thing — the archive is what makes a release
-rebuildable after the upstream that served those bytes has stopped serving them.
+Every byte the build consumes that the build did not write: the two apk closures, the base rootfs
+tarball, and the kernel source tarball. Named as one thing because it is fetched, verified and
+published as one thing — the archive is what makes a release rebuildable after the upstream that
+served those bytes has stopped serving them.
+
+**Every member is a function of the package set**, which is what lets the archive itself be
+reproducible. A byte upstream can rewrite on its own schedule — Alpine's package index is the
+worked example — is not an input the archive can hold, because holding it makes two fetches of the
+same package set produce two different archives.
 
 ## Witness build
 
