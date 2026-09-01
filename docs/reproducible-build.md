@@ -48,6 +48,19 @@ asset in 2030. **There is no second build path**, which is the whole point: the 
 today and 2030 is confined to *fetching*, and the *building* is the same code path CI walks on every
 commit rather than one nobody has exercised since it was written.
 
+The one thing the build produces before it consumes is the local repository's `APKINDEX.tar.gz`,
+generated from the archived `.apk` files themselves — `apk` cannot resolve a local repository without
+one. It is a function of the input set and not a further input, which is why it is not archived and
+not pinned.
+
+**It is generated twice, because there are two installs from the archive**, and they are separate:
+`build/Dockerfile.iso` installs the toolchain closure into the builder, before `mkiso.sh` exists to
+run, and `mkiso.sh` installs the appliance closure into the rootfs. Missing the first is not a
+subtle failure — `opening .../APKINDEX.tar.gz: No such file or directory`, then
+`unable to select packages` — but it is a failure the test suite could not see, so
+`tests/test_build_verifier.py` now enumerates both files and asserts each generates an index, with
+the flags, rather than trusting that a change to one reached the other.
+
 **5. `build/inputs/` is checked against `build/inputs.sha256` on hash and on set equality before
 stage 1 runs, and the build refuses otherwise.**
 
@@ -63,6 +76,30 @@ precisely what the 2030 path is.
 *Checked by* `check_inputs`, with a wrong hash, a missing file and an extra file each driven as a
 hostile input.
 
+**Nothing in the archive is pinned by a hash that moves on its own, and Alpine's `APKINDEX.tar.gz`
+is the reason that sentence exists** (#68). It was archived and pinned until it wasn't. Alpine
+regenerates and re-signs both indexes whenever anything lands in 3.24, so those two hashes moved
+with no package version, no `.apk` and no closure having changed — twice in one day, measured: CI
+saw `c7660f4a…` for community and a refresh an hour later saw `bec9ee36…`. That cost two claims at
+once. Claim 5 went red on every pull request touching `build/`, for a reason unrelated to the change
+under review, which is how a guard becomes a thing people click past. And claim 7 was quietly false:
+the maintainer's fetch and CI's witness fetch, hours apart, produced different input archives for
+the same package set.
+
+The instrument that replaced it is not a weaker pin, it is **no file to pin**. The indexes answer
+one question — which repository each package came from — and that answer is recorded in the archive
+as directory placement. `build/mkiso.sh` generates its own index from the `.apk` files, and installs
+with `--allow-untrusted` because a locally generated index carries no Alpine signature.
+
+**What `--allow-untrusted` costs, stated so it can be argued with.** At install time, nothing that
+was doing work: it replaces `apk`'s signature check over an index with stage 0's check over every
+byte that index describes, against a list in git that a reviewer watches change. Alpine's signature
+is still verified by `apk` — during `build/fetch-inputs.sh --refresh`, resolving against the live
+CDN, which is where the hashes in that list come from. The trust anchor moved from build time to
+refresh time, and from a file to a reviewed commit. What it would cost to pretend otherwise is
+worse: a self-signed index would satisfy `apk` with a key we minted, and read like a signature check
+to everyone who did not look.
+
 **6. The root of the build is a tarball, not a registry tag.** `build/Dockerfile.iso` is
 `FROM scratch` plus `alpine-minirootfs-3.24.1-x86_64.tar.gz`. Alpine keeps every point release's
 minirootfs forever with a `.sha256` and an `.asc` beside it; Docker Hub's retention for untagged
@@ -71,6 +108,11 @@ digests could not be established, and a Hub digest is checkable only by pulling 
 **7. `bitcoin-signer-amd64.iso` and `aobs-inputs-vMAJOR.MINOR.tar` are both deterministic.** A
 witness confirms the archive as well as the image, so a swapped input set is caught by the same
 comparison that catches a swapped ISO.
+
+The archive half is a claim about the *package set*, and it holds only because every member is now a
+function of that set: the `.apk` files, the minirootfs and the kernel tarball are pinned bytes,
+`CLOSURES.txt` and `NOTICE` are derived from them, and there is nothing left that Alpine can rewrite
+between two fetches. That was not true while the indexes were archived — see claim 5.
 
 **8. A rebuild that diverges says where.** `mkiso.sh` prints the sha256 of every intermediate it
 already produced — the rootfs tree manifest, `bzImage`, `initramfs.zst`, `efi.img`, the ISO — and the

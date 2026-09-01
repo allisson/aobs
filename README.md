@@ -145,8 +145,8 @@ mkdir -p out && docker run --rm --privileged -v "$PWD:/src" -v "$PWD/out:/out" a
 ```
 
 **The build touches no network.** `build/fetch-inputs.sh` is the only step that does, and it is not
-part of the build: it populates `build/inputs/` — 96 appliance packages, 112 toolchain packages, both
-of Alpine's verbatim indexes, the minirootfs tarball and the kernel tarball — and `build/mkiso.sh`
+part of the build: it populates `build/inputs/` — 96 appliance packages, 112 toolchain packages, the
+minirootfs tarball and the kernel tarball — and `build/mkiso.sh`
 refuses to start unless every byte of that directory matches `build/inputs.sha256`, on hash **and on
 set equality**. There is no second, offline-only build path to go stale: this is the only path, and
 CI walks it on every commit.

@@ -43,12 +43,35 @@ ADD build/inputs/alpine-minirootfs-3.24.1-x86_64.tar.gz /
 # the reason #57 gives: it dies first and larger, and a toolchain failure kills the build image
 # before stage 1 ever runs. The `--mount=type=bind` is what keeps 300 MB of `.apk` files out of the
 # resulting image — they are inputs to one `RUN`, not part of the builder.
+#
+# **The index is generated here, exactly as `build/mkiso.sh` generates its own** (#68). Alpine's is
+# not archived: its bytes are re-signed on Alpine's schedule and moved with nothing this build
+# depends on having changed. This is the *second* place that installs from `build/inputs/`, and it
+# is a separate one — the toolchain closure, into the builder, before `mkiso.sh` exists to run — so
+# the generation has to happen twice or this `RUN` fails with
+# `opening .../APKINDEX.tar.gz: No such file or directory` and `unable to select packages`.
+# `tests/test_build_verifier.py` asserts both places do it, and asserts the flags, because the two
+# are easy to change apart.
+#
+# The bind mount is read-only, so the local repository is symlinks in `/tmp` and the index is
+# written beside them. `--rewrite-arch x86_64` is load-bearing: without it every `A:noarch` stanza
+# keeps that arch and `apk` looks for those packages under `<repo>/noarch/`. `apk index`'s stderr is
+# held back — `build/inputs/` is two closures rather than a mirror, so it warns that the repository
+# may be broken, which is true of the index and irrelevant to this install — and printed if the
+# command actually fails.
 COPY build/toolchain-versions.txt /tmp/toolchain-versions.txt
 RUN --mount=type=bind,source=build/inputs/apks,target=/inputs/apks \
-	printf '%s\n' /inputs/apks/main /inputs/apks/community >/etc/apk/repositories && \
-	apk add --no-cache \
+	for repository in main community; do \
+		mkdir -p "/tmp/apks/$repository/x86_64" && \
+		ln -s /inputs/apks/$repository/x86_64/*.apk "/tmp/apks/$repository/x86_64/" && \
+		{ ( cd "/tmp/apks/$repository/x86_64" && \
+			apk index --rewrite-arch x86_64 -o APKINDEX.tar.gz -- *.apk \
+		) >/dev/null 2>/tmp/apk-index.err || { cat /tmp/apk-index.err >&2; exit 1; }; } || exit 1; \
+	done && \
+	printf '%s\n' /tmp/apks/main /tmp/apks/community >/etc/apk/repositories && \
+	apk add --no-cache --allow-untrusted \
 		$(sed -n 's/^\([a-z0-9][^ #]*\)$/\1/p' /tmp/toolchain-versions.txt | tr '\n' ' ') && \
-	rm -f /tmp/toolchain-versions.txt
+	rm -rf /tmp/toolchain-versions.txt /tmp/apks /tmp/apk-index.err
 
 # What a deterministic build needs from its environment, fixed here **and again in `mkiso.sh`**. Not
 # belt-and-braces duplication: the reproducibility guard runs the second build with `-e TZ=...`,

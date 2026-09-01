@@ -243,6 +243,24 @@ def _closures(inputs: Path) -> dict[str, list[str]]:
     return found
 
 
+def _aports_commit(inputs: Path) -> str:
+    """The `# @aports-commit alpine-release <sha>` marker at the head of `CLOSURES.txt`.
+
+    `alpine-release` is the branch's release marker and this build neither installs nor archives it,
+    so its recipe commit is answerable only while an `APKINDEX` is in hand — which the release is
+    not (#68). The fetcher asks and records; this reads what was archived and hashed. A missing
+    marker is a hard failure: a manifest that silently names no commit is a written offer pointing
+    nowhere.
+    """
+    for raw in _read(str(inputs / "CLOSURES.txt")).splitlines():
+        if raw.startswith("# @aports-commit "):
+            return raw.split()[-1]
+    raise SystemExit(
+        f"{inputs / 'CLOSURES.txt'} carries no `# @aports-commit` marker: "
+        "re-run build/fetch-inputs.sh, or unpack a release input archive that has one"
+    )
+
+
 def _tree_manifest(root: str) -> str:
     """One line per path: mode, owner, and either a content hash or a symlink target.
 
@@ -384,7 +402,9 @@ inputs-list-sha256: {inputs_list_sha256}
 #
 # `aports-commit` is the aports recipe commit of `alpine-release`, the branch's release-marker
 # package. It is a pointer into a history that does not expire, not the whole record — the complete
-# per-package licence and aports commit is the `NOTICE` inside the archive.
+# per-package licence and aports commit is the `NOTICE` inside the archive. `alpine-release` is
+# neither installed nor archived, so the fetcher records its commit in `CLOSURES.txt` while an
+# index is still in hand and this reads it from there (#68).
 
 alpine-branch: {alpine_branch}
 aports-commit: {aports_commit}
@@ -422,13 +442,7 @@ def _manifest(source: str, release_file: str, published: str) -> str:
     for closure, packages in _closures(inputs).items():
         input_lines.append(f"input-apks-{closure}: {len(packages)} packages")
 
-    aports = subprocess.run(
-        [sys.executable, str(root / "build" / "apkindex.py"), str(inputs),
-         "--aports-commit", "alpine-release"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
+    aports = _aports_commit(inputs)
 
     files = _published(published)
     iso = next((name for name in files if name.endswith(".iso")), "bitcoin-signer-amd64.iso")
