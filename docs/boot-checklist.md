@@ -154,11 +154,13 @@ boot" must not be read as "no device is ever authorized".
 
 27. **The maintainer's arm64 build and CI's x86_64 witness build produce the same sha256.** This is
     the cross-architecture half of `docs/reproducible-build.md` claim 1, and it is here rather than in
-    the CI guard because an arm64 runner would emulate for hours — while the release ritual compares
-    the two builds anyway, at no extra cost.
+    the CI guard because GitHub's arm64 runners are Linux on ARM: the always-amd64 builder would run
+    under QEMU there, not the Rosetta translation the maintainer's macOS host uses, which is both a
+    configuration nobody in this project builds on and a slower one by an amount this repository has
+    never measured. The release ritual compares the two builds anyway, at no extra cost.
 
     Compare the **hash ladder**, not only the ISO: `mkiso.sh` prints five rungs, and the first one
-    that differs is where the divergence began. *(#59, #65)*
+    that differs is where the divergence began. *(#59, #65, #74)*
 
 28. **The published verification command, run from the published instructions, against the published
     assets.** Downloaded from the release rather than copied out of the build directory:
