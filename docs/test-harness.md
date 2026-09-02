@@ -279,4 +279,5 @@ as *verifiable*, and a claim whose verification procedure is unwritten is not re
 #10 committed to the first of them going in the published README. That checklist is what keeps the
 promise, and running it is a step in `docs/release.md`'s ritual — item 8 of the checklist and the
 release-time arm64/x86_64 cross-architecture comparison are both there because no runner can perform
-either.
+the first, and none is a good instrument for the second — a GitHub arm64 runner would exercise QEMU's
+codegen rather than the translation layer the maintainer's own arm64 build actually uses (#74).

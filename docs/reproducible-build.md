@@ -196,9 +196,14 @@ The first four are free. **The CPU count costs real time and stays**, because it
 `zstd` hazard — the one divergence source whose fix a future edit could undo without any other
 symptom.
 
-**Architecture is in the contract but not in the guard.** An arm64 runner would emulate for hours.
-It moves to `docs/boot-checklist.md` as a release-time human check, which is free, because the ritual
-already compares the maintainer's arm64 build against CI's x86_64 witness build.
+**Architecture is in the contract but not in the guard.** The builder is `FROM
+--platform=linux/amd64` on every host, so what an arm64 runner would vary is only which translation
+layer executes the same x86_64 toolchain — and on GitHub's Linux/arm64 runners that layer is QEMU,
+not the Rosetta path the maintainer's macOS host takes. That is a configuration nobody in this
+project builds on, and a slower one by an amount never measured here (#74), so the guard would be
+both worse as an instrument and dearer to run. It moves to `docs/boot-checklist.md` as a
+release-time human check, which is free, because the ritual already compares the maintainer's arm64
+build against CI's x86_64 witness build.
 
 **Trigger: every release tag, and every pull request touching `build/`.** A tags-only guard learns
 about decay at the worst possible moment — during a release, when the person who broke it is not the
