@@ -250,15 +250,16 @@ def test_a_good_signature_cannot_dilute_a_bad_one(
 def test_an_absent_archive_fails_and_iso_only_does_not(
     release: Path, keys: dict[str, str]
 ) -> None:
-    """User story 9: declining a 360 MB download is a reasonable choice and must not be reported as
-    a failure — but it must be reported as *not checked*, which is what `--iso-only` says."""
+    """User story 9: declining the input archive and the source archive is a reasonable choice and
+    must not be reported as a failure — but it must be reported as *not checked*, which is what
+    `--iso-only` says. #71 added the second archive, so the sentence names both."""
     (release / ARCHIVE_NAME).unlink()
 
     assert _run(release, keys).returncode == 1
 
     result = _run(release, keys, "--iso-only")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "the input archive is not checked" in result.stdout
+    assert "the input and source archives are not checked" in result.stdout
     assert f"{ISO_NAME}: OK" in result.stdout
 
 
