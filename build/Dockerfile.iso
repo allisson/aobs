@@ -15,11 +15,18 @@
 # `--platform=linux/amd64` is not optional and not a portability nicety. The artifact is
 # `bitcoin-signer-amd64.iso`; `syslinux` exists for no other architecture in Alpine, and an
 # aarch64 builder would silently install an aarch64 userland into a rootfs meant for an x86_64
-# kernel. On an Apple-silicon or other arm64 host this runs under emulation — correct, and slow
-# enough that the kernel stage is measured in hours rather than minutes. That the ISO is
-# nevertheless byte-identical between an arm64 and an x86_64 builder is claim 1 of
-# `docs/reproducible-build.md`, and it is why the maintainer's arm64 build and CI's x86_64 witness
-# can be compared at all.
+# kernel. On an Apple-silicon or other arm64 host this therefore runs under whatever translation
+# layer the container runtime provides, and the cost is the runtime's, not emulation's in general
+# (#74). Measured once under OrbStack, which uses Rosetta and registers no QEMU handler at all: a
+# full build took ~426 s against CI's native x86_64 323 s — about 1.3x — of which the kernel stage
+# was 354 s at the pinned `MAKE_JOBS=4`. That stage is not large: `build/mkiso.sh` builds from
+# `allnoconfig` with `build/kernel.config` as the preset and compiled 1,113 objects, where a distro
+# kernel compiles twenty thousand. Under QEMU's TCG instead — a Linux/arm64 host, or macOS with
+# Rosetta unavailable — expect a multiple of that rather than a small factor; it has never been
+# measured here, and it is why `docs/boot-checklist.md` item 27 stays a release ritual and not a CI
+# guard. That the ISO is nevertheless byte-identical between an arm64 and an x86_64 builder is
+# claim 1 of `docs/reproducible-build.md`, and it is why the maintainer's arm64 build and CI's
+# x86_64 witness can be compared at all.
 #
 # **`FROM scratch` plus a minirootfs tarball, not `FROM alpine:3.24`.** #55 could not establish Docker
 # Hub's retention for untagged digests, and a Hub digest is checkable only by pulling from that
