@@ -8,7 +8,7 @@ beside them, because that is how the obligation those binaries carry is met.
 What is redistributed
 ---------------------
 
-`aobs-inputs-vMAJOR.MINOR.tar`, published as a release asset, carries:
+`aobs-inputs-<release>.tar`, published as a release asset, carries:
 
 - the **appliance apk closure** and the **toolchain apk closure** — Alpine Linux `.apk` packages,
   **unmodified**, exactly as Alpine published them, with their upstream signatures intact;
@@ -20,7 +20,7 @@ lands in the branch, so archiving it made the archive differ between two fetches
 set; `build/mkiso.sh` generates its own from the `.apk` files above and installs with
 `--allow-untrusted` (#68).
 
-`aobs-sources-vMAJOR.MINOR.tar` is published beside it and carries the corresponding source for
+`aobs-sources-<release>.tar` is published beside it and carries the corresponding source for
 everything copyleft-touched in the list above. It is **not a build input** — nothing in it is read by
 any build — which is why it is a separate asset with a separate list. See *Corresponding source*
 below.
@@ -53,7 +53,7 @@ Corresponding source
 --------------------
 
 **The corresponding source is published as a second release asset,
-`aobs-sources-vMAJOR.MINOR.tar`**, and its `sha256` is bound by the signed manifest's
+`aobs-sources-<release>.tar`**, and its `sha256` is bound by the signed manifest's
 `sources-list-sha256` field to `build/sources.sha256` as committed at the tag. It is an
 **accompaniment** under GPLv2 §3(a), not an offer and not a pointer.
 

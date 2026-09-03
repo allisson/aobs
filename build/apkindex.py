@@ -18,7 +18,7 @@ This is asked at fetch time, when `build/fetch-inputs.sh` has just downloaded th
 scratch directory, and the answer is recorded in the archive as directory placement. **The indexes
 themselves are not archived** (#68): Alpine regenerates and re-signs them whenever anything lands in
 the branch, so their bytes move with nothing this repository depends on having changed — which made
-them unpinnable by hash and made `aobs-inputs-vMAJOR.MINOR.tar` non-deterministic between two
+them unpinnable by hash and made `aobs-inputs-<release>.tar` non-deterministic between two
 fetches hours apart. `build/mkiso.sh` generates its own index from the archived `.apk` files.
 
 **Which single aports commit the manifest names** — also the index, and for a reason worth stating:

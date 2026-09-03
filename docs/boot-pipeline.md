@@ -144,7 +144,7 @@ With `vga=791` (1024×768) `vesafb` provides a graphical framebuffer and `fbcon`
 The picker carries **one reserved row** at the bottom, and a second line pointing at the advisories:
 
 ```
-aobs v1.0 · 4f1c8a6e2b90 · 2026-09-14
+aobs v0.1.0 · 4f1c8a6e2b90 · 2026-09-14
 Advisories are published at github.com/allisson/aobs/blob/main/ADVISORIES.txt — this appliance cannot check.
 ```
 
@@ -343,8 +343,8 @@ line below is a published claim, checked before an image exists.
 
 Four further assertions run only when a release is being cut, in `build/release-preflight.sh` rather
 than in `mkiso.sh`, and `docs/release.md` says why the split falls there: a dirty tree, an unsigned or
-absent `vMAJOR.MINOR` tag, a hand-set `SOURCE_DATE_EPOCH`, and a manifest whose `git-commit` is not
-`HEAD`. A development build trips none of them.
+absent `vMAJOR.MINOR[.PATCH]` tag, a hand-set `SOURCE_DATE_EPOCH`, and a manifest whose
+`git-commit` is not `HEAD`. A development build trips none of them.
 
 ## The artifact
 

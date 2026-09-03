@@ -28,12 +28,13 @@ test**, so [#13](https://github.com/allisson/aobs/issues/13)'s golden-file asser
 across every geometry. A startup check refuses to run below 100 × 30 rather than degrading silently.
 
 **One row is reserved, and it is not on this screen.** #61 gives the keymap picker and every failure
-screen a release identity footer — two lines: `aobs v1.0 · 4f1c8a6e2b90 · 2026-09-14`, and where
+screen a release identity footer — two lines: `aobs v0.1.0 · 4f1c8a6e2b90 · 2026-09-14`, and where
 advisories live. Counted against the 128 × 48 floor and against 85 × 43 for the QR screen, that is two
 rows out of 48 on screens whose content is a short list and a message, not out of the review screen's
-row budget, which is untouched. The identity row is 38 columns for a `vMAJOR.MINOR` release, well
-inside the 96-column cap; the advisory line is the longer of the two and is the one that fixes the
-wording's length budget.
+row budget, which is untouched. The identity row is 39 columns for a `vMAJOR.MINOR.PATCH`
+release and 37 for a two-component one — measured, not estimated; an earlier 38 here was off by
+one — well inside the 96-column cap. The advisory line is the longer of the two and is the one
+that fixes the wording's length budget.
 
 ## The output row
 

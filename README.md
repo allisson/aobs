@@ -58,8 +58,8 @@ sources with different operators, neither of them GitHub, is the whole point of 
 ### 2. Verify the release
 
 ```sh
-gpg --verify manifest-v1.0.txt.asc manifest-v1.0.txt
-grep -E '^[0-9a-f]{64}  ' manifest-v1.0.txt | sha256sum -c -
+gpg --verify manifest-v0.1.0.txt.asc manifest-v0.1.0.txt
+grep -E '^[0-9a-f]{64}  ' manifest-v0.1.0.txt | sha256sum -c -
 ```
 
 That is the entire verification. The `grep` is required, not decoration: `sha256sum -c` treats the
@@ -80,7 +80,7 @@ have are the bytes they vouched for.
 commit, the inputs and `SOURCE_DATE_EPOCH` precisely so that you can:
 
 ```sh
-git checkout v1.0
+git checkout v0.1.0
 docker run --rm --platform=linux/amd64 -v "$PWD:/src" -w /src \
     alpine:3.24 sh build/fetch-inputs.sh
 docker build -f build/Dockerfile.iso -t aobs-iso .
@@ -92,8 +92,8 @@ claim this project actually rests on; the signature only tells you who to blame 
 `docs/reproducible-build.md` states the contract numbered and checkable.
 
 **The version row on the appliance's first screen identifies, it does not attest.**
-`aobs v1.0 · 4f1c8a6e2b90 · 2026-09-14` is checkable against the manifest you verified, which is what
-the commit prefix is for — but a modified image can print anything, and a self-report by a
+`aobs v0.1.0 · 4f1c8a6e2b90 · 2026-09-14` is checkable against the manifest you verified, which
+is what the commit prefix is for — but a modified image can print anything, and a self-report by a
 possibly-modified image is not evidence about itself.
 
 ### What GitHub could forge

@@ -714,7 +714,7 @@ async def test_the_running_app_installs_no_logging_handler_that_writes_anywhere(
 # cannot be mistaken for a release.
 
 RELEASED = Release(
-    release="v1.0",
+    release="v0.1.0",
     released="2026-09-14",
     commit="4f1c8a6e2b90d7c35a18ef04b6d2917c0ae53b81",
     dirty=False,
@@ -730,7 +730,7 @@ async def test_the_first_screen_names_the_version_the_commit_and_the_date() -> N
     app = build(release=RELEASED)
     async with app.run_test(size=CONSOLE):
         assert isinstance(app.screen, KeymapScreen)
-        assert footer(app) == "aobs v1.0 · 4f1c8a6e2b90 · 2026-09-14"
+        assert footer(app) == "aobs v0.1.0 · 4f1c8a6e2b90 · 2026-09-14"
 
 
 async def test_the_footer_carries_a_commit_prefix_and_not_only_a_version() -> None:
@@ -802,4 +802,4 @@ async def test_the_same_line_appears_on_the_failure_screen() -> None:
     app = build(release=RELEASED)
     async with app.run_test(size=(MIN_COLUMNS - 1, MIN_ROWS)):
         assert isinstance(app.screen, ConsoleTooSmallScreen)
-        assert footer(app) == "aobs v1.0 · 4f1c8a6e2b90 · 2026-09-14"
+        assert footer(app) == "aobs v0.1.0 · 4f1c8a6e2b90 · 2026-09-14"

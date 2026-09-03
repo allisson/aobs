@@ -31,7 +31,7 @@ Entry format
 
     ADVISORY:   aobs-YYYY-NNN
     DATE:       YYYY-MM-DD
-    AFFECTED:   the versions as the appliance displays them, e.g. `v1.0`, `v1.0 through v1.2`
+    AFFECTED:   the versions as the appliance displays them, e.g. `v0.1.0`, `v0.1.0 through v0.2.1`
     WHAT:       what is wrong
     DO:         what an owner of an affected stick should do
     SIGNED:     what funds already signed on that build imply

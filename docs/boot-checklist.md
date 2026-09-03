@@ -130,8 +130,8 @@ boot" must not be read as "no device is ever authorized".
 ## What the image says about itself
 
 23. **The first screen names the version, the commit prefix and the build date**, and the row matches
-    the manifest you verified before booting. `aobs v1.0 · 4f1c8a6e2b90 · 2026-09-14`, on the keymap
-    picker, without navigating anywhere. *(#61)*
+    the manifest you verified before booting. `aobs v0.1.0 · 4f1c8a6e2b90 · 2026-09-14`, on the
+    keymap picker, without navigating anywhere. *(#61)*
 
     **This is an identification aid and not an attestation.** A modified image can print anything.
     What is being checked here is that the row is present, correct and unavoidable — not that the
@@ -166,8 +166,8 @@ boot" must not be read as "no device is ever authorized".
     assets.** Downloaded from the release rather than copied out of the build directory:
 
     ```sh
-    gpg --verify manifest-v1.0.txt.asc manifest-v1.0.txt
-    grep -E '^[0-9a-f]{64}  ' manifest-v1.0.txt | sha256sum -c -
+    gpg --verify manifest-v0.1.0.txt.asc manifest-v0.1.0.txt
+    grep -E '^[0-9a-f]{64}  ' manifest-v0.1.0.txt | sha256sum -c -
     ```
 
     SeedSigner's first signed release shipped a file that gave `gpg: not a detached signature`, and an

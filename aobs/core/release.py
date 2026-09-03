@@ -1,6 +1,6 @@
 """What the appliance says about itself, as one row of text.
 
-`aobs v1.0 · 4f1c8a6e2b90 · 2026-09-14` — and #61 settled every part of it:
+`aobs v0.1.0 · 4f1c8a6e2b90 · 2026-09-14` — and #61 settled every part of it:
 
 - **The 12-hex commit prefix is what makes the line checkable.** A version alone cannot distinguish
   a rebuild from the published build; the prefix can be matched against the manifest a user has
@@ -63,7 +63,7 @@ class Release:
     and that is a development build by every definition this project uses.
     """
 
-    #: `v1.0`, or `development`.
+    #: `v0.1.0`, or `development`.
     release: str
     #: `YYYY-MM-DD`, formatted by the build from `source-date-epoch`.
     released: str

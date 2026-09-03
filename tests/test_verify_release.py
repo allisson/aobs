@@ -37,7 +37,7 @@ import pytest
 ROOT = Path(__file__).parent.parent
 SCRIPT = ROOT / "verify-release.sh"
 
-RELEASE = "v1.0"
+RELEASE = "v0.1.0"
 MANIFEST_NAME = f"manifest-{RELEASE}.txt"
 ISO_NAME = "bitcoin-signer-amd64.iso"
 ARCHIVE_NAME = f"aobs-inputs-{RELEASE}.tar"

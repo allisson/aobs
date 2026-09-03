@@ -12,8 +12,8 @@
 # It is a **convenience, not an authority**. The README gives the two raw commands first, and they
 # are the whole of the verification:
 #
-#     gpg --verify manifest-vX.Y.txt.asc manifest-vX.Y.txt
-#     grep -E '^[0-9a-f]{64}  ' manifest-vX.Y.txt | sha256sum -c -
+#     gpg --verify manifest-v0.1.0.txt.asc manifest-v0.1.0.txt
+#     grep -E '^[0-9a-f]{64}  ' manifest-v0.1.0.txt | sha256sum -c -
 #
 # What this adds is the part most verifiers skip: it closes by saying what it did **not** check.
 #

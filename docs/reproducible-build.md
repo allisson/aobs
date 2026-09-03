@@ -105,7 +105,7 @@ to everyone who did not look.
 minirootfs forever with a `.sha256` and an `.asc` beside it; Docker Hub's retention for untagged
 digests could not be established, and a Hub digest is checkable only by pulling from that registry.
 
-**7. `bitcoin-signer-amd64.iso` and `aobs-inputs-vMAJOR.MINOR.tar` are both deterministic.** A
+**7. `bitcoin-signer-amd64.iso` and `aobs-inputs-<release>.tar` are both deterministic.** A
 witness confirms the archive as well as the image, so a swapped input set is caught by the same
 comparison that catches a swapped ISO.
 
@@ -115,7 +115,7 @@ function of that set: the `.apk` files, the minirootfs and the kernel tarball ar
 between two fetches. That was not true while the indexes were archived — see claim 5.
 
 **The source archive is deliberately outside this claim, and outside claim 5.**
-`aobs-sources-vMAJOR.MINOR.tar` (#71) is the corresponding source for the copyleft-touched packages, published
+`aobs-sources-<release>.tar` (#71) is the corresponding source for the copyleft-touched packages, published
 beside the input archive. Every byte in it is pinned — the recipe files by aports commit, the
 tarballs by the `sha512sums` at that commit — and `build/sources.sha256` lists them, bound to the
 signed manifest by `sources-list-sha256`. But **no build reads it**, so it is not in `build/inputs/`

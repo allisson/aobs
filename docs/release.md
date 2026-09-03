@@ -30,7 +30,7 @@ docker run --rm -v "$PWD:/src" -w /src aobs-test
 **2. Create the signed annotated tag — locally, not pushed.**
 
 ```sh
-git tag -s v1.0 -m 'aobs v1.0'
+git tag -s v0.1.0 -m 'aobs v0.1.0'
 ```
 
 **Never through the GitHub UI.** `main`'s HEAD is otherwise signed by GitHub's key
@@ -96,25 +96,25 @@ cp out/bitcoin-signer-amd64.iso verify-release.sh ADVISORIES.txt release/
 # the .apk files and the kernel tarball are already compressed.
 tar --sort=name --owner=0 --group=0 --numeric-owner \
     --mtime="@$(git log -1 --format=%ct)" --format=gnu \
-    -C build -cf release/aobs-inputs-v1.0.tar inputs
+    -C build -cf release/aobs-inputs-v0.1.0.tar inputs
 
 # The source archive, same shape, same reasons. Separate asset because the build never reads it.
 tar --sort=name --owner=0 --group=0 --numeric-owner \
     --mtime="@$(git log -1 --format=%ct)" --format=gnu \
-    -C build -cf release/aobs-sources-v1.0.tar sources
+    -C build -cf release/aobs-sources-v0.1.0.tar sources
 
-python3 build/gather.py write-manifest . "$RELEASE_FILE" release >release/manifest-v1.0.txt
-python3 build/gather.py manifest . release/manifest-v1.0.txt "$RELEASE_FILE" release
+python3 build/gather.py write-manifest . "$RELEASE_FILE" release >release/manifest-v0.1.0.txt
+python3 build/gather.py manifest . release/manifest-v0.1.0.txt "$RELEASE_FILE" release
 
 # All four refusals, now that there is a manifest and a release file to judge.
-./build/release-preflight.sh "$RELEASE_FILE" release/manifest-v1.0.txt
+./build/release-preflight.sh "$RELEASE_FILE" release/manifest-v0.1.0.txt
 
-gpg --detach-sign --armor --output release/manifest-v1.0.txt.asc release/manifest-v1.0.txt
+gpg --detach-sign --armor --output release/manifest-v0.1.0.txt.asc release/manifest-v0.1.0.txt
 gpg --detach-sign --armor --output release/ADVISORIES.txt.asc ADVISORIES.txt
 
 cd release
-gpg --verify manifest-v1.0.txt.asc manifest-v1.0.txt
-grep -E '^[0-9a-f]{64}  ' manifest-v1.0.txt | sha256sum -c -
+gpg --verify manifest-v0.1.0.txt.asc manifest-v0.1.0.txt
+grep -E '^[0-9a-f]{64}  ' manifest-v0.1.0.txt | sha256sum -c -
 ./verify-release.sh
 ```
 
@@ -130,7 +130,7 @@ entry must show up in a diff. It is re-signed whenever a new entry is appended.
 succeeded.**
 
 ```sh
-git push origin v1.0
+git push origin v0.1.0
 ```
 
 **6. CI's witness build runs from the pushed tag** and publishes the hashes it got.
@@ -160,11 +160,11 @@ published needing re-verification.
 
 **7. Publish the Release — once.**
 
-Assets: `bitcoin-signer-amd64.iso`, `aobs-inputs-v1.0.tar`, `aobs-sources-v1.0.tar`,
-`manifest-v1.0.txt`, `manifest-v1.0.txt.asc`, `verify-release.sh`, `ADVISORIES.txt` and
+Assets: `bitcoin-signer-amd64.iso`, `aobs-inputs-v0.1.0.tar`, `aobs-sources-v0.1.0.tar`,
+`manifest-v0.1.0.txt`, `manifest-v0.1.0.txt.asc`, `verify-release.sh`, `ADVISORIES.txt` and
 `ADVISORIES.txt.asc`.
 
-**`aobs-sources-v1.0.tar` is not optional and not a convenience.** It is the accompanying source
+**`aobs-sources-v0.1.0.tar` is not optional and not a convenience.** It is the accompanying source
 GPLv2 §3(a) requires for the 18 GPL-2.0-only `.apk` files in the input archive — §3(b) and §3(c) are
 both unavailable to this project, and §3 grants no fourth route (#71). Publishing the input archive
 without it redistributes those binaries under no permitted term. It carries the rest of the
@@ -184,9 +184,9 @@ That constraint is what will still be true on the day a witness key exists.
 
 ```sh
 mkdir /tmp/stranger && cd /tmp/stranger
-gh release download v1.0
-gpg --verify manifest-v1.0.txt.asc manifest-v1.0.txt
-grep -E '^[0-9a-f]{64}  ' manifest-v1.0.txt | sha256sum -c -
+gh release download v0.1.0
+gpg --verify manifest-v0.1.0.txt.asc manifest-v0.1.0.txt
+grep -E '^[0-9a-f]{64}  ' manifest-v0.1.0.txt | sha256sum -c -
 ```
 
 Downloaded, not copied from `release/`. What is being checked is what GitHub serves.
@@ -204,7 +204,7 @@ because a development build never runs this.
 
 1. **A dirty working tree.** An uncommitted edit is in the image and in nothing a stranger can check
    out.
-2. **`HEAD` not at a signed annotated tag matching `vMAJOR.MINOR`.**
+2. **`HEAD` not at a signed annotated tag matching `vMAJOR.MINOR[.PATCH]`.**
 3. **`SOURCE_DATE_EPOCH` not equal to the tagged commit's date.** A mismatch means it was set by
    hand, and the ISO's timestamps would then assert something about no commit at all.
 4. **A manifest whose `git-commit` is not `HEAD`.** The signature covers the manifest *because* the
@@ -220,7 +220,7 @@ a shell condition still bites.
 
 ## The manifest
 
-One plain-text, line-oriented `manifest-vMAJOR.MINOR.txt`, readable with `cat`, with three kinds of
+One plain-text, line-oriented `manifest-<release>.txt`, readable with `cat`, with three kinds of
 line:
 
 - **`key: value` metadata** — `format`, `release`, `released`, `git-tag`, `git-commit`,
@@ -237,7 +237,7 @@ comments — pointed at the manifest whole, busybox coreutils prints `comment li
 So the documented command is:
 
 ```sh
-grep -E '^[0-9a-f]{64}  ' manifest-v1.0.txt | sha256sum -c -
+grep -E '^[0-9a-f]{64}  ' manifest-v0.1.0.txt | sha256sum -c -
 ```
 
 One file, at the cost of a one-liner nobody would guess unaided. The alternative — a bare `SHA256SUMS`
@@ -247,7 +247,7 @@ manifest *because* the manifest names the inputs.
 `inputs-list-sha256` does the real work: it pins the archive to `build/inputs.sha256` **as committed at
 the tag**, so a swapped archive is caught even if the asset were replaced in place.
 
-`sources-list-sha256` is the same binding for `aobs-sources-vMAJOR.MINOR.tar` against
+`sources-list-sha256` is the same binding for `aobs-sources-<release>.tar` against
 `build/sources.sha256`. #71 made the corresponding source an *accompaniment* rather than a pointer,
 and an accompaniment nobody can pin is a pointer again — at whoever last uploaded the asset.
 
