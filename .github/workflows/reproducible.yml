@@ -63,6 +63,18 @@ on:
 permissions:
   contents: read
 
+# **Every build step here pipes into `tee`, and GitHub's default shell is `bash -e {0}` — no
+# `pipefail`.** So a pipeline's exit status is `tee`'s, and `tee` succeeds whatever the build did:
+# `mkiso.sh` refused at stage 0 with six violations and *"Build once, ordinarily"* was still
+# reported green, with the failure surfacing two steps later as `sha256sum: out-a/…iso: No such
+# file or directory`. A guard whose build step cannot fail is not a guard, and the misleading
+# report is worse than no report — it names the wrong step to a reader debugging a red run.
+#
+# Set once for the workflow rather than per step, because the next step someone adds inherits it.
+defaults:
+  run:
+    shell: bash -eo pipefail {0}
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
