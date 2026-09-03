@@ -49,6 +49,15 @@ on:
 permissions:
   contents: read
 
+# The same reason as `reproducible.yml`, and it matters more here: this job's whole output is a hash
+# ladder a human compares against the builder's, and `| tee` under GitHub's default `bash -e {0}`
+# means a build that refused would still report the step green. A witness that says nothing when it
+# failed is the one failure mode `docs/release.md` cannot tolerate — "cannot run" and "ran and
+# disagreed" are different cases there, and a green step that built nothing looks like neither.
+defaults:
+  run:
+    shell: bash -eo pipefail {0}
+
 jobs:
   witness:
     name: independent reproduction from the tag
