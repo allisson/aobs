@@ -824,9 +824,16 @@ def check_inputs(present: Mapping[str, str], committed_text: str) -> list[Violat
 #: misread. #61.
 DEVELOPMENT = "development"
 
-#: The only version shape a release may carry. `vMAJOR.MINOR` and nothing else — the release ritual
-#: (#65) matches the tag against this, and `docs/release.md` names no other form.
-RELEASE_TAG = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+#: The only version shape a release may carry. `vMAJOR.MINOR[.PATCH]` and nothing else — the
+#: release ritual (#65) matches the tag against this, and `docs/release.md` names no other form.
+#:
+#: **The patch component is optional rather than required** (#77). It has to be *accepted*, because
+#: `SECURITY.md` designs for a release found to be bad and the fix for a bad `0.1.0` wants `v0.1.1`
+#: — under a two-component-only gate that fix consumes the minor slot and `0.2` comes to mean "we
+#: shipped a patch". It stays optional rather than mandatory because forbidding two components
+#: would retroactively invalidate a filename a stranger may already hold, and nothing published
+#: needs to be re-verified for a regex to widen.
+RELEASE_TAG = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)(\.(0|[1-9]\d*))?$")
 
 #: The fields `/etc/aobs-release` must carry. Version, commit and `SOURCE_DATE_EPOCH` are the
 #: **complete embeddable set** — #61's finding is that nothing derived from the image can be
@@ -1035,16 +1042,16 @@ def check_release_preflight(
     if not git.tag:
         violations.append(
             Violation(
-                "HEAD is at an annotated tag matching vMAJOR.MINOR — the stage-3 assertion binds "
-                "the embedded version to it, so the tag exists before the build",
+                "HEAD is at an annotated tag matching vMAJOR.MINOR[.PATCH] — the stage-3 "
+                "assertion binds the embedded version to it, so the tag exists before the build",
                 "git describe --exact-match --tags found no tag at HEAD",
             )
         )
     elif not RELEASE_TAG.match(git.tag):
         violations.append(
             Violation(
-                "the release tag is vMAJOR.MINOR and nothing else: `docs/release.md` names no "
-                "other form and the manifest's file names are built from it",
+                "the release tag is vMAJOR.MINOR[.PATCH] and nothing else: `docs/release.md` "
+                "names no other form and the manifest's file names are built from it",
                 git.tag,
             )
         )

@@ -5,7 +5,7 @@
 #
 #     SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) ./build/release-preflight.sh
 #     ./build/release-preflight.sh path/to/etc-aobs-release
-#     ./build/release-preflight.sh path/to/etc-aobs-release manifest-v1.0.txt
+#     ./build/release-preflight.sh path/to/etc-aobs-release manifest-v0.1.0.txt
 #
 # **Run it twice, and the second run is the one that matters.** Before the build there is no
 # `/etc/aobs-release` and no manifest, so the first form checks the tree and the tag and takes
@@ -24,7 +24,7 @@
 # The four:
 #
 #   1. a dirty working tree
-#   2. HEAD not at a signed annotated tag matching `vMAJOR.MINOR`
+#   2. HEAD not at a signed annotated tag matching `vMAJOR.MINOR[.PATCH]`
 #   3. the epoch the build ran under not equal to the tagged commit's date — a mismatch means it was
 #      set by hand rather than derived
 #   4. a manifest whose `git-commit` is not HEAD (only when a manifest is named)

@@ -90,7 +90,7 @@ mkdir -p "$INPUTS/apks/main/x86_64" "$INPUTS/apks/community/x86_64"
 # not archived** (#68). Alpine regenerates and re-signs them whenever anything lands in the branch,
 # so their bytes move with nothing this repository depends on having changed, and archiving them
 # cost two claims at once: `build/inputs.sha256` carried two hashes that died on their own, and
-# `aobs-inputs-vMAJOR.MINOR.tar` differed between two fetches of the same package set — which is
+# `aobs-inputs-<release>.tar` differed between two fetches of the same package set — which is
 # `docs/reproducible-build.md` claim 7, broken at release time, between the maintainer's build and
 # CI's witness.
 #

@@ -698,7 +698,7 @@ _EPOCH = "1773446400"
 
 def _release_file(**overrides: str) -> str:
     fields = {
-        "release": "v1.0",
+        "release": "v0.1.0",
         "released": "2026-03-14",
         "git-commit": _COMMIT,
         "source-date-epoch": _EPOCH,
@@ -708,7 +708,7 @@ def _release_file(**overrides: str) -> str:
     return "".join(f"{key}: {value}\n" for key, value in fields.items())
 
 
-def _judge_release(text: str, *, tag: str = "v1.0", dirty: bool = False) -> list:
+def _judge_release(text: str, *, tag: str = "v0.1.0", dirty: bool = False) -> list:
     return verify.check_embedded_release(
         text, tag=tag, head_commit=_COMMIT, dirty=dirty, source_date_epoch=_EPOCH
     )
@@ -742,7 +742,7 @@ def test_a_development_build_is_skipped_rather_than_faked() -> None:
 
 
 def test_a_development_build_that_claims_a_version_is_rejected() -> None:
-    violations = _judge_release(_release_file(release="v1.0"), tag="")
+    violations = _judge_release(_release_file(release="v0.1.0"), tag="")
     assert [v for v in violations if verify.DEVELOPMENT in v.claim]
 
 
@@ -799,7 +799,7 @@ def _facts(**overrides) -> object:
     fields = {
         "head_commit": _COMMIT,
         "dirty": False,
-        "tag": "v1.0",
+        "tag": "v0.1.0",
         "tag_signed": True,
         "tag_commit_date": _EPOCH,
     }
@@ -863,11 +863,30 @@ def test_no_release_mode_refusal_fires_in_development_mode(
     )
 
 
-def test_a_tag_that_is_not_vmajor_minor_is_rejected() -> None:
+@pytest.mark.parametrize(
+    "tag", ["v0.1.0", "v1.0", "v10.20.30", "v0.0.0"], ids=["patch", "two-component", "wide", "zero"]
+)
+def test_a_release_tag_may_carry_an_optional_patch_component(tag: str) -> None:
+    """#77: `v0.1.1` has to have somewhere to go, or a patch consumes the minor slot.
+
+    Two components stay *accepted* rather than forbidden — nothing already published needs to be
+    re-verified for the gate to widen."""
     violations = verify.check_release_preflight(
-        _facts(tag="release-1.0"), source_date_epoch=_EPOCH, manifest_commit=_COMMIT
+        _facts(tag=tag), source_date_epoch=_EPOCH, manifest_commit=_COMMIT
     )
-    assert [v for v in violations if "vMAJOR.MINOR" in v.claim]
+    assert [v for v in violations if "vMAJOR.MINOR[.PATCH]" in v.claim] == []
+
+
+@pytest.mark.parametrize(
+    "tag",
+    ["release-1.0", "v1", "v1.0.0.0", "v01.0", "1.0.0", "v1.0.0-rc1"],
+    ids=["prefixed", "one-component", "four-component", "leading-zero", "no-v", "pre-release"],
+)
+def test_a_tag_that_is_not_vmajor_minor_patch_is_rejected(tag: str) -> None:
+    violations = verify.check_release_preflight(
+        _facts(tag=tag), source_date_epoch=_EPOCH, manifest_commit=_COMMIT
+    )
+    assert [v for v in violations if "vMAJOR.MINOR[.PATCH]" in v.claim], violations
 
 
 def test_a_preflight_with_no_manifest_yet_judges_the_other_three() -> None:
@@ -890,9 +909,9 @@ _SOURCES_ARCHIVE_SHA = "1" * 64
 def _manifest(**overrides: str) -> str:
     fields = {
         "format": verify.MANIFEST_FORMAT,
-        "release": "v1.0",
+        "release": "v0.1.0",
         "released": "2026-03-14",
-        "git-tag": "v1.0",
+        "git-tag": "v0.1.0",
         "git-commit": _COMMIT,
         "source-date-epoch": _EPOCH,
         "iso-name": "bitcoin-signer-amd64.iso",
@@ -908,15 +927,15 @@ def _manifest(**overrides: str) -> str:
         + f"signer: {verify.BUILDER_FINGERPRINT} builder\n"
         + "input-kernel: linux-6.12.106.tar.xz sha256=" + "d" * 64 + "\n"
         + f"{_ISO_SHA}  bitcoin-signer-amd64.iso\n"
-        + f"{_ARCHIVE_SHA}  aobs-inputs-v1.0.tar\n"
-        + f"{_SOURCES_ARCHIVE_SHA}  aobs-sources-v1.0.tar\n"
+        + f"{_ARCHIVE_SHA}  aobs-inputs-v0.1.0.tar\n"
+        + f"{_SOURCES_ARCHIVE_SHA}  aobs-sources-v0.1.0.tar\n"
     )
 
 
 _PUBLISHED = {
     "bitcoin-signer-amd64.iso": _ISO_SHA,
-    "aobs-inputs-v1.0.tar": _ARCHIVE_SHA,
-    "aobs-sources-v1.0.tar": _SOURCES_ARCHIVE_SHA,
+    "aobs-inputs-v0.1.0.tar": _ARCHIVE_SHA,
+    "aobs-sources-v0.1.0.tar": _SOURCES_ARCHIVE_SHA,
 }
 
 
@@ -1000,7 +1019,7 @@ def test_a_manifest_naming_a_file_that_is_not_published_is_rejected() -> None:
     """A reader's `sha256sum -c` would fail on it, so the manifest may not name it."""
     published = {name: value for name, value in _PUBLISHED.items() if name.endswith(".iso")}
     violations = _judge_manifest(_manifest(), published=published)
-    assert [v for v in violations if "aobs-inputs-v1.0.tar" in v.claim]
+    assert [v for v in violations if "aobs-inputs-v0.1.0.tar" in v.claim]
 
 
 def test_a_manifest_with_no_signer_line_is_rejected() -> None:
