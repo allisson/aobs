@@ -240,13 +240,19 @@ The build exists and **nothing here has been run on real hardware.**
 What is verified: `build/kernel.config` is checked against every claim it carries by
 `tests/test_build_verifier.py`, which also feeds each assertion a deliberately broken input to prove
 it still bites, and the config has been through `kconfig`'s own dependency resolution — 613 symbols
-against 6.12.106, no violations. Stages 0 and 1 of the build run end to end: 96 pinned packages,
-97.1 MiB, and both signature schemes signing inside the rootfs the image will carry.
+against 6.12.106, no violations. All four stages of the build run end to end: 96 pinned packages,
+both signature schemes signing inside the rootfs the image will carry, and, measured off the image
+that run produced, 110.7 MiB of rootfs unpacked into a 29.1 MiB initramfs beside a 2.4 MiB kernel,
+in a 41 MiB hybrid ISO.
 
-What is not: no ISO has been produced. The kernel compile, the initramfs and `xorriso` are written
-and unexecuted. And no test in this repository can tell you whether the resulting kernel boots,
-finds a framebuffer and enumerates a camera on your machine — that is `docs/boot-checklist.md`, and
-it is published with the ISO.
+What is not: that ISO has never been built in release mode. `out/bitcoin-signer-amd64.iso` came from
+a full four-stage run on 2026-09-01, from commit `c553b904` with a **dirty** tree, so the
+`/etc/aobs-release` inside it reads `release: development` and stage 3's tag assertion was skipped
+rather than satisfied. Its hash ladder, recovered from the image itself, is recorded on
+[#78](https://github.com/allisson/aobs/issues/78); no build from a clean tagged tree has ever run.
+And no test in this repository can tell you whether the resulting kernel boots, finds a framebuffer
+and enumerates a camera on your machine — that is `docs/boot-checklist.md`, and it is published with
+the ISO.
 
 No release has been cut. The reproducibility guard and the witness build are written and have never
 run, so two numbers this design depends on are still estimates: the guard's CI runtime against the
