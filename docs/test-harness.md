@@ -176,12 +176,25 @@ would choose them, which no generator discovers.
 the appliance.
 
     docker build -f build/Dockerfile.test -t aobs-test .     # only when the pins change
-    docker run --rm -v "$PWD:/src" -w /src aobs-test         # the dev loop, ~85 s
+    docker run --rm -v "$PWD:/src" -w /src aobs-test         # the dev loop, ~7 m 30 s
 
 The bind mount is what makes this the loop a developer lives in: the image carries the pinned
 userland, the working tree comes from the host, and **no rebuild is needed to run an edit** — only a
 change to `build/apk-versions.txt` requires one. CI uses the `COPY` baked into the image instead, so
 what it judges is the tree as pushed.
+
+**What the loop costs, measured (#79).** `895 passed, 2 skipped, 2 deselected in 456 s (7 m 36 s)`,
+`main` at `b471a2f`, clean tree, on the maintainer's host: macOS, an 8-core / 8 GiB Docker VM. Two
+runs on that host agreed to within 0.1 s — 456.34 s and 456.44 s — with the second one taken while
+three unrelated containers sat at a combined 6 % of one core, so **the figure is not a contended
+reading**.
+
+Every timing on this page is the suite size of its day, and the suite is what grew: the `~85 s`
+below was measured at #30's ~125 tests and this one at 895. `--durations=30` puts 286 s of the 456 s
+— 63 % — in 30 tests, 191 s of it in `tests/test_wallet_entry.py` alone, all of them Textual
+`pilot`-driven screen tests. **Whether that time is `pilot.pause()` scheduling or production-param
+Argon2id inside the backup-restore cases has not been measured**, so nothing here says the loop
+could not be faster; it says the run is green and this is what it costs.
 
 **This used to be two tiers, and the second one was `uv` on the host Python — "the loop a developer
 lives in".** It was retired in #35 when it stopped being the fast one. `embit` is vendored from git
