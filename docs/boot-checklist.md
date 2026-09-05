@@ -172,3 +172,44 @@ boot" must not be read as "no device is ever authorized".
 
     SeedSigner's first signed release shipped a file that gave `gpg: not a detached signature`, and an
     outsider found it. This item costs thirty seconds. *(#60, #65)*
+
+## The run record
+
+This document is the procedure. The **run record** is the evidence that it was followed, and without
+one *running this list is what a release means* is a sentence nobody outside the project can check.
+One record per release, plain text, `cat`-readable by the same stranger reading the manifest, from
+`boot-runs/TEMPLATE.txt`. `docs/release.md` steps 4 and 9 say when it is written and when it is
+closed; this section says what goes in it.
+
+**It is published twice, and the two copies differ by an appended section, never by an edit.**
+`boot-run-<release>.txt` is a release asset, staged in `release/` and therefore named in the
+manifest's checksum block — signed, and checked by the same one-liner that checks every other asset.
+`docs/boot-runs/<release>.txt` is the same bytes committed to git, with a `--- post-publication ---`
+section appended holding items 27 and 28, which cannot have answers before the release exists. Git
+history is the tamper-evidence for that section, the way it is for `ADVISORIES.txt` (#62). Nothing
+above the rule is ever edited: a mistake found later is a new line below it, so that the published
+asset and the committed file never disagree about the same row.
+
+**Three verdicts, and only three.**
+
+- `pass` — the item was performed as written and answered as the item says it should.
+- `fail` — it did not. **A release does not publish with a `fail` in its record**, and step 4 is
+  before the tag push precisely so that the cost of one is a `git tag -d`.
+- `deviated` — performed, but not as written, with mandatory prose saying what was done instead and
+  why. It does not block publication. It is the verdict a stranger will actually read, because it is
+  where this release's evidence stops matching this document's claim.
+
+**Which items record a value is a rule, not a list**, so that it cannot rot against the items above:
+*an item whose text names a number, a literal string, or a specific device records the observed value
+alongside the verdict; every other item records the verdict, with free-text observation optional.*
+Applied to the list as it stands that is items 7, 10, 12, 16, 19, 22, 23 and 27. Two more carry a
+**mandatory** observation despite naming no value, because a bare `pass` on them means nothing: item 9
+records which USB class drivers were actually present, and item 14 records which camera was used and
+which pixel formats it offered.
+
+**The machine is identified by hand, from outside the appliance.** The appliance is amnesic and makes
+no network calls, and a dumper that wrote this out would be new code in the money-path image to serve
+a document. So the operator transcribes a fixed field list — the template has it — and the point of
+those fields is to let a stranger judge how much their hardware resembles the one machine a release
+was checked on. **Serial numbers, MAC addresses and disk identifiers are excluded**: the record is
+published, and a resemblance aid does not need to identify the maintainer's hardware to a third party.

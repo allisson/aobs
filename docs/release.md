@@ -15,7 +15,11 @@ so **the tag must exist before the build**. But a tag pushed for a build that th
 litter in a repository strangers clone.
 
 **A local tag is retractable and a pushed one is not.** So the push moves after the build, and the
-first irreversible act in this ritual is step 5.
+first irreversible act in this ritual is step 6.
+
+The boot checklist sits in the same gap, for the same reason. It is the strongest evidence this
+release has and it can only be run on a built ISO, so it runs at step 4 — after the build, before the
+push. An item that fails there costs a `git tag -d`, not a retraction of something strangers hold.
 
 ## The checklist
 
@@ -48,7 +52,7 @@ SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) ./build/release-preflight.sh
 
 This form's epoch check is the weaker one, and the script's header says why: `mkiso.sh` derives
 `SOURCE_DATE_EPOCH` itself and ignores the environment, so comparing this shell's variable against the
-tagged commit's date compares two values you just set from the same source. Step 4 runs it again with
+tagged commit's date compares two values you just set from the same source. Step 5 runs it again with
 the file the build wrote, which is the form that bites.
 
 ```sh
@@ -78,7 +82,30 @@ The stage-3 assertion binds `/etc/aobs-release` to that tag. **Record the hash l
 prints** — CI's witness build prints the same five rungs, and the first one that differs is where a
 divergence began.
 
-**4. Build the input archive and the manifest, and verify locally by running the published command
+**4. Run the boot checklist on the ISO you just built, and write the run record.**
+
+`docs/boot-checklist.md` is the procedure and *The run record* at its end is the format. Items 1
+through 26 are answerable now; items 27 and 28 are not, and they are filled in at steps 7 and 9 from
+this same ritual — the record's header says so, so a reader is never left wondering whether two rows
+were forgotten or deferred.
+
+```sh
+mkdir -p release
+cp docs/boot-runs/TEMPLATE.txt release/boot-run-v0.1.0.txt
+$EDITOR release/boot-run-v0.1.0.txt
+```
+
+**It is written into `release/` and not committed yet, and that is deliberate.** `release/` is
+gitignored, so the tree stays clean and step 5's refusal 1 still bites; step 5's manifest covers
+everything in that directory, so the record is signed with no change to `build/gather.py`; and the
+committed copy is made at step 9, once items 27 and 28 have answers. Do not delete `release/` in
+between — the record exists nowhere else until then.
+
+**A `fail` on any item stops the release here**, and the tag is still local: `git tag -d v0.1.0`, fix,
+start again. A `deviated` does not stop it, but it is the one verdict whose prose a reader will
+actually read, so write it for the stranger comparing their hardware to yours.
+
+**5. Build the input archive and the manifest, and verify locally by running the published command
 from the published instructions.**
 
 `RELEASE_FILE` below is the `/etc/aobs-release` the build wrote into the rootfs. Extract it from the
@@ -89,7 +116,7 @@ nothing to disagree about — and it is what refusal 3 judges the epoch against.
 ```sh
 RELEASE_FILE=/path/to/etc-aobs-release
 
-mkdir -p release
+mkdir -p release            # already holds boot-run-v0.1.0.txt from step 4
 cp out/bitcoin-signer-amd64.iso verify-release.sh ADVISORIES.txt release/
 
 # One deterministic tar: sorted members, fixed mtime, uid, gid and mode, uncompressed —
@@ -126,14 +153,15 @@ The cost of catching that here is thirty seconds.
 #62 requires it to be in git history: a clone from any mirror must carry it, and an edit to a past
 entry must show up in a diff. It is re-signed whenever a new entry is appended.
 
-**5. Push the tag. This is the first irreversible act, and it happens only after the build has
-succeeded.**
+**6. Push the tag. This is the first irreversible act, and it happens only after the build has
+succeeded and the boot checklist has been run.**
 
 ```sh
 git push origin v0.1.0
 ```
 
-**6. CI's witness build runs from the pushed tag** and publishes the hashes it got.
+**7. CI's witness build runs from the pushed tag** and publishes the hashes it got. Its comparison is
+boot-checklist item 27; record the outcome there at step 9.
 
 **It does not sign, today, and the release is therefore single-signed.** #58 created no witness key:
 signing would need one in GitHub's secret store, and `verify-release.sh` hardcodes an empty
@@ -145,7 +173,7 @@ published needing re-verification.
 
 - **A witness that disagrees blocks the release, and the thing that blocks is this checklist rather
   than the workflow.** No CI job can block a publication CI does not perform: `witness.yml` builds,
-  hashes, and uploads what it saw. Step 7 does not happen until that artifact has been read and its
+  hashes, and uploads what it saw. Step 8 does not happen until that artifact has been read and its
   hash ladder found identical to the one step 3 printed. If they differ, that is a reproducibility
   defect, and the contract's position — a stranger who rebuilds and gets a different hash has found a
   defect, not a difference of opinion — has to bind us before it binds anyone else. Fix it and re-tag.
@@ -158,11 +186,11 @@ published needing re-verification.
   verification, and the `signer:` lines make its absence visible rather than silent. **Publishing over
   a witness that ran and disagreed is never permitted.**
 
-**7. Publish the Release — once.**
+**8. Publish the Release — once.**
 
 Assets: `bitcoin-signer-amd64.iso`, `aobs-inputs-v0.1.0.tar`, `aobs-sources-v0.1.0.tar`,
-`manifest-v0.1.0.txt`, `manifest-v0.1.0.txt.asc`, `verify-release.sh`, `ADVISORIES.txt` and
-`ADVISORIES.txt.asc`.
+`manifest-v0.1.0.txt`, `manifest-v0.1.0.txt.asc`, `verify-release.sh`, `boot-run-v0.1.0.txt`,
+`ADVISORIES.txt` and `ADVISORIES.txt.asc`.
 
 **The release notes open with the README's pre-trust banner, copied verbatim** — the section
 `## v0.1.0 is a pre-trust release. Do not put real funds on it.` and everything under it, down to
@@ -181,12 +209,13 @@ Everything but the manifest and the `.asc` files is named in the manifest's chec
 documented one-liner really does check every published file at once — **the verifier included**, which
 matters, because a tampered `verify-release.sh` is a real attack.
 
-**A single publication is the point**, and it is the reason step 6 waits for the witness rather than
+**A single publication is the point**, and it is the reason step 7 waits for the witness rather than
 publishing and appending. Adding a signature to an already-published `.asc` would mutate a signed
 asset that strangers may already hold, with no way to tell a reader which version of it they got.
 That constraint is what will still be true on the day a witness key exists.
 
-**8. Re-verify the *published* assets as a stranger would, then refresh the README's advisory list.**
+**9. Re-verify the *published* assets as a stranger would, close the run record, then refresh the
+README's advisory list.**
 
 ```sh
 mkdir /tmp/stranger && cd /tmp/stranger
@@ -196,6 +225,22 @@ grep -E '^[0-9a-f]{64}  ' manifest-v0.1.0.txt | sha256sum -c -
 ```
 
 Downloaded, not copied from `release/`. What is being checked is what GitHub serves.
+
+**Those two commands are boot-checklist item 28**, and running them here is what answers it. So the
+record can now be closed:
+
+```sh
+cp release/boot-run-v0.1.0.txt docs/boot-runs/v0.1.0.txt
+$EDITOR docs/boot-runs/v0.1.0.txt      # append the post-publication section: items 27 and 28
+git add docs/boot-runs/v0.1.0.txt && git commit -m 'Boot-checklist run record for v0.1.0'
+```
+
+**The committed copy is the published copy plus an appended section, never an edit to it.** Everything
+above the `--- post-publication ---` rule is byte-identical to the signed asset, so a reader who
+distrusts the git history can `sha256sum` the published file and compare against the manifest, and a
+reader who distrusts the asset can see in a diff that only two rows were ever added. Below that rule
+is covered by git history alone and says so — the same tamper-evidence `ADVISORIES.txt` relies on
+(#62), for the two items the signature could not have covered without lying about when they happened.
 
 Every release's README must carry the **full advisory list** — that is one of #62's two discovery
 mechanisms, and the only one that reaches a user who went to fetch a newer ISO without thinking to

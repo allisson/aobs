@@ -1,0 +1,106 @@
+aobs boot-checklist run record
+==============================
+
+The procedure is docs/boot-checklist.md; its section "The run record" is the format, and
+docs/release.md steps 4 and 9 say when this file is written and when it is closed.
+
+Items 1 through 26 are answered at step 4, on the ISO the release was built from, before the tag is
+pushed. Items 27 and 28 cannot have answers before the release exists; they are below the
+post-publication rule, appended after step 9. They are deferred, not forgotten.
+
+Verdicts are pass, fail or deviated. A deviated item carries prose saying what was done instead. A
+record containing a fail does not get published.
+
+
+Release
+-------
+
+release:        v0.0.0
+git-commit:
+iso-sha256:
+run-started:                       # UTC date, from the operator's own machine, not the appliance
+run-finished:
+operator:
+
+
+Machine
+-------
+
+Transcribed by hand from outside the appliance. No serial numbers, no MAC addresses, no disk
+identifiers: this file is published, and a resemblance aid does not need to identify the hardware to
+a third party.
+
+make-model:
+cpu:
+ram:
+firmware:                          # UEFI or BIOS, and its version
+graphics:                          # adapter, and the framebuffer geometry it gave
+camera:                            # make and model, and the pixel formats it offered
+keyboard:                          # USB, PS/2 or built-in
+
+
+Items 1 through 26
+------------------
+
+One block per item. `value:` is present only where the item's text names a number, a literal string
+or a specific device (items 7, 10, 12, 16, 19, 22 and 23 as the list stands). Items 9 and 14 carry a
+mandatory `observed:` instead: a bare pass on them says nothing.
+
+ 1. amnesia: pull the medium, sign anyway            verdict:
+ 2. amnesia: image the medium and diff it            verdict:
+ 3. amnesia: on the running appliance                verdict:
+ 4. amnesia: shutdown is a forced power-off          verdict:
+ 5. amnesia: exactly one userspace process           verdict:
+ 6. amnesia: no core file can be produced            verdict:
+ 7. usb: authorized_default reads 0                  verdict:          value:
+ 8. usb: mass storage mid-session binds nothing      verdict:
+ 9. usb: driver list is usbhid and uvcvideo only     verdict:          observed:
+10. console: fbcon gives at least 85x43              verdict:          value:
+11. console: keymap picker echoes keys as typed      verdict:
+12. camera: real webcam decode holds 5 fps           verdict:          value:
+13. camera: multi-frame PSBT from a real screen      verdict:
+14. camera: compressed-only camera is named          verdict:          observed:
+15. camera: released between uses                    verdict:
+16. refusal: the RAM floor fires                     verdict:          value:
+17. refusal: no path from the app to a prompt        verdict:
+18. refusal: failure screen, keypress, power off     verdict:
+19. refusal: cold boot leaves the randomness wait    verdict:          value:
+20. refusal: unloadable keymap named before secrets  verdict:
+21. refusal: no date or time displayed anywhere      verdict:
+22. interop: full round trip per watch-only wallet   verdict:          value:
+23. identity: first screen names version and commit  verdict:          value:
+24. identity: development build says so              verdict:
+25. identity: failure screen repeats the row         verdict:
+26. identity: advisory line points, does not claim   verdict:
+
+Notes
+-----
+
+Free text. Anything a stranger repeating this list on their own hardware would want to have been
+told. Every deviated verdict above is explained here, by item number.
+
+
+--- post-publication ---
+
+Everything above this rule is the published asset, byte for byte, and is covered by the manifest's
+signature. Everything below it exists only in the committed copy at docs/boot-runs/<release>.txt and
+is covered by git history alone. Nothing above the rule is ever edited; a correction is a new line
+here, naming the item it corrects.
+
+27. release: builder and witness produce the same sha256    verdict:
+    builder ladder:
+      rung 1:
+      rung 2:
+      rung 3:
+      rung 4:
+      rung 5:
+    witness ladder:
+      rung 1:
+      rung 2:
+      rung 3:
+      rung 4:
+      rung 5:
+
+28. release: published verification command, published assets, downloaded    verdict:
+    gpg --verify said:
+    sha256sum -c said:

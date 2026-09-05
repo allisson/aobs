@@ -10,3 +10,7 @@ build/inputs/
 
 # The source fetch writes here.
 build/sources/
+
+# Step 5 of docs/release.md stages the published assets here. Ignored because refusal 1 judges
+# `git status --porcelain`, and an untracked `release/` would make the manifest step refuse itself.
+release/
