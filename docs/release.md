@@ -164,6 +164,12 @@ Assets: `bitcoin-signer-amd64.iso`, `aobs-inputs-v0.1.0.tar`, `aobs-sources-v0.1
 `manifest-v0.1.0.txt`, `manifest-v0.1.0.txt.asc`, `verify-release.sh`, `ADVISORIES.txt` and
 `ADVISORIES.txt.asc`.
 
+**The release notes open with the README's pre-trust banner, copied verbatim** — the section
+`## v0.1.0 is a pre-trust release. Do not put real funds on it.` and everything under it, down to
+the *Nothing else here is lowered* paragraph. Verbatim, not summarised: two wordings of one safety
+claim drift, and the copy that drifts is always the one the reader met first. See *Pre-trust, and
+what takes it off* below for when the banner stops being copied at all.
+
 **`aobs-sources-v0.1.0.tar` is not optional and not a convenience.** It is the accompanying source
 GPLv2 §3(a) requires for the 18 GPL-2.0-only `.apk` files in the input archive — §3(b) and §3(c) are
 both unavailable to this project, and §3 grants no fourth route (#71). Publishing the input archive
@@ -279,3 +285,27 @@ of this repository's pins dead within 79 days.
 problem deletion does not fix: the bad ISO is already on the stranger's stick, and a user who can no
 longer re-download it also can no longer confirm what they hold. This is universal practice across
 Tails, Tor, Bitcoin Core and Coldcard. Remediation is `ADVISORIES.txt`, not deletion.
+
+## Pre-trust, and what takes it off
+
+`0.1.0` ships with a banner at the top of `README.md`, copied verbatim into the release notes,
+saying it is a pre-trust release and not for real funds. That banner is the release's **only** safety
+instrument: the appliance carries no mainnet lock, and the release identity footer identifies rather
+than attests, so prose is what stands between a reader and a loss.
+
+**A claim with no written retraction path becomes permanent by accident.** These are the three
+conditions, and they are the exact negations of what the banner asserts, so the banner and its
+retraction cannot drift apart:
+
+1. **`docs/boot-checklist.md` run to completion on at least one machine outside this project**, and
+   the run recorded — this negates the banner's first bullet, which says one machine and no other.
+2. **At least one rebuild by a party outside this project reaching the published hash ladder** —
+   this negates the second bullet's *no party outside this project has rebuilt this image*.
+3. **A witness build that ran and agreed, so the manifest carries two signatures** — this negates
+   the second bullet's *one signature, not two*. A witness that could not run does not satisfy this;
+   single-signed publication is an escape hatch for shipping, never for retracting the claim.
+
+When all three hold, the release that carries them **deletes the banner and states which evidence
+met each condition**, naming the run record, the reproducer and the witness key. Until then every
+release copies the banner forward. Retracting the claim is `1.0`'s work and has its own evidence
+bar; this section exists so that the wording does not have to be reverse-engineered later.

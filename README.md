@@ -9,6 +9,25 @@ The design is closed one decision at a time on the wayfinder map,
 `CONTEXT.md` the vocabulary. **Read the document before changing behaviour it fixes** — a design
 decision made only inside a code diff is invisible to the next session.
 
+## `v0.1.0` is a pre-trust release. Do not put real funds on it.
+
+Use it on signet and testnet.
+
+Two things this project will promise at `1.0` have not happened yet:
+
+- **`docs/boot-checklist.md` has been run on one machine, and no other.** Nobody has observed this
+  ISO boot, find a framebuffer, enumerate a camera or refuse a block device on hardware other than
+  that one. The checklist is published with the ISO so you can run all 28 items on yours.
+- **No party outside this project has rebuilt this image.** The reproducibility contract and the
+  witness build are written and have never run against a second builder; `manifest-v0.1.0.txt`
+  carries one signature, not two. A hash ladder nobody has independently reproduced is a claim, not
+  a check.
+
+Nothing else here is lowered. [Verifying what you downloaded](#verifying-what-you-downloaded) below
+proves you got this image and not another one, and that check is exactly as strong as it will be at
+`1.0`. [Status](#status) holds the evidence behind both bullets; `docs/release.md` holds what takes
+this paragraph off.
+
 ## What exists today
 
 `aobs/core/` — the pure core — the harness around it, the application, and both halves of every
