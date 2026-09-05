@@ -1,12 +1,12 @@
 # The witness build: an independent reproduction, from the pushed tag, before strangers rely on it.
 #
-# `docs/release.md` step 7. What this job is for, in one sentence: **the first independent
+# `docs/release.md` step 8. What this job is for, in one sentence: **the first independent
 # reproduction of a release should happen before anybody outside the project depends on it**, and the
 # only way to make that true is to do it in the ritual rather than to hope somebody does it later.
 #
 # **A witness that disagrees blocks the release — and the thing that blocks is the ritual, not this
 # job.** No CI job can block a publication CI does not perform: this workflow builds, hashes, and
-# publishes what it saw as an artifact. `docs/release.md` step 8 does not happen until a human has
+# publishes what it saw as an artifact. `docs/release.md` step 9 does not happen until a human has
 # read that artifact and found it identical to the builder's hash ladder. If the hashes differ, that is
 # a reproducibility defect, and the contract's position — a stranger who rebuilds and gets a different
 # hash has found a defect, not a difference of opinion — has to bind us before it binds anyone else.
@@ -77,7 +77,7 @@ jobs:
         # which needs the maintainer's public key in the runner's keyring — and importing it here
         # would make CI's check of the signature depend on a channel CI is meant to corroborate
         # rather than to trust. The signature on the tag is the maintainer's instrument, checked
-        # locally in `docs/release.md` step 2 and by any stranger who clones. What the witness can
+        # locally in `docs/release.md` step 3 and by any stranger who clones. What the witness can
         # check for itself, it checks:
         run: |
           test -z "$(git status --porcelain)"

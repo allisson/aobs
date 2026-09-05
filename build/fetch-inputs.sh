@@ -24,7 +24,12 @@
 # **`--refresh` is a maintainer action and CI never runs it.** It re-resolves the closures against
 # the live CDN and rewrites `build/inputs.sha256`; a human then commits that diff, because a changed
 # hash for an unchanged version is exactly the supply-chain event that should be visible in a pull
-# request. CI's witness build fetches from the CDN *against the committed list*, so it stays an
+# request. It classifies its own diff — paths added or removed are version churn, a surviving path
+# with a new hash is not — so that distinction does not rest on a tired reading of `git diff`.
+#
+# **The release ritual never runs it either**, for a reason `docs/release.md` step 1 states: a refresh
+# rewrites the list from whatever the CDN just served, which would make the release's own input check
+# vacuous. CI's witness build fetches from the CDN *against the committed list*, so it stays an
 # independent reproduction and fails loudly the day a pin dies.
 #
 # **Why this runs in an `alpine:3.24` container while the builder does not.** Resolving an apk
@@ -206,9 +211,29 @@ note "$(grep -c '|' "$INPUTS/NOTICE") packages recorded with licence and aports 
 
 stage "build/inputs.sha256"
 if [ "$REFRESH" = yes ]; then
+	# `mktemp` leaves it empty, which is the right reading of "no list yet": every path is new.
+	OLD=$(mktemp)
+	if [ -f "$LIST" ]; then cp "$LIST" "$OLD"; fi
 	(cd "$INPUTS" && find . -type f | sed 's|^\./||' | LC_ALL=C sort | xargs sha256sum) >"$LIST"
+
+	# Two events produce a non-empty diff and only one of them is routine. The path carries the
+	# version, so the columns tell them apart: a path that appears or disappears is Alpine moving
+	# and the pin following, a path that survives with a different hash is the same version serving
+	# different bytes. Counting them here rather than leaving it to a tired reading of the diff,
+	# because the second one is the whole reason this list is committed by hand.
+	added=$(awk 'NR==FNR{p[$2];next} !($2 in p)' "$OLD" "$LIST" | wc -l | tr -d ' ')
+	removed=$(awk 'NR==FNR{p[$2];next} !($2 in p)' "$LIST" "$OLD" | wc -l | tr -d ' ')
+	moved=$(awk 'NR==FNR{h[$2]=$1;next} ($2 in h) && h[$2]!=$1' "$OLD" "$LIST" | wc -l | tr -d ' ')
+	rm -f "$OLD"
+
 	note "rewritten — $(grep -c . "$LIST") files. Review and commit the diff:"
-	note "a changed hash for an unchanged version is the event that should be visible in a PR."
+	note "$added path(s) added, $removed removed — version churn, ordinary review."
+	if [ "$moved" -gt 0 ]; then
+		note ""
+		note "$moved unchanged path(s) with a DIFFERENT HASH. That is not churn."
+		note "The same version served different bytes. Stop and read docs/release.md,"
+		note "'Bumping a pin' — this is a security question before it is a pin bump."
+	fi
 else
 	note "left alone. build/mkiso.sh checks build/inputs/ against it, on hash and set equality."
 	note "Run with --refresh to re-resolve the closures and rewrite it."
