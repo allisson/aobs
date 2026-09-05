@@ -221,16 +221,26 @@ if [ "$REFRESH" = yes ]; then
 	# and the pin following, a path that survives with a different hash is the same version serving
 	# different bytes. Counting them here rather than leaving it to a tired reading of the diff,
 	# because the second one is the whole reason this list is committed by hand.
+	#
+	# **`CLOSURES.txt` and `NOTICE` are excluded from the second test, and that exclusion is what
+	# makes it usable.** This script writes both of them, from the set it just resolved, at a path
+	# that never carries a version — so they change on *every* churn. Counted as incidents they fire
+	# the block below on every ordinary pin bump, which is how a guard gets ignored on the day it
+	# means something. Measured, not guessed: they were the whole of the first run's "2 unchanged
+	# paths with a different hash", against three genuinely churned apks.
+	derived='$2!="CLOSURES.txt" && $2!="NOTICE"'
 	added=$(awk 'NR==FNR{p[$2];next} !($2 in p)' "$OLD" "$LIST" | wc -l | tr -d ' ')
 	removed=$(awk 'NR==FNR{p[$2];next} !($2 in p)' "$LIST" "$OLD" | wc -l | tr -d ' ')
-	moved=$(awk 'NR==FNR{h[$2]=$1;next} ($2 in h) && h[$2]!=$1' "$OLD" "$LIST" | wc -l | tr -d ' ')
+	moved=$(awk "NR==FNR{h[\$2]=\$1;next} ($derived) && (\$2 in h) && h[\$2]!=\$1" \
+		"$OLD" "$LIST" | wc -l | tr -d ' ')
 	rm -f "$OLD"
 
 	note "rewritten — $(grep -c . "$LIST") files. Review and commit the diff:"
 	note "$added path(s) added, $removed removed — version churn, ordinary review."
+	note "CLOSURES.txt and NOTICE are written from that set, so they follow it."
 	if [ "$moved" -gt 0 ]; then
 		note ""
-		note "$moved unchanged path(s) with a DIFFERENT HASH. That is not churn."
+		note "$moved fetched path(s) unchanged in name, with a DIFFERENT HASH. That is not churn."
 		note "The same version served different bytes. Stop and read docs/release.md,"
 		note "'Bumping a pin' — this is a security question before it is a pin bump."
 	fi

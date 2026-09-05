@@ -355,13 +355,18 @@ the only reviewer of a supply-chain diff.
 
 - **A path appears or disappears** — `libcurl-8.16.0-r0.apk` gone, `-r1` arrived. That is version
   churn: Alpine moved, the pin followed, ordinary review.
-- **A path survives with a different hash** — the same version, different bytes. That is **not churn,
-  it is an incident.** The release does not proceed through it, and the question is not *what changed*
+- **A fetched path survives with a different hash** — the same version, different bytes. That is **not
+  churn, it is an incident.** The release does not proceed through it, and the question is not *what changed*
   but *why bytes served under an unchanged version identifier are not the bytes we recorded*. Until
   that has an answer, treat it as `SECURITY.md`'s territory, not as a pin bump; if any published
   release was built from the old bytes, it is `ADVISORIES.txt`'s.
 
-`--refresh` prints both counts, so the distinction does not depend on a tired person reading a diff.
+**`CLOSURES.txt` and `NOTICE` are neither**, and the second test excludes them. `fetch-inputs.sh`
+writes both from the set it just resolved, at paths that carry no version, so they change on every
+churn — counted as incidents they would fire the alarm on every ordinary pin bump, and an alarm that
+fires during ordinary work is one nobody reads on the day it means something.
+
+`--refresh` prints the counts, so the distinction does not depend on a tired person reading a diff.
 
 **CI never runs `--refresh`.** CI's witness build fetches from the CDN *against the committed list*,
 so it stays an independent reproduction rather than a replay of the builder's own bytes — and it fails
