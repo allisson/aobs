@@ -181,7 +181,7 @@ byte. The second build varies, all at once:
 
 - the build path
 - the hostname
-- the clock, pushed forward 37 hours
+- the clock, pushed forward 37 hours — on the **runner**, unavoidably; see below
 - `TZ`, `LC_ALL` and `LANG`
 - the umask, 022 → 077
 - the CPU count, `--cpus=2` against the runner's full count
@@ -211,9 +211,34 @@ person cutting it. The two halves cannot share one `push` filter: GitHub applies
 tag pushes too and requires both to be satisfied, so `tags` plus `paths` in one block would skip the
 guard for exactly the release tags it exists to protect.
 
+**The clock variation moves the runner's clock, and no mechanism avoids that.** A container shares
+the host kernel's `CLOCK_REALTIME`, and `--privileged` — which the guard needs for stage 1's chroots
+— grants `CAP_SYS_TIME`, so `date -s` inside the second build sets the runner's wall clock. The
+alternatives were checked and each fails for its own reason: a Linux **time namespace** virtualises
+`CLOCK_MONOTONIC` and `CLOCK_BOOTTIME` only, never `CLOCK_REALTIME`; **`libfaketime`** is
+`LD_PRELOAD` and cannot follow the build into the chroot, which is precisely where source 8 lives, so
+it would miss the class the variation exists for; and `--cap-drop=SYS_TIME` is a **no-op under
+`--privileged`** — only `--cap-add=ALL --cap-drop=SYS_TIME` clears the bit, at the price of
+reassembling by hand everything else `--privileged` does for those chroots.
+
+So the push stays and is contained. The workflow restores the clock in a step that runs even when the
+build fails, from arithmetic on `/proc/uptime` rather than NTP, so a red run cannot leave the runner
+37 hours in the future. Only the log-line timestamps inside the hostile build step are fiction.
+
+**What the 37 hours buy over doing nothing** is narrower than it looks, and worth stating: the two
+builds already run some ten minutes apart on the same clock, so any *second*-granular wall-clock leak
+diverges without any variation at all. The push adds the hour- and day-granular class — source 8
+stamps `/etc/shadow`'s last-change field in **days** — and that class is the entire justification.
+
 **Written fallback, decided in advance rather than during the annoyance:** if the guard's first CI run
 exceeds **40 minutes**, the trigger drops to tags plus `workflow_dispatch`. A guard slow enough to be
 resented does not get made faster; it gets disabled.
+
+**That 40 minutes is read off the guard's own monotonic figure, not off GitHub's step timer.** Each
+build step brackets itself with `/proc/uptime` and prints its duration, because `settimeofday` cannot
+move a monotonic clock and can move everything GitHub reports: the hostile step was once shown as
+133821 s — about 37.17 hours — for a build that finished in minutes, which is the clock push being
+read back as elapsed time. Two instruments that have to agree is what catches that; one does not.
 
 The guard's runtime is an **estimate until it has run once**. So is whether a native amd64 kernel
 build fits inside a free runner's 6-hour ceiling. Both are measured on the first run rather than
