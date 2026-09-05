@@ -178,7 +178,7 @@ boot" must not be read as "no device is ever authorized".
 This document is the procedure. The **run record** is the evidence that it was followed, and without
 one *running this list is what a release means* is a sentence nobody outside the project can check.
 One record per release, plain text, `cat`-readable by the same stranger reading the manifest, from
-`boot-runs/TEMPLATE.txt`. `docs/release.md` steps 4 and 9 say when it is written and when it is
+`boot-runs/TEMPLATE.txt`. `docs/release.md` steps 5 and 10 say when it is written and when it is
 closed; this section says what goes in it.
 
 **It is published twice, and the two copies differ by an appended section, never by an edit.**
@@ -193,7 +193,7 @@ asset and the committed file never disagree about the same row.
 **Three verdicts, and only three.**
 
 - `pass` — the item was performed as written and answered as the item says it should.
-- `fail` — it did not. **A release does not publish with a `fail` in its record**, and step 4 is
+- `fail` — it did not. **A release does not publish with a `fail` in its record**, and step 5 is
   before the tag push precisely so that the cost of one is a `git tag -d`.
 - `deviated` — performed, but not as written, with mandatory prose saying what was done instead and
   why. It does not block publication. It is the verdict a stranger will actually read, because it is

@@ -15,15 +15,45 @@ so **the tag must exist before the build**. But a tag pushed for a build that th
 litter in a repository strangers clone.
 
 **A local tag is retractable and a pushed one is not.** So the push moves after the build, and the
-first irreversible act in this ritual is step 6.
+first irreversible act in this ritual is step 7.
 
 The boot checklist sits in the same gap, for the same reason. It is the strongest evidence this
-release has and it can only be run on a built ISO, so it runs at step 4 — after the build, before the
+release has and it can only be run on a built ISO, so it runs at step 5 — after the build, before the
 push. An item that fails there costs a `git tag -d`, not a retraction of something strangers hold.
+
+**A dead pin has the same shape and is why step 1 exists.** Alpine's CDN keeps only the current
+version of each package, so a release cut with stale pins is refused — and that refusal used to land in
+the middle of the build, by which point the signed tag already existed and had to be deleted and
+remade. The pins are now proven live before anything ceremonial happens, which is the cheapest
+possible position for that failure.
 
 ## The checklist
 
-**1. Clean tree on `main`, tests pass.**
+**1. Prove the pins are live.**
+
+```sh
+docker run --rm --platform=linux/amd64 -v "$PWD:/src" -w /src \
+    alpine:3.24 sh build/fetch-inputs.sh
+python3 build/gather.py inputs build/inputs build/inputs.sha256
+```
+
+This is `build/mkiso.sh` stage 0's input check, run standalone in seconds instead of several hours
+into a kernel compile. It fetches from the live CDN and judges what arrived against the committed
+`build/inputs.sha256`, on hash **and** on set equality — so it fails exactly when a pin has died or
+moved, which is the failure this step exists to move to the front.
+
+**The ritual never runs `--refresh`, the same way CI never does.** If this step fails, the release
+stops here — nothing is tagged, nothing is built — and the fix is the ordinary `## Bumping a pin` pull
+request on `main`, reviewed by somebody who is not the person cutting the release, merged, and then
+this ritual restarts from the top. A refresh rewrites `build/inputs.sha256` from whatever the CDN just
+served; performing one inside the release would make this very check **vacuous by construction**, since
+the list would then be generated from the same bytes it is supposed to judge. The rule that a human
+reviews every hash change does not get an exception carved into it at the moment attention is lowest.
+
+When it passes, `build/inputs/` is populated and verified, and **step 4 does not fetch the inputs
+again**.
+
+**2. Clean tree on `main`, tests pass.**
 
 ```sh
 git switch main && git pull --ff-only
@@ -31,7 +61,7 @@ git status --porcelain            # must be empty
 docker run --rm -v "$PWD:/src" -w /src aobs-test
 ```
 
-**2. Create the signed annotated tag — locally, not pushed.**
+**3. Create the signed annotated tag — locally, not pushed.**
 
 ```sh
 git tag -s v0.1.0 -m 'aobs v0.1.0'
@@ -41,7 +71,7 @@ git tag -s v0.1.0 -m 'aobs v0.1.0'
 `B5690EEEBB952194`, not the maintainer's, and a tag created in a browser carries the platform's
 signature rather than a person's. `SECURITY.md` holds the fingerprint this must be.
 
-**3. Preflight the cheap half, fetch the inputs, then build.**
+**4. Preflight the cheap half, fetch the sources, then build.**
 
 The tree and the tag first, because they are what a several-hour kernel compile should not be spent
 discovering:
@@ -52,12 +82,10 @@ SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) ./build/release-preflight.sh
 
 This form's epoch check is the weaker one, and the script's header says why: `mkiso.sh` derives
 `SOURCE_DATE_EPOCH` itself and ignores the environment, so comparing this shell's variable against the
-tagged commit's date compares two values you just set from the same source. Step 5 runs it again with
+tagged commit's date compares two values you just set from the same source. Step 6 runs it again with
 the file the build wrote, which is the form that bites.
 
 ```sh
-docker run --rm --platform=linux/amd64 -v "$PWD:/src" -w /src \
-    alpine:3.24 sh build/fetch-inputs.sh
 docker run --rm --platform=linux/amd64 -v "$PWD:/src" -w /src \
     alpine:3.24 sh build/fetch-sources.sh
 docker build -f build/Dockerfile.iso -t aobs-iso .
@@ -65,9 +93,9 @@ mkdir -p out && docker run --rm --privileged -v "$PWD:/src" -v "$PWD/out:/out" a
 ```
 
 `fetch-sources.sh` populates `build/sources/` — ~456 MB, 48 origin aports, the corresponding source
-for everything copyleft-touched the release redistributes (#71). It reads `build/inputs/`, so it runs
-after `fetch-inputs.sh` and not before. **The build never opens it**: it is a release asset, not a
-build input, which is why it has its own list rather than joining `build/inputs.sha256` — putting it
+for everything copyleft-touched the release redistributes (#71). It reads `build/inputs/`, which step 1
+populated and verified. **The build never opens it**: it is a release asset, not a build input, which
+is why it has its own list rather than joining `build/inputs.sha256` — putting it
 there would make every witness build and every 2030 rebuild download 456 MB the build is required to
 have and required never to read.
 
@@ -82,10 +110,10 @@ The stage-3 assertion binds `/etc/aobs-release` to that tag. **Record the hash l
 prints** — CI's witness build prints the same five rungs, and the first one that differs is where a
 divergence began.
 
-**4. Run the boot checklist on the ISO you just built, and write the run record.**
+**5. Run the boot checklist on the ISO you just built, and write the run record.**
 
 `docs/boot-checklist.md` is the procedure and *The run record* at its end is the format. Items 1
-through 26 are answerable now; items 27 and 28 are not, and they are filled in at steps 7 and 9 from
+through 26 are answerable now; items 27 and 28 are not, and they are filled in at steps 8 and 10 from
 this same ritual — the record's header says so, so a reader is never left wondering whether two rows
 were forgotten or deferred.
 
@@ -96,16 +124,16 @@ $EDITOR release/boot-run-v0.1.0.txt
 ```
 
 **It is written into `release/` and not committed yet, and that is deliberate.** `release/` is
-gitignored, so the tree stays clean and step 5's refusal 1 still bites; step 5's manifest covers
+gitignored, so the tree stays clean and step 6's refusal 1 still bites; step 6's manifest covers
 everything in that directory, so the record is signed with no change to `build/gather.py`; and the
-committed copy is made at step 9, once items 27 and 28 have answers. Do not delete `release/` in
+committed copy is made at step 10, once items 27 and 28 have answers. Do not delete `release/` in
 between — the record exists nowhere else until then.
 
 **A `fail` on any item stops the release here**, and the tag is still local: `git tag -d v0.1.0`, fix,
 start again. A `deviated` does not stop it, but it is the one verdict whose prose a reader will
 actually read, so write it for the stranger comparing their hardware to yours.
 
-**5. Build the input archive and the manifest, and verify locally by running the published command
+**6. Build the input archive and the manifest, and verify locally by running the published command
 from the published instructions.**
 
 `RELEASE_FILE` below is the `/etc/aobs-release` the build wrote into the rootfs. Extract it from the
@@ -116,7 +144,7 @@ nothing to disagree about — and it is what refusal 3 judges the epoch against.
 ```sh
 RELEASE_FILE=/path/to/etc-aobs-release
 
-mkdir -p release            # already holds boot-run-v0.1.0.txt from step 4
+mkdir -p release            # already holds boot-run-v0.1.0.txt from step 5
 cp out/bitcoin-signer-amd64.iso verify-release.sh ADVISORIES.txt release/
 
 # One deterministic tar: sorted members, fixed mtime, uid, gid and mode, uncompressed —
@@ -153,15 +181,15 @@ The cost of catching that here is thirty seconds.
 #62 requires it to be in git history: a clone from any mirror must carry it, and an edit to a past
 entry must show up in a diff. It is re-signed whenever a new entry is appended.
 
-**6. Push the tag. This is the first irreversible act, and it happens only after the build has
+**7. Push the tag. This is the first irreversible act, and it happens only after the build has
 succeeded and the boot checklist has been run.**
 
 ```sh
 git push origin v0.1.0
 ```
 
-**7. CI's witness build runs from the pushed tag** and publishes the hashes it got. Its comparison is
-boot-checklist item 27; record the outcome there at step 9.
+**8. CI's witness build runs from the pushed tag** and publishes the hashes it got. Its comparison is
+boot-checklist item 27; record the outcome there at step 10.
 
 **It does not sign, today, and the release is therefore single-signed.** #58 created no witness key:
 signing would need one in GitHub's secret store, and `verify-release.sh` hardcodes an empty
@@ -173,8 +201,8 @@ published needing re-verification.
 
 - **A witness that disagrees blocks the release, and the thing that blocks is this checklist rather
   than the workflow.** No CI job can block a publication CI does not perform: `witness.yml` builds,
-  hashes, and uploads what it saw. Step 8 does not happen until that artifact has been read and its
-  hash ladder found identical to the one step 3 printed. If they differ, that is a reproducibility
+  hashes, and uploads what it saw. Step 9 does not happen until that artifact has been read and its
+  hash ladder found identical to the one step 4 printed. If they differ, that is a reproducibility
   defect, and the contract's position — a stranger who rebuilds and gets a different hash has found a
   defect, not a difference of opinion — has to bind us before it binds anyone else. Fix it and re-tag.
 
@@ -186,7 +214,7 @@ published needing re-verification.
   verification, and the `signer:` lines make its absence visible rather than silent. **Publishing over
   a witness that ran and disagreed is never permitted.**
 
-**8. Publish the Release — once.**
+**9. Publish the Release — once.**
 
 Assets: `bitcoin-signer-amd64.iso`, `aobs-inputs-v0.1.0.tar`, `aobs-sources-v0.1.0.tar`,
 `manifest-v0.1.0.txt`, `manifest-v0.1.0.txt.asc`, `verify-release.sh`, `boot-run-v0.1.0.txt`,
@@ -209,12 +237,12 @@ Everything but the manifest and the `.asc` files is named in the manifest's chec
 documented one-liner really does check every published file at once — **the verifier included**, which
 matters, because a tampered `verify-release.sh` is a real attack.
 
-**A single publication is the point**, and it is the reason step 7 waits for the witness rather than
+**A single publication is the point**, and it is the reason step 8 waits for the witness rather than
 publishing and appending. Adding a signature to an already-published `.asc` would mutate a signed
 asset that strangers may already hold, with no way to tell a reader which version of it they got.
 That constraint is what will still be true on the day a witness key exists.
 
-**9. Re-verify the *published* assets as a stranger would, close the run record, then refresh the
+**10. Re-verify the *published* assets as a stranger would, close the run record, then refresh the
 README's advisory list.**
 
 ```sh
@@ -317,6 +345,28 @@ git add build/inputs.sha256 && git diff --cached build/inputs.sha256
 
 A human commits that diff, because **a changed hash for an unchanged version is exactly the
 supply-chain event that should be visible in a pull request.**
+
+**This happens on `main`, in a reviewed pull request, never inside the release ritual** — step 1
+stops the release and sends the releaser here precisely so that the person cutting a release is not
+the only reviewer of a supply-chain diff.
+
+**Two different events produce a non-empty diff, and only one of them is routine.** Each line is
+`<sha256>  <path>`, and the path carries the version, so the columns tell them apart:
+
+- **A path appears or disappears** — `libcurl-8.16.0-r0.apk` gone, `-r1` arrived. That is version
+  churn: Alpine moved, the pin followed, ordinary review.
+- **A fetched path survives with a different hash** — the same version, different bytes. That is **not
+  churn, it is an incident.** The release does not proceed through it, and the question is not *what changed*
+  but *why bytes served under an unchanged version identifier are not the bytes we recorded*. Until
+  that has an answer, treat it as `SECURITY.md`'s territory, not as a pin bump; if any published
+  release was built from the old bytes, it is `ADVISORIES.txt`'s.
+
+**`CLOSURES.txt` and `NOTICE` are neither**, and the second test excludes them. `fetch-inputs.sh`
+writes both from the set it just resolved, at paths that carry no version, so they change on every
+churn — counted as incidents they would fire the alarm on every ordinary pin bump, and an alarm that
+fires during ordinary work is one nobody reads on the day it means something.
+
+`--refresh` prints the counts, so the distinction does not depend on a tired person reading a diff.
 
 **CI never runs `--refresh`.** CI's witness build fetches from the CDN *against the committed list*,
 so it stays an independent reproduction rather than a replay of the builder's own bytes — and it fails
