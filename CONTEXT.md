@@ -252,3 +252,12 @@ evidence for the higher one does not exist yet. It is a statement about what has
 never about what has been *found*: "nobody outside this project has rebuilt this image" is
 pre-trust, "we found a flaw" is an advisory, and conflating them makes both unreadable. A pre-trust
 claim carries the conditions that retract it, or it becomes permanent by accident.
+
+## Boot-checklist run record
+
+The record that the boot checklist was run, on which machine, and what each item answered — one per
+release, published beside the ISO. The checklist is the *procedure*; the run record is the
+*evidence*, and only the second one is a thing a stranger can check. It is an attestation: signed,
+naming an identified operator and an identified machine. Its verdicts are *pass*, *fail* and
+*deviated*, and the third is the load-bearing one — it marks where a release's evidence stops
+matching the checklist's claim, which a missing row or a generous *pass* would hide.
