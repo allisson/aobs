@@ -12,7 +12,8 @@
 #                               a renamed host directory back at /src would vary nothing the build
 #                               can see, which is the trap
 #   - the hostname              --hostname
-#   - the clock                 the container's clock, pushed 37 hours forward
+#   - the clock                 pushed 37 hours forward — and there is no way to do this that does
+#                               not move the *runner's* clock; see "The clock is the runner's" below
 #   - TZ, LC_ALL, LANG          set to values that would reach mtools and xorriso if unforced
 #   - the umask                 022 -> 077, which mkiso.sh must override to 022 itself
 #   - the CPU count             --cpus=2 against the runner's full count
@@ -36,10 +37,36 @@
 # about decay at the worst possible moment — during a release, when the person who broke it is not the
 # person cutting it. The `on:` block below says why the two halves cannot live in one `push` filter.
 #
+# **The clock is the runner's, not the container's, and that is not a choice.** `--privileged` grants
+# `CAP_SYS_TIME`, and a container shares the host kernel's `CLOCK_REALTIME`, so `date -s` moves the
+# runner. Every alternative was checked and none survives: a Linux **time namespace** virtualises
+# `CLOCK_MONOTONIC` and `CLOCK_BOOTTIME` only, never `CLOCK_REALTIME`; **`libfaketime`** (Alpine
+# 0.9.10-r3) is `LD_PRELOAD`, and stage 1 chroots into `/rootfs`, where the `.so` does not exist and
+# the preload silently drops — which is exactly where divergence source 8 lives, so it would miss the
+# one class this variation is for; and `--cap-drop=SYS_TIME` **is a no-op under `--privileged`**
+# (measured: `CapEff` stays `000001ffffffffff`; only `--cap-add=ALL --cap-drop=SYS_TIME` clears bit
+# 25, at the cost of reassembling everything else `--privileged` does for the chroots).
+#
+# So the push stays, and is **contained** instead: *Put the runner's clock back* restores it with
+# `if: always()`, from arithmetic on `/proc/uptime` rather than NTP, so a failed build cannot leave
+# the runner in the future. Only the log-line timestamps *inside* the hostile step remain fiction.
+#
+# **The 37 hours are not decoration.** The two builds already run ~10 minutes apart on the same
+# clock, so any second-granular wall-clock leak diverges with no variation at all. The push adds the
+# hour- and day-granular class — source 8 stamps `/etc/shadow`'s last-change field in **days** — and
+# that class is the whole justification.
+#
+# **Each build prints its own duration from `/proc/uptime`, and that is the figure to read.**
+# `settimeofday` cannot move a monotonic clock, so this measure is independent of anything the build
+# does; GitHub's step timer is not. Two instruments that have to agree is what would have caught the
+# corruption the first time — the hostile step was once reported as 133821 s (~37.17 h) against a job
+# that finished in minutes.
+#
 # **Written fallback, decided in advance rather than during the annoyance:** if this job's first run
-# exceeds 40 minutes, the trigger drops to tags plus `workflow_dispatch`. A guard slow enough to be
-# resented does not get made faster; it gets disabled. Its runtime, and whether a native amd64 kernel
-# build fits the free-runner 6h ceiling, are **estimates until this has run once.**
+# exceeds 40 minutes **by the printed monotonic figure**, the trigger drops to tags plus
+# `workflow_dispatch`. A guard slow enough to be resented does not get made faster; it gets disabled.
+# Its runtime, and whether a native amd64 kernel build fits the free-runner 6h ceiling, are
+# **estimates until this has run once.**
 #
 # Every action is pinned to a commit SHA, not a tag. A tag is a movable pointer, and a repository
 # whose entire selling point is that every input is pinned cannot make an exception for the thing that
@@ -107,8 +134,11 @@ jobs:
       - name: Build once, ordinarily
         run: |
           mkdir -p out-a
+          read -r up0 _ < /proc/uptime
           docker run --rm --privileged \
             -v "$PWD:/src" -v "$PWD/out-a:/out" aobs-iso | tee ladder-a.txt
+          read -r up1 _ < /proc/uptime
+          awk -v a="$up0" -v b="$up1" 'BEGIN{printf "monotonic: build A took %d s\n", b-a}'
 
       - name: Build again, under hostile variation
         # A differently named build path, another hostname and uid, a clock 37 hours ahead, a
@@ -118,6 +148,16 @@ jobs:
           elsewhere="$RUNNER_TEMP/a-rather-differently-named-build-directory"
           mkdir -p out-b "$elsewhere"
           cp -a . "$elsewhere/"
+
+          # Read *before* the container moves the clock, and handed to the restore step below. The
+          # pair is (real, monotonic): the restore is arithmetic on the second, so it needs neither
+          # NTP nor a clock the build could have touched.
+          read -r up0 _ < /proc/uptime
+          {
+            echo "CLOCK_REAL0=$(date -u +%s)"
+            echo "CLOCK_UP0=$up0"
+          } >> "$GITHUB_ENV"
+
           docker run --rm --privileged \
             --hostname a-different-host \
             --cpus=2 \
@@ -130,6 +170,25 @@ jobs:
             -e WORK=/somewhere/else/entirely \
             aobs-iso sh -c 'date -s "+37 hours" >/dev/null; umask 077; \
                             exec /bin/sh "$SRC/build/mkiso.sh"' | tee ladder-b.txt
+
+          read -r up1 _ < /proc/uptime
+          awk -v a="$up0" -v b="$up1" 'BEGIN{printf "monotonic: build B took %d s\n", b-a}'
+
+      - name: Put the runner's clock back
+        # `if: always()`, and immediately after the push, because the failure case is the one that
+        # matters: a build that dies mid-stage would otherwise leave every later step — and the job's
+        # own reported duration — 37 hours into the future. Restoring here means only the log lines
+        # inside the step above are fiction.
+        #
+        # `date -s` and not NTP: the runner's clock is set to where it would have been had nothing
+        # touched it, `real0 + (uptime_now - uptime_then)`. `settimeofday` cannot move a monotonic
+        # clock, so that delta is true however far the wall clock was pushed.
+        if: always()
+        run: |
+          [ -n "${CLOCK_REAL0:-}" ] || exit 0
+          read -r up1 _ < /proc/uptime
+          sudo date -u -s "@$(awk -v r="$CLOCK_REAL0" -v a="$CLOCK_UP0" -v b="$up1" \
+                                  'BEGIN{printf "%d", r + (b-a)}')"
 
       - name: Compare
         # The ladder first, because it names *where* a divergence began; the ISO comparison is the
