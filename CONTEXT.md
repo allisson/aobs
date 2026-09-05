@@ -244,3 +244,11 @@ or unsafe result its user could not have seen. Distinguished from a release note
 this have cost someone money without them noticing* — and from most advisory formats by one field:
 whether upgrading is sufficient, or whether keys generated on the affected build are permanently
 compromised and the funds must move.
+
+## Pre-trust release
+
+A release whose published claim is deliberately lower than the project's own bar, because named
+evidence for the higher one does not exist yet. It is a statement about what has been *observed*,
+never about what has been *found*: "nobody outside this project has rebuilt this image" is
+pre-trust, "we found a flaw" is an advisory, and conflating them makes both unreadable. A pre-trust
+claim carries the conditions that retract it, or it becomes permanent by accident.
