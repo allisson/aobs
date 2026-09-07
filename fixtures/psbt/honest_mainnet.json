@@ -1,0 +1,28 @@
+{
+  "name": "honest_mainnet",
+  "description": "The same review on mainnet, from the same published mnemonic.",
+  "traces_to": "docs/test-harness.md \u2014 mainnet fixtures, vector mnemonic only",
+  "network": "mainnet",
+  "expected": {
+    "refusal": null,
+    "outputs": [
+      {
+        "index": 0,
+        "category": "payment",
+        "sats": 1000000
+      },
+      {
+        "index": 1,
+        "category": "change_proven",
+        "sats": 999000,
+        "proven_path": "m/84h/0h/0h/1/1"
+      }
+    ],
+    "headline": {
+      "payments_sats": 1000000,
+      "fee_sats": 1000,
+      "total_leaving_sats": 1001000
+    },
+    "transaction_warnings": []
+  }
+}

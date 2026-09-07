@@ -1,0 +1,43 @@
+# The Python layer, pinned by version AND sha256, because Debian trixie ships it below
+# what this application declares. docs/adr/0002-python-dependencies-from-pinned-wheels.md
+# holds the decision and the numbers; the short form is:
+#
+#   textual        app runs on 8.2.7   trixie has 2.1.2    six majors back
+#   rich           app runs on 15.0.0  trixie has 13.9.4   two majors back
+#   cryptography   app declares >=44   trixie has 43.0.0   below the declared floor
+#   argon2-cffi    app declares >=23.1 trixie has 21.1.0    below the declared floor
+#   pytest-asyncio app declares >=1.3  trixie has 0.25.1    below the declared floor
+#
+# Everything Debian CAN serve at an acceptable version still comes from apt — python3
+# itself, qrcode, zxing-cpp, pil, libsecp256k1, kbd, busybox, the kernel. See
+# build/apt-versions.txt. Two lists, one rule: the authoritative test tier installs the
+# exact versions the ISO installs, from both.
+#
+# `python3-pip` installs these with --no-index from build/inputs/, so the build still
+# touches no network, and pip is removed from the rootfs before the initramfs is packed.
+#
+# These are TOP-LEVEL PINS, not the closure. build/fetch-inputs.sh (M2) resolves the
+# transitive set — markdown-it-py, mdit-py-plugins, platformdirs, pygments,
+# typing-extensions, cffi, pycparser, argon2-cffi-bindings, backports-asyncio-runner —
+# and writes every wheel's hash into build/inputs.sha256, which is what the build gates
+# on. A wheel whose hash is not in that file stops the build; it does not get fetched.
+#
+# The wheels are prebuilt binaries for three of these, which is in tension with the
+# decision to vendor embit rather than take its PyPI wheel (that wheel bundles a
+# libsecp256k1 blob). The distinction the ADR draws: a blob in the INPUT ARCHIVE is
+# hash-pinned, published and rebuildable-against, exactly like a .deb. A blob in the
+# REPOSITORY is neither. embit stays vendored from source.
+
+# @group appliance
+
+textual==8.2.7 --hash=sha256:4caaa13a90bc4cf9c6c862c067ccd34fe84e9c161710a2a907a8026313b6bd73
+rich==15.0.0 --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb
+argon2-cffi==25.1.0 --hash=sha256:fdc8b074db390fccb6eb4a3604ae7231f219aa669a2652e0f20e16ba513d5741
+
+# cp311-abi3, not cp313: cryptography ships stable-ABI wheels, so one file covers every
+# CPython from 3.11 up. manylinux_2_28 against trixie's glibc 2.41 — satisfied.
+cryptography==47.0.0 --hash=sha256:0024b87d47ae2399165a6bfb20d24888881eeab83ae2566d62467c5ff0030ce7
+
+# @group harness
+
+pytest-asyncio==1.3.0 --hash=sha256:611e26147c7f77640e6d0a92a38ed17c3e9848063698d5c93d5aa7aa11cebff5

@@ -1,0 +1,63 @@
+{
+  "name": "many_outputs",
+  "description": "Eight payments and one proven change output. More outputs than fit on a screen, which is what the scroll-to-end lock exists for.",
+  "traces_to": "docs/review-screen.md \u2014 the scroll-to-end lock",
+  "network": "signet",
+  "expected": {
+    "refusal": null,
+    "outputs": [
+      {
+        "index": 0,
+        "category": "payment",
+        "sats": 200000
+      },
+      {
+        "index": 1,
+        "category": "payment",
+        "sats": 200000
+      },
+      {
+        "index": 2,
+        "category": "payment",
+        "sats": 200000
+      },
+      {
+        "index": 3,
+        "category": "payment",
+        "sats": 200000
+      },
+      {
+        "index": 4,
+        "category": "payment",
+        "sats": 200000
+      },
+      {
+        "index": 5,
+        "category": "payment",
+        "sats": 200000
+      },
+      {
+        "index": 6,
+        "category": "payment",
+        "sats": 200000
+      },
+      {
+        "index": 7,
+        "category": "payment",
+        "sats": 200000
+      },
+      {
+        "index": 8,
+        "category": "change_proven",
+        "sats": 395000,
+        "proven_path": "m/84h/1h/0h/1/0"
+      }
+    ],
+    "headline": {
+      "payments_sats": 1600000,
+      "fee_sats": 5000,
+      "total_leaving_sats": 1605000
+    },
+    "transaction_warnings": []
+  }
+}

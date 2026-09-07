@@ -41,8 +41,8 @@ Say which kind you mean. A sentence that does not is not yet a claim.
 | Nothing recoverable from RAM after power-off | **Best-effort, not promised** — no byte-zeroing | not checkable; stated as a limit |
 | The published ISO is byte-identical to an independent rebuild | **Checkable by rebuilding** | `sha256sum`, against the signed manifest |
 
-Two of these are weaker than they were in this project's Alpine ancestry, where a hand-written kernel
-config compiled out networking and the block layer entirely. `docs/adr/0001-debian-base-and-stock-kernel.md`
+Three of these are weaker than they were in this project's Alpine ancestry, where a hand-written
+kernel config compiled out networking, modules and the block layer entirely. `docs/adr/0001-debian-base-and-stock-kernel.md`
 records why that was traded away and what was bought with it. Do not restate either as structural.
 
 The strongest claim is the last one, and it is the one the project actually rests on: the signature
@@ -83,10 +83,22 @@ asserts the Schnorr and extrakeys symbols resolve in the shipped `.so`, and fail
 
 ## The image
 
-Debian 13 (trixie), pinned to a `snapshot.debian.org` timestamp so `apt` resolves to fixed versions
-forever. `build/apt-versions.txt` is generated from that snapshot and is the single list both tiers
-read — the appliance group is installed into the rootfs, the harness group never is, and the build
-fails if a harness package reaches the image.
+Debian 13 (trixie), pinned to a `snapshot.debian.org` timestamp — both `trixie` and `trixie-security`,
+because the kernel security update lives in the second one — so `apt` resolves to fixed versions
+forever. `build/snapshot.env` holds the pin.
+
+Two pinned lists, and `build/verify.py` parses both. `build/apt-versions.txt` is everything Debian can
+serve at an acceptable version: the base layout, `python3`, `busybox`, `kbd`/`console-data`,
+`libsecp256k1-2`, `python3-qrcode`, `python3-zxing-cpp`, `python3-pil`, and the kernel.
+`build/wheel-versions.txt` is the rest of the Python layer — `textual`, `rich`, `cryptography`,
+`argon2-cffi` — pinned by version and sha256, because Debian stable ships all four **below** what this
+application declares; `docs/adr/0002-python-dependencies-from-pinned-wheels.md` has the numbers and the
+trade. Wheels are fetched in the one networked step and installed with `--no-index`, so the build still
+touches no network, and `pip` is removed before the initramfs is packed.
+
+In both lists the appliance group is installed into the rootfs, the harness group never is, the
+`# @group` markers are machine-readable, and the build fails if a harness package or a package manager
+reaches the image.
 
 Four things about the shape, each of them a decision rather than an accident:
 
@@ -133,8 +145,8 @@ Four tiers, and the split is what keeps skew failing in CI rather than on the ap
 
 1. **Fast suite** — runs anywhere, on any Python. The core, the ports against fakes, the app headless.
 2. **Authoritative tier** — `debian:trixie-slim` at the same pinned snapshot, installing *the exact
-   versions the ISO installs*. `python3-textual` 2.1.2 against whatever `pip` gives a dev machine is
-   precisely the drift this tier exists to catch.
+   versions the ISO installs*, from both pin files and with wheels resolved `--no-index` the way the
+   image resolves them. Whatever `pip` gives a dev machine is precisely the drift this tier catches.
 3. **Reproducibility guard** — builds twice under deliberately hostile variation and fails on any
    differing byte. Runs on `build/**` changes.
 4. **Regtest suite** — needs a `bitcoind`. Opt-in, outside the default loop.
@@ -152,6 +164,7 @@ cannot be.
 | Document | Fixes |
 |---|---|
 | `docs/adr/0001-debian-base-and-stock-kernel.md` | The base OS and the kernel, and what the switch cost |
+| `docs/adr/0002-python-dependencies-from-pinned-wheels.md` | Where the Python layer comes from, and where a prebuilt blob may live |
 | `docs/boot-pipeline.md` | The build's stages, PID 1, the module allowlist, the RAM floor |
 | `docs/threat-model.md` | Adversary tiers, and every claim above at its stated strength |
 | `docs/reproducible-build.md` | The reproducibility contract and the divergence sources it fixes |
@@ -172,7 +185,7 @@ cannot be.
 This is a restart of an Alpine-based project that compiled its own kernel. The Python application,
 its tests and its app-level documents carry over essentially unchanged; the build and the operating
 system were rewritten. What the switch bought and what it cost is in
-`docs/adr/0001-debian-base-and-stock-kernel.md`, and the two weakened claims are marked as such in
+`docs/adr/0001-debian-base-and-stock-kernel.md`, and the three weakened claims are marked as such in
 the table above and in `docs/threat-model.md`. The predecessor never cut a release and was never
 booted on real hardware — which is why `docs/roadmap.md` puts a hardware boot ahead of everything
 that is not needed to reach one.

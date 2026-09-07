@@ -1,0 +1,92 @@
+# The exact Debian package versions both tiers install, read from the pinned snapshot in
+# build/snapshot.env (trixie @ 20260901T000000Z, plus trixie-security at the same instant).
+#
+# docs/test-harness.md requires the authoritative tier to install *the exact versions the
+# ISO installs*, so a skew fails in CI rather than on the appliance. This file is the one
+# pinned list, and it has three consumers: build/Dockerfile.test installs BOTH groups,
+# build/mkiso.sh installs the appliance group ONLY, and build/verify.py parses it to
+# assert that no harness package reached the rootfs.
+#
+# The `# @group` markers are MACHINE-READABLE AND LOAD-BEARING. A package outside any
+# group is a parse error in verify.py, never a guess. In the Alpine predecessor the split
+# was once a prose comment with `py3-pip` on the far side of it, and a naive parser — as
+# Dockerfile.test is, and is right to be, because it wants both halves — would have put a
+# package manager in the rootfs and defeated a published claim with nothing noticing.
+#
+# These are TOP-LEVEL PINS, not the closure. build/fetch-inputs.sh (M2) expands them with
+# apt's own resolver at this snapshot and writes every resolved .deb into
+# build/inputs.sha256, which is what the build actually gates on.
+#
+# The Python layer is NOT here — it is build/wheel-versions.txt, and
+# docs/adr/0002-python-dependencies-from-pinned-wheels.md says why.
+#
+# Regenerate with: sh build/gather-apt-versions.sh
+
+# @group appliance
+# Everything below this marker is installed into the rootfs.
+
+# The base layout and the shell. Debian minbase gives /bin/sh via dash; busybox is what
+# provides `poweroff`, which build/init needs and which no init system is here to offer.
+dash=0.5.12-12
+busybox=1:1.37.0-6+b8
+util-linux=2.41.5-0+deb13u1
+
+# The interpreter. build/verify.py asserts both this and /bin/sh are present in the
+# rootfs: the predecessor's first ISO had neither, and build/init could not have run a
+# single line of itself.
+python3=3.13.5-1
+
+# Every EC operation on the appliance — derivation, ECDSA, Schnorr, address proof — runs
+# here and never in embit's pure-Python fallback. Debian ships this prebuilt, so the
+# build asserts secp256k1_schnorrsig_sign32 and secp256k1_keypair_create resolve in the
+# shipped .so rather than trusting that BIP86's modules were enabled. UNVERIFIED as of
+# this commit; the assertion is what settles it.
+libsecp256k1-2=0.5.0-2+b1
+
+# The QR channel, both directions. Appliance dependencies, not harness ones:
+# aobs/ui/qrcodes.py imports qrcode and aobs/ui/qrdecode.py imports zxingcpp and PIL.
+# `python3-segno` is not what Debian packages either, which is why qrcode is the encoder.
+python3-qrcode=8.2-1
+python3-zxing-cpp=2.3.0-4
+python3-pil=11.1.0-5+deb13u4
+
+# `loadkeys` and the maps it loads. The Keymap adapter shells out to the first and reads
+# the second. console-data is what makes layouts() return more than the default, and the
+# full set ships deliberately: a user on AZERTY or ABNT2 typing a BIP39 passphrase
+# through a US map creates a wallet they can never reopen, with no error and no signal.
+kbd=2.7.1-2
+console-data=2:1.12-9
+
+# The kernel, unmodified, from trixie-security. build/mkiso.sh then prunes the modules
+# tree to the allowlist and deletes the rest, kernel/net and drivers/net included.
+linux-image-amd64=6.12.107-1
+
+# @group harness
+# The test tier only. The ISO carries no test runner and no package manager, and
+# build/verify.py fails the build if any name below reaches the rootfs.
+
+python3-pytest=8.3.5-2
+python3-hypothesis=6.130.5-2
+
+# HARNESS GROUP, NEVER THE APPLIANCE GROUP. verify.py fails the build if either name
+# reaches the rootfs, and it matters twice over here: an appliance carrying git would
+# have a network utility in the image. Both are needed by real tests rather than mocks —
+# tests/test_verify_release.py drives the real verify-release.sh against a fixture
+# release signed with scratch keys in a throwaway GNUPGHOME, and a fake gpg would be a
+# test of our own mock. The one artifact aimed at people who trust nobody is the last one
+# that should be tested against a stand-in.
+git=1:2.47.3-0+deb13u1
+gnupg=2.4.7-21+deb13u1
+
+# Installs build/wheel-versions.txt into both tiers, from pre-fetched wheels only.
+# --no-index at install time, and removed from the rootfs before the initramfs is packed.
+python3-pip=25.1.1+dfsg-1
+
+# The builder's own tools. Not installed into either tier's Python environment — listed
+# here so Dockerfile.iso reads one pinned file rather than resolving `latest`.
+mmdebstrap=1.5.7-1+deb13u1
+xorriso=1.5.6-1.2+b1
+isolinux=3:6.04~git20190206.bf6db5b4+dfsg1-3.1
+grub-efi-amd64-bin=2.12-9+deb13u2
+zstd=1.5.7+dfsg-1
+cpio=2.15+dfsg-2

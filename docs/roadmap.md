@@ -27,48 +27,61 @@ Get the inherited code and the pinned base into this repo, with nothing built ye
 - [ ] Seed `CONTEXT.md`, revising the terms the base-OS switch changes: `Offline`, `Amnesic`,
       `No data path`, `Boot medium`, `Input archive`, `Source archive`, `Reproducibility contract`.
 - [ ] Pick the `snapshot.debian.org` timestamp and record it in one place both the build and the test
-      tier read.
+      tier read — `build/snapshot.env`.
+- [ ] `build/apt-repositories`: both `trixie` and `trixie-security` at that instant. The second is not
+      optional — at this snapshot `linux-image-amd64` is 6.12.94-1 in main and **6.12.107-1** in
+      security, so pinning main alone would ship an appliance kernel thirteen point releases behind,
+      silently.
 - [ ] Generate `build/apt-versions.txt` from that snapshot, with the machine-readable
       `# @group appliance` / `# @group harness` markers. A package outside any group is a parse error,
       never a guess — in the predecessor a prose comment on the wrong side of the split put a package
       manager in the rootfs and nothing noticed.
-- [ ] `docs/adr/0001-debian-base-and-stock-kernel.md`, `docs/overview.md`, this file.
+- [ ] `build/wheel-versions.txt`: the Python layer Debian ships below the app's declared floors,
+      pinned by version and sha256. See `docs/adr/0002-python-dependencies-from-pinned-wheels.md`.
+- [ ] `docs/adr/0001-debian-base-and-stock-kernel.md`,
+      `docs/adr/0002-python-dependencies-from-pinned-wheels.md`, `docs/overview.md`, `CLAUDE.md`,
+      this file.
+- [ ] Fix `.gitignore`: the Python-packaging default ignores `build/`, which is source here.
+- [ ] Drop `tests/test_build_verifier.py` and `tests/test_verify_release.py`. Both test subjects that
+      no longer exist — the Alpine `build/gather.py`, `build/verify.py` and `verify-release.sh` — so
+      they are rewritten against the Debian build at M2 and M5 respectively, not ported. **This is
+      the one place where importing the predecessor loses coverage**, and it is recorded here so it
+      cannot be forgotten: until M2 the build has no assertions under test.
 
 **Exit**: the fast suite runs on a dev machine. Nothing else is claimed.
 
 ---
 
-## M1 — The application, green on Debian's Textual
+## M1 — The application, green in the authoritative tier
 
-The largest known unknown in the migration, and it needs no image at all — which is why it is first.
-The harness drives the app headless in seconds; an ISO build is minutes. Debugging a breaking
-framework upgrade on the slow loop would be a choice to suffer.
+Needs no image at all, which is why it is first: the harness drives the app headless in seconds and an
+ISO build is minutes.
 
-Debian trixie ships **`python3-textual` 2.1.2**. The application was written against `textual>=0.80`,
-and Textual 1.0 and 2.0 were both breaking releases. Roughly 20 screens, 4 widgets and the global-key
-layer are exposed to it.
+The original plan here was a Textual port, on the belief that Debian shipped a *newer* Textual than the
+app was written for. It ships an older one — six majors older — and two crypto floors besides, so
+`docs/adr/0002` moved the Python layer to hash-pinned wheels and **there is no port**. What is left is
+proving that the app runs unchanged on Debian's interpreter, against Debian's `libsecp256k1`, with the
+wheel layer installed the way the image will install it.
 
-- [ ] `build/Dockerfile.test` on `debian:trixie-slim` at the pinned snapshot, installing **both**
-      package groups — the authoritative tier.
-- [ ] Port `aobs/ui/` to Textual 2.1.2. Screen by screen, suite green at each step.
-- [ ] The global-key contract survives verbatim: `esc` backs out without acting, `F12` powers off, the
-      confirm key is per-screen and never `enter` and never `esc`. A screen where `esc` means *proceed*
-      is a defect, not a port artifact.
-- [ ] The failure shape survives: what happened, next steps with no default and no highlighted button,
-      a short stable condition name.
+- [ ] `build/Dockerfile.test` on `debian:trixie-slim` at the pinned snapshot, installing **both** apt
+      groups and **both** wheel groups — the authoritative tier.
+- [ ] Wheels install from pre-fetched files with `--no-index`, the same way `mkiso.sh` will do it. A
+      tier that reaches PyPI at test time is not testing what ships.
+- [ ] Full suite green on Debian's `python3` 3.13.5. `pyproject.toml` says `>=3.12`; the predecessor
+      ran 3.14, so 3.13 is a version neither has exercised.
+- [ ] Confirm the vendored `embit` and `ur2` build and pass there — Debian packages neither.
 - [ ] Verify Debian's `libsecp256k1-2` 0.5.0 exports `secp256k1_schnorrsig_sign32` and
       `secp256k1_keypair_create`. **Unverified today.** If it does not, this milestone grows a
-      build-from-upstream stage and the ADR gets an amendment.
+      build-from-upstream stage and `docs/adr/0001` gets an amendment.
 - [ ] Assert every EC operation goes through that `.so` and never embit's pure-Python fallback.
-- [ ] `python3-embit` and `python3-urtypes` do not exist in Debian — confirm the vendored copies build
-      and pass against Debian's Python (trixie is Python 3.13; `pyproject.toml` says `>=3.12`).
+- [ ] `build/verify.py` parses **both** pin files and asserts the two groups stay disjoint — two lists
+      is a thing the build checks, not a thing that can drift.
 
-**Exit**: the full suite passes inside the authoritative tier, at the exact package versions the ISO
-will install. One ECDSA and one Schnorr signature verified against a known-answer fixture.
+**Exit**: the full suite passes inside the authoritative tier, at the exact versions the ISO will
+install, from both lists. One ECDSA and one Schnorr signature verified against a known-answer fixture.
 
-**Risk**: this is the milestone most likely to blow up in scope. If the Textual port turns out to be a
-rewrite rather than a port, that is a finding worth stopping on and reconsidering Q10 — not something
-to absorb silently.
+**Risk**: `libsecp256k1` is the live one. If Debian's build lacks the BIP86 modules, the "no compiler in
+the build" property from `docs/adr/0001` partly goes away — that is a finding to stop on, not to absorb.
 
 ---
 
@@ -77,8 +90,9 @@ to absorb silently.
 - [ ] `mmdebstrap --mode=unshare` builds the rootfs from the pinned snapshot. **No `--privileged`.**
       Verify unshare mode works in the CI runner early; if it does not, that is a finding, not a
       licence to reach for `--privileged`.
-- [ ] `build/fetch-inputs.sh`: the one networked step, and not part of the build. It populates
-      `build/inputs/`, and the build refuses to start unless every byte matches `build/inputs.sha256`
+- [ ] `build/fetch-inputs.sh`: the one networked step, and not part of the build. It resolves both
+      pin files' closures — `.deb`s from the snapshot, wheels from PyPI — into `build/inputs/`, and
+      the build refuses to start unless every byte matches `build/inputs.sha256`
       — on hash **and** on set equality. There is no second, offline-only path to go stale.
 - [ ] Install Debian's `linux-image-amd64` (6.12 LTS, the same series the predecessor compiled by
       hand). No kernel compile, no `kernel.config`, no toolchain.
@@ -86,8 +100,10 @@ to absorb silently.
       `uvcvideo`, `usbhid`, plus dependencies — and delete everything else, including all of
       `kernel/net` and `kernel/drivers/net` and every storage driver. Regenerate `modules.dep`.
 - [ ] A `modprobe` blacklist as a cheap second line. It is never cited as the claim.
-- [ ] Copy the app tree into the rootfs. Not `pip install` — no package manager reaches the image, and
-      `build/verify.py` fails the build if one does.
+- [ ] Install the wheel layer into the rootfs with `pip --no-index` from `build/inputs/`, then remove
+      `pip` before the initramfs is packed. `build/verify.py` fails the build if any package manager
+      survives into the image.
+- [ ] Copy the app tree into the rootfs. Never `pip install` for the app itself.
 - [ ] Ship the full `console-data` keymap set. Measure what it costs.
 - [ ] `build/init` as PID 1: five mounts, UTF-8 console, default keymap, `authorized_default=0` after
       our devices enumerate and before the first secret, the RAM floor, `exec python3 -m aobs`. No
@@ -96,7 +112,8 @@ to absorb silently.
 - [ ] `xorriso` into a hybrid ISO: `isolinux` for BIOS, `grub-efi` for UEFI. Secure Boot is **not**
       supported in v0.1.
 - [ ] `build/verify.py`: every build-time assertion as a pure function, each fed a deliberately broken
-      input by the suite to prove it still bites. Minimum set — no harness package in the rootfs, no
+      input by the suite to prove it still bites — this is where `tests/test_build_verifier.py` comes
+      back, written against the Debian build rather than ported from the Alpine one. Minimum set — no harness package in the rootfs, no
       package manager, `/bin/sh` and `python3` present (the predecessor's first ISO had neither, and
       `build/init` could not have run a line), no `kernel/net`, no module outside the allowlist, no
       getty, the `libsecp256k1` symbols, the RAM floor matching the measured size.
@@ -166,7 +183,7 @@ Everything below this line waits.
       `SOURCE_DATE_EPOCH`, and the sha256 of every published file. The manifest is what is signed; the
       ISO is not. A signature over a file that names the inputs also says which inputs produced them,
       which is what an independent reproduction needs.
-- [ ] `verify-release.sh`: what a stranger runs. `sha256sum` and `gpg`, nothing else, by construction
+- [ ] `verify-release.sh`: what a stranger runs, and `tests/test_verify_release.py` with it — `sha256sum` and `gpg`, nothing else, by construction
       and by test — driven in CI against a fixture release signed with scratch keys in a throwaway
       `GNUPGHOME`. The one artifact aimed at people who trust nobody is the last one to be tested
       against a stand-in.
