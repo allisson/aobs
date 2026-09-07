@@ -103,6 +103,15 @@ wheel layer installed the way the image will install it.
 - [ ] Full suite green on Debian's `python3` 3.13.5. `pyproject.toml` says `>=3.12`; the predecessor
       ran Alpine's 3.14 and this machine runs 3.13.12, so Debian's 3.13.5 is close to but not the same
       as anything the suite has passed on.
+
+      **Observed, and deliberately not yet checked off.** In `build/Dockerfile.test`, with the
+      session gates above in place: `720 passed, 4 skipped, 2 deselected, 0 failed` in 496 s,
+      reporting `python 3.13.5, EC backend ctypes_secp256k1, authoritative tier yes`. The four
+      skips are exactly `SKIPS_ALLOWED` and none was stale, so the skip policy passed by staying
+      silent. That run was the tier image under **qemu on an arm64 Mac** — the same x86_64
+      userland, the same `libsecp256k1`, the same wheels, but a host this project's own rule says
+      a milestone may not cite. The box closes on CI's native x86_64 run, and the numbers written
+      here then come from that run.
 - [x] **Confirmed.** Every appliance wheel has a `manylinux` build for CPython 3.13:
       `fetch-inputs.sh` runs `pip download --only-binary :all: --platform manylinux_2_28_x86_64
       --platform manylinux2014_x86_64 --python-version 3.13`, which fails if any package would need
@@ -123,7 +132,7 @@ wheel layer installed the way the image will install it.
       — BIP86's modules were enabled — and also the long-deprecated `secp256k1_ec_privkey_negate`
       alias that the vendored embit's loader binds unconditionally. No build-from-upstream stage is
       needed and `docs/adr/0001` stands.
-- [ ] Assert every EC operation goes through that `.so` and never embit's pure-Python fallback.
+- [x] Assert every EC operation goes through that `.so` and never embit's pure-Python fallback.
       **Measured, and worse than a performance note**: with no `libsecp256k1` to `ctypes`-load, the
       vendored embit silently resolves to `py_secp256k1` — 1.73 ms per `ec_pubkey_create` against
       tens of microseconds for the C library, which is why the suite takes 22 minutes on a machine
@@ -131,12 +140,50 @@ wheel layer installed the way the image will install it.
       code path `docs/boot-pipeline.md` forbids on the appliance, and passes. So the assertion is not
       only a build-time check: the suite itself must refuse to run against the fallback, or say so on
       every line of output.
-- [ ] `build/verify.py` parses **both** pin files and asserts the two groups stay disjoint — two lists
+
+      **Landed as both halves, in `tests/conftest.py`.** `pytest_report_header` names the
+      interpreter and the live backend on *every* run in *both* tiers, and adds a line saying the
+      run is not evidence about the appliance whenever the backend is the fallback — that is the
+      dev-machine half, and it is what stops a milestone being checked off from a green
+      `py_secp256k1` run. `pytest_sessionstart` is the tier half: with `AOBS_AUTHORITATIVE_TIER=1`
+      and a backend other than `ctypes_secp256k1` the session **does not start**, because a green
+      report from 697 tests through the fallback looks exactly like a good one. No
+      `AOBS_ALLOW_PURE_PYTHON_EC` escape hatch — an escape hatch on this one *is* the failure mode.
+      The backend is read from `ec_pubkey_create.__module__`, never from whether a `.so` is on
+      disk: `secp256k1.py` binds inside a bare `except:`, so a present-but-unloadable library
+      produces a pure-Python signer and no error at all.
+- [x] `build/verify.py` parses **both** pin files and asserts the two groups stay disjoint — two lists
       is a thing the build checks, not a thing that can drift.
-- [ ] **No test may be skipped in this tier.** Three entropy tests carry
-      `@linux_getrandom_only` because `os.GRND_NONBLOCK` does not exist off Linux, so they skip on a
-      dev Mac and the ordering guarantee in `docs/entropy-mixing.md` is guarded only here. A tier
-      that reports skips is not authoritative; make a non-zero skip count fail it.
+
+      Three pure functions, and the M1 slice only — every assertion that needs a rootfs to look at
+      is M2's. `parse_pin_file` makes the `# @group` markers load-bearing: a pin before any marker,
+      an unknown group, an unpinned name, a name pinned twice in one group, or a missing group is
+      an error and never a guess. `groups_are_disjoint` owns the cross-group case separately, so
+      the message names the rootfs rather than a duplicate line. `no_apt_package_shadows_a_wheel`
+      is the `docs/adr/0002` seam and is the one that will actually bite: **no `python3-*` package
+      may be in the apt list at all**, not merely none that collides with a wheel today, because
+      the collision arrives later when the wheel is added and nothing re-reads the apt list then.
+      `python3` and `python3-pip` are the two named exceptions. `tests/test_build_verifier.py`
+      returns here — written against the Debian build, not ported from the Alpine one M0 dropped —
+      and feeds each function an input broken in the exact way it exists to catch.
+- [x] **No test may be skipped in this tier**, and the mechanism is an **allowlist keyed by node
+      id**, not a count. Three entropy tests carry `@linux_getrandom_only` because
+      `os.GRND_NONBLOCK` does not exist off Linux, so they skip on a dev Mac and the ordering
+      guarantee in `docs/entropy-mixing.md` is guarded only here. A tier that reports skips is not
+      authoritative.
+
+      **This box previously said "make a non-zero skip count fail it", and that was unimplementable
+      at M1** — two of the four skips have subjects that arrive at M2 and M5, so zero is not
+      reachable from here. `.github/workflows/tests.yml` had already settled for `<= 4` parsed out
+      of `-q` output with `sed`, which is weaker than it looks: a count cannot tell a fifth skip
+      from one of the four *moving*, and it cannot notice an entry that has stopped skipping. The
+      gate is now `SKIPS_ALLOWED` in `tests/conftest.py`, naming each of the four by node id with
+      the milestone that deletes it, and **two** things fail the session — a skip nobody named, and
+      an entry that no longer skips. The second matters as much as the first: a stale entry is a
+      standing exemption nobody notices has stopped applying, so the next skip of that test passes
+      unremarked. Staleness is judged only on a whole-suite run, because the dev loop runs one file
+      in the same container. `skip_policy_violations()` is a pure function and is fed its own
+      broken inputs in `tests/test_tier_gates.py`, the same way `build/verify.py` is.
 
 **Exit**: the full suite passes inside the authoritative tier, at the exact versions the ISO will
 install, from both lists. One ECDSA and one Schnorr signature verified against a known-answer fixture.
