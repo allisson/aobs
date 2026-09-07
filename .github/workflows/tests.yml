@@ -55,6 +55,14 @@ jobs:
       - name: Requirement files match the lock
         run: sh build/gather-requirements.sh --check
 
+      # The pin files' own contract, before anything is fetched or installed: both parse, the
+      # groups are disjoint, and no `python3-*` package sits in the apt list. `tests/
+      # test_build_verifier.py` proves each of those assertions still bites; this runs them
+      # against the committed lists. It needs no inputs and no container, so it fails in seconds
+      # here rather than in minutes there.
+      - name: The pin files parse and the groups stay disjoint
+        run: python3 build/verify.py
+
       # The version list is derived from the same lock, and drifts the same way.
       - name: build/wheel-versions.txt matches the lock
         run: |
@@ -109,8 +117,7 @@ jobs:
       - name: Build the container
         run: docker build -f build/Dockerfile.test -t aobs-test .
 
-      # One run, not two: the suite is the expensive thing here and `-rs` makes the same run
-      # report why anything skipped.
+      # One run, and the skip policy is inside it rather than around it.
       #
       # M1 requires that this tier skip nothing that is about the appliance: the three entropy
       # tests, the EC-backend assertion and the keymap-tree assertion are guarded by
@@ -119,21 +126,15 @@ jobs:
       # not hypothetical: on its first run here it failed and caught the picker silently dropping
       # ABNT2.
       #
-      # FOUR skips are expected, and each is named rather than tolerated in bulk:
-      #   - tests/test_structure.py:154   docs/test-harness.md arrives at M2
-      #   - tests/test_structure.py:421   ADVISORIES.txt and the README section arrive at M5
-      #   - tests/test_wallet_interop.py  two tests, no captured wallet frames — a pre-existing
-      #                                   gap inherited from the predecessor, see
-      #                                   fixtures/wallet_frames/README.md
-      # The gate is on the count so that a FIFTH skip fails the build, and it tightens as each of
-      # those four lands.
+      # This step used to parse `N skipped` out of `-q` output with sed and compare it to 4. The
+      # gate now lives in `tests/conftest.py` as SKIPS_ALLOWED, keyed by node id: a count cannot
+      # tell a fifth skip from one of the four moving, and it cannot fail an entry that has
+      # stopped skipping. `-rs` stays, so the same run still prints why each one skipped.
+      #
+      # The same conftest refuses to start this container at all if embit resolved to
+      # `py_secp256k1`, so this job cannot report green from a pure-Python signer.
       #
       # No bind mount, unlike the dev loop: what CI judges is the tree as pushed, which is the
       # copy baked into the image.
       - name: Run the suite
-        run: |
-          set -o pipefail
-          docker run --rm aobs-test python3 -m pytest -q -rs 2>&1 | tee /tmp/out.txt
-          skipped=$(sed -n 's/.*[^0-9]\([0-9]\+\) skipped.*/\1/p' /tmp/out.txt | tail -1)
-          echo "skipped: ${skipped:-0} (allowed: 4)"
-          test "${skipped:-0}" -le 4
+        run: docker run --rm aobs-test python3 -m pytest -rs
