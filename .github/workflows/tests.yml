@@ -97,7 +97,13 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/inputs
-          key: inputs-${{ hashFiles('build/apt-versions.txt', 'build/requirements.appliance.txt', 'build/requirements.test.txt', 'build/snapshot.env') }}
+          # `build/inputs.sha256` is in the key, and it is the one that actually makes a hit mean
+          # "the same bytes as last time". The pin files alone do not: the M2 closure fix changed
+          # what those same eight pins RESOLVE to — the appliance pool went from 37 packages to 57
+          # — with every pin file byte-identical. A key over pins only would have restored the
+          # stale pool and failed the step below, which is the right failure but the wrong reason
+          # to pay for a CI run.
+          key: inputs-${{ hashFiles('build/inputs.sha256', 'build/apt-versions.txt', 'build/requirements.appliance.txt', 'build/requirements.test.txt', 'build/snapshot.env') }}
 
       - name: Fetch inputs
         if: steps.inputs.outputs.cache-hit != 'true'

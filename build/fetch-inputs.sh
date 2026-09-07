@@ -66,6 +66,20 @@ HASHES=build/inputs.sha256
 # it needs that group's closure to be complete on its own; the tier installs both. Downloading the
 # union into a single directory would leave the appliance pool missing whatever it shares with the
 # harness group, and the failure would appear at image-build time as an unsatisfiable dependency.
+#
+# THE SAME FAILURE ARRIVED THROUGH THE BASE IMAGE, and it is why the appliance group resolves
+# against an empty dpkg status. Measured 2026-09-07 in the M2 unshare probe: `mmdebstrap` refused
+# the appliance pool with `libc6 ... not installable`, `dpkg ... not installable`, and thirty-nine
+# more. The pool held 37 packages; the real closure from nothing is 57. The missing ones are
+# exactly what `debian:trixie-slim` already had installed when this script resolved — `libc6`,
+# `dpkg`, `tar`, `coreutils`, `debconf`, `tzdata`, `libpam-*`. `--reinstall` re-downloads the
+# packages NAMED on the command line; it does not re-download a transitive dependency apt
+# considers already satisfied. The pool was therefore complete relative to the container that
+# built it, which is the one place it never has to be: `Dockerfile.test` starts FROM that image,
+# and `mkiso.sh` starts from nothing.
+#
+# `Dir::State::status` pointed at an empty file is what makes apt resolve as if nothing were
+# installed. It replaces `--reinstall` rather than joining it.
 group() {
     # $1: "appliance" | "harness" — print that group's pinned name=version lines
     awk -v want="$1" '
@@ -82,7 +96,7 @@ HARNESS_PINS=$(group harness)
 [ -n "$APPLIANCE_PINS" ] || { echo "no appliance packages parsed" >&2; exit 1; }
 [ -n "$HARNESS_PINS" ] || { echo "no harness packages parsed" >&2; exit 1; }
 
-mkdir -p "$INPUTS/deb/appliance" "$INPUTS/deb/harness" "$INPUTS/wheels/appliance" "$INPUTS/wheels/test"
+mkdir -p "$INPUTS/deb/appliance" "$INPUTS/deb/kernel" "$INPUTS/deb/harness" "$INPUTS/wheels/appliance" "$INPUTS/wheels/test"
 
 fetch_debs() {
     # $1: output subdirectory; $2: space-separated pins
@@ -121,11 +135,85 @@ fetch_debs() {
             rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources
 
             apt-get update
-            # --reinstall so that packages already in the base image are still downloaded: the
-            # rootfs mkiso.sh builds starts empty, and "already installed here" is not a fact
-            # about the appliance.
-            apt-get install -y --no-install-recommends --download-only --reinstall $PINS
+
+            # RESOLVE AGAINST AN EMPTY DPKG STATUS. What is already installed in this container is
+            # not a fact about the rootfs mkiso.sh builds, and `--reinstall` does not cover it: it
+            # re-downloads the packages named on the command line, never a transitive dependency
+            # apt considers already satisfied. See the header of the closures section.
+            : > /tmp/empty-status
+            apt-get install -y --no-install-recommends --download-only \
+                -o Dir::State::status=/tmp/empty-status $PINS
             cp /var/cache/apt/archives/*.deb /out/
+            ls -1 /out | wc -l
+        '
+}
+
+# The kernel is FETCHED, NEVER RESOLVED, and never installed into the rootfs.
+#
+# `docs/overview.md` says the whole rootfs is the initramfs, so the kernel is a file sitting beside
+# it on the ISO rather than a package inside it. Letting apt resolve it drags in the machinery for
+# building the very thing this project builds itself: measured 2026-09-07,
+# `linux-image-amd64` -> `linux-image-6.12.107+deb13-amd64` -> `initramfs-tools` -> `udev` ->
+# `systemd`, which would have put an init system in a pool for an appliance whose first published
+# claim is that it has none. Dropping the kernel from the resolution removes `systemd`, `udev`,
+# `initramfs-tools`, `libsystemd-shared` and `dracut-install` from the pool outright — 57 packages
+# with none of them, against 78 with all of them.
+#
+# `mkiso.sh` unpacks these two with `dpkg-deb -x` into a staging directory: `vmlinuz` goes on the
+# ISO, `/lib/modules` is pruned to the allowlist and copied into the rootfs, and dpkg is never told
+# a kernel was installed, so no maintainer script runs and no bootloader is invoked.
+#
+# `libsystemd0` and `libudev1` DO remain in the closure, pulled by `util-linux`. Those are shared
+# libraries, not daemons: there is no `systemd` PID 1 and no `udevd` in the image, and that is the
+# claim `build/verify.py` checks. Naming the distinction here because "no systemd" and "no
+# libsystemd0" are different statements and only the first one is true.
+fetch_kernel() {
+    # $1: output subdirectory; $2: space-separated pins
+    out=$1
+    pins=$2
+    echo "==> downloading the kernel packages, unresolved (source: $SOURCE)"
+    docker run --rm --platform=linux/amd64 \
+        -e DEBIAN_SNAPSHOT="$DEBIAN_SNAPSHOT" -e DEBIAN_SUITE="$DEBIAN_SUITE" \
+        -e PINS="$pins" -e SOURCE="$SOURCE" \
+        -v "$PWD/$out:/out" \
+        debian:trixie-slim sh -euc '
+            if [ "$SOURCE" = "snapshot" ]; then
+                printf "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s/ %s main\n" \
+                    "$DEBIAN_SNAPSHOT" "$DEBIAN_SUITE" > /etc/apt/sources.list.d/pinned.list
+                printf "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s/ %s-security main\n" \
+                    "$DEBIAN_SNAPSHOT" "$DEBIAN_SUITE" >> /etc/apt/sources.list.d/pinned.list
+                printf "Acquire::Retries \"8\";\nAcquire::http::Timeout \"60\";\n" \
+                    > /etc/apt/apt.conf.d/99retries
+            else
+                printf "deb http://deb.debian.org/debian %s main\n" "$DEBIAN_SUITE" \
+                    > /etc/apt/sources.list.d/pinned.list
+                printf "deb http://deb.debian.org/debian-security %s-security main\n" "$DEBIAN_SUITE" \
+                    >> /etc/apt/sources.list.d/pinned.list
+                printf "Acquire::Retries \"2\";\nAcquire::http::Timeout \"30\";\n" \
+                    > /etc/apt/apt.conf.d/99retries
+            fi
+            rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources
+
+            apt-get update
+
+            # `download`, not `install --download-only`: it fetches exactly the named .debs and
+            # resolves nothing. That is the whole point — resolving is what drags in an init
+            # system.
+            #
+            # But `linux-image-amd64` is a 1.5 KB METAPACKAGE that carries no kernel, so the
+            # concrete image has to be named too. It is derived from the metapackage rather than
+            # pinned a second time in `build/apt-versions.txt`: the version is already fixed by the
+            # snapshot, and two lines naming one kernel is two places for one fact — the second
+            # would go stale the moment the pin moved and nothing would re-read it.
+            #
+            # `apt-cache depends` reads the index, not the dependency solver, so this stays a
+            # lookup and never becomes a resolution.
+            real=$(apt-cache depends --no-recommends --no-suggests $PINS \
+                   | awk "/Depends:/ { print \$2 }" | grep "^linux-image-" || true)
+            [ -n "$real" ] || { echo "no concrete linux-image behind $PINS" >&2; exit 1; }
+            echo "==> metapackage $PINS resolves to $real"
+
+            cd /out && apt-get download $PINS $real
             ls -1 /out | wc -l
         '
 }
@@ -139,9 +227,11 @@ else
 fi
 
 fetch_group() {
-    # $1 output dir; $2 pins. Try $SOURCE; on failure fall back to snapshot, which is the only
-    # host guaranteed to still carry a version the live mirror has moved past.
-    if fetch_debs "$1" "$2"; then
+    # $1 output dir; $2 pins; $3 fetcher (fetch_debs | fetch_kernel). Try $SOURCE; on failure fall
+    # back to snapshot, which is the only host guaranteed to still carry a version the live mirror
+    # has moved past.
+    _fetch=${3:-fetch_debs}
+    if "$_fetch" "$1" "$2"; then
         return 0
     fi
     if [ "$SOURCE" = "snapshot" ]; then
@@ -153,14 +243,27 @@ fetch_group() {
     # A prefix assignment does not scope to a shell function in POSIX sh, so set and restore.
     _prev=$SOURCE
     SOURCE=snapshot
-    fetch_debs "$1" "$2"
+    "$_fetch" "$1" "$2"
     _rc=$?
     SOURCE=$_prev
     return $_rc
 }
 
-fetch_group "$INPUTS/deb/appliance" "$(echo "$APPLIANCE_PINS" | tr '\n' ' ')"
-fetch_group "$INPUTS/deb/harness" "$(echo "$APPLIANCE_PINS" "$HARNESS_PINS" | tr '\n' ' ')"
+# The kernel pins are split out of the appliance group before resolution. They stay in the
+# appliance group in `build/apt-versions.txt`, because that group answers "may this survive into
+# the shipped rootfs?" and the pruned modules tree does — it is the INSTALL METHOD that differs,
+# not the destination. See fetch_kernel above for why resolving them puts an init system in the
+# pool of an appliance whose first published claim is that it has none.
+KERNEL_PINS=$(echo "$APPLIANCE_PINS" | grep '^linux-image' || true)
+ROOTFS_PINS=$(echo "$APPLIANCE_PINS" | grep -v '^linux-image' || true)
+[ -n "$KERNEL_PINS" ] || { echo "no linux-image pin in the appliance group" >&2; exit 1; }
+[ -n "$ROOTFS_PINS" ] || { echo "the appliance group is nothing but the kernel" >&2; exit 1; }
+
+fetch_group "$INPUTS/deb/appliance" "$(echo "$ROOTFS_PINS" | tr '\n' ' ')"
+fetch_group "$INPUTS/deb/kernel" "$(echo "$KERNEL_PINS" | tr '\n' ' ')" fetch_kernel
+# The harness pool is what `Dockerfile.test` installs on top of `debian:trixie-slim`, and the tier
+# needs the appliance packages too. The kernel is deliberately absent: no test installs a kernel.
+fetch_group "$INPUTS/deb/harness" "$(echo "$ROOTFS_PINS" "$HARNESS_PINS" | tr '\n' ' ')"
 
 # --- The wheel closures -------------------------------------------------------------------------
 #
