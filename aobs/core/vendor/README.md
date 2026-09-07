@@ -13,10 +13,26 @@ It is vendored rather than depended on for the reason `docs/boot-pipeline.md` gi
 packages no `embit`, and the appliance introduces no pip — and it is taken **from git rather than
 from the PyPI wheel**, which is the part that matters (#34).
 
-embit's wheel ships `util/prebuilt/libsecp256k1_*.so`, a glibc-linked binary that exists in no
-commit of the repository: `MANIFEST.in` prunes `src/embit/util/prebuilt`, and the `.so` is built
-at wheel-build time by a toolchain nobody records. Vendoring from source means that blob never
-enters this tree at all, rather than entering it and being deleted by a step someone can skip.
+**It is the sdist, and there is no wheel.** This paragraph used to say "embit's wheel ships
+`util/prebuilt/libsecp256k1_*.so`", which is wrong on the artifact: embit has never published a
+wheel for any of its 28 releases. What PyPI has is `embit-0.8.0.tar.gz` (2024-05-30), and that
+sdist carries **seven** prebuilt binaries — `libsecp256k1_{darwin_arm64,darwin_x86_64,linux_aarch64,
+linux_armv6l,linux_armv7l,linux_x86_64}.{so,dylib}` and `_windows_amd64.dll` — with no
+`MANIFEST.in` in the tarball at all.
+
+The pruning rules this file used to credit are real but newer than the release: git `v0.8.2` does
+carry a `MANIFEST.in` that `prune`s `src/embit/util/prebuilt` and `global-exclude`s `*.so`,
+`*.dylib` and `*.dll`, and at that tag `src/embit/util/` holds six `.py` files and no `prebuilt/`
+directory. Verified against both artifacts on 2026-09-07.
+
+That makes the conclusion stronger, not weaker. Because the binaries are in the **sdist**,
+`pip install embit` delivers them and `--no-binary embit` is not an escape — there is no artifact
+on PyPI without them. Vendoring from git is the only way the blob never enters this tree, rather
+than entering it and being deleted by a step someone can skip.
+
+PyPI is also two years and two tags behind: `0.8.0` from 2024-05-30 against the `v0.8.2` commit
+pinned above, from 2026-08-08. Depending on PyPI would mean going backwards as well as taking the
+blob.
 
 It has to stay gone. `embit/util/secp256k1.py` picks its EC implementation inside a bare
 `except:`, and `_find_library()` returns the prebuilt path whenever the file merely *exists* —

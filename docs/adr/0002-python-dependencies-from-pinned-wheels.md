@@ -73,7 +73,8 @@ said out loud.
 Three of these wheels carry prebuilt binaries — `cryptography` most of all, since it bundles its own
 Rust and OpenSSL build, plus `pillow` and `zxing-cpp` — and `cffi` and `argon2-cffi-bindings` compile
 against `libffi`. That is in visible tension with the predecessor's decision to vendor `embit` from
-source *specifically to keep its PyPI wheel's prebuilt `libsecp256k1` blob out of the repository*.
+source *specifically to keep the prebuilt `libsecp256k1` binaries in its PyPI sdist out of the
+repository*.
 
 The line is where the blob lives *and what it does*. A binary in the **input archive** is
 hash-pinned, published beside the release, and verified byte for byte by an independent rebuild —
@@ -81,9 +82,11 @@ indistinguishable in kind from a `.deb`, which is also a prebuilt binary nobody 
 compiled. A binary in the **repository** is none of those things: carried in the source tree,
 reviewed by nobody, diffed by nobody.
 
-**That test alone would license installing `embit` from its wheel, and it must not.** An earlier
-draft of this ADR said as much and was wrong. `embit`'s wheel ships
-`util/prebuilt/libsecp256k1_*.so`, and the objection to it is not opacity — it is that
+**That test alone would license installing `embit` from PyPI, and it must not.** An earlier draft of
+this ADR said as much and was wrong. It also said "wheel", which is wrong twice over: embit has never
+published a wheel, and the seven prebuilt `libsecp256k1` binaries are in the **sdist** — so
+`--no-binary` buys nothing and there is no artifact on PyPI without them. The objection is not
+opacity — it is that
 `_find_library()` returns the prebuilt path whenever that file merely *exists* and does not fall
 through when *loading* it fails. The blob's presence is therefore enough to silently select
 `py_secp256k1`, embit's pure-Python elliptic curve arithmetic, defeating the one EC rule this project
