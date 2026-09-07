@@ -172,6 +172,18 @@ class _Getrandom:
         return bytes(count)
 
 
+#: `os.getrandom` and `os.GRND_NONBLOCK` exist only on Linux, and the adapter names the
+#: constant at call time, so these three cannot run on a non-Linux dev machine even with the
+#: syscall patched. They are not optional: the authoritative tier in `build/Dockerfile.test`
+#: is Linux and runs them on every commit, which is where the entropy ordering is actually
+#: guarded. `docs/entropy-mixing.md` fixes the behaviour.
+linux_getrandom_only = pytest.mark.skipif(
+    not hasattr(os, "GRND_NONBLOCK"),
+    reason="os.getrandom/GRND_NONBLOCK are Linux-only; covered by the Linux test tier",
+)
+
+
+@linux_getrandom_only
 def test_the_randomness_call_is_non_blocking_first_and_blocking_only_after(monkeypatch) -> None:
     """The ordering is the point: an uninitialised pool becomes an answerable question rather
     than a syscall the appliance disappears into with nothing on screen."""
@@ -181,6 +193,7 @@ def test_the_randomness_call_is_non_blocking_first_and_blocking_only_after(monke
     assert getrandom.calls == [(32, True), (32, False)]
 
 
+@linux_getrandom_only
 def test_a_ready_pool_is_never_asked_to_block(monkeypatch) -> None:
     getrandom = _Getrandom(blocked=0)
     monkeypatch.setattr(real_entropy.os, "getrandom", getrandom)
@@ -188,6 +201,7 @@ def test_a_ready_pool_is_never_asked_to_block(monkeypatch) -> None:
     assert getrandom.calls == [(32, True)]
 
 
+@linux_getrandom_only
 def test_readiness_is_answered_rather_than_waited_on(monkeypatch) -> None:
     getrandom = _Getrandom(blocked=1)
     monkeypatch.setattr(real_entropy.os, "getrandom", getrandom)

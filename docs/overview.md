@@ -87,14 +87,19 @@ Debian 13 (trixie), pinned to a `snapshot.debian.org` timestamp — both `trixie
 because the kernel security update lives in the second one — so `apt` resolves to fixed versions
 forever. `build/snapshot.env` holds the pin.
 
-Two pinned lists, and `build/verify.py` parses both. `build/apt-versions.txt` is everything Debian can
-serve at an acceptable version: the base layout, `python3`, `busybox`, `kbd`/`console-data`,
-`libsecp256k1-2`, `python3-qrcode`, `python3-zxing-cpp`, `python3-pil`, and the kernel.
-`build/wheel-versions.txt` is the rest of the Python layer — `textual`, `rich`, `cryptography`,
-`argon2-cffi` — pinned by version and sha256, because Debian stable ships all four **below** what this
-application declares; `docs/adr/0002-python-dependencies-from-pinned-wheels.md` has the numbers and the
-trade. Wheels are fetched in the one networked step and installed with `--no-index`, so the build still
-touches no network, and `pip` is removed before the initramfs is packed.
+Two pinned lists, and `build/verify.py` parses both, along one clean seam: **if Python imports it, it
+comes from `pyproject.toml`; everything else comes from Debian.**
+
+`build/apt-versions.txt` is the operating system — the base layout, `dash`, `busybox`, `util-linux`,
+`python3` itself, `libsecp256k1-2`, `kbd`/`console-data`, the kernel — and it pins no `python3-*`
+package beyond the interpreter and `pip`. `build/wheel-versions.txt` is the Python layer, all 19
+appliance packages and 8 harness ones, derived from `pyproject.toml` and `uv.lock`. Debian stable
+ships that layer behind what the app declares, three of them below a declared floor;
+`docs/adr/0002-python-dependencies-from-pinned-wheels.md` has the numbers, and also why the layer is
+not split package by package — two resolvers over one import graph reconcile nothing.
+
+Wheels are fetched in the one networked step and installed with `--no-index`, so the build still
+touches no network; `pip` is installed transiently and removed before the initramfs is packed.
 
 In both lists the appliance group is installed into the rootfs, the harness group never is, the
 `# @group` markers are machine-readable, and the build fails if a harness package or a package manager

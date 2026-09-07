@@ -17,8 +17,12 @@
 # apt's own resolver at this snapshot and writes every resolved .deb into
 # build/inputs.sha256, which is what the build actually gates on.
 #
-# The Python layer is NOT here — it is build/wheel-versions.txt, and
-# docs/adr/0002-python-dependencies-from-pinned-wheels.md says why.
+# NO PYTHON PACKAGE IS PINNED HERE except the interpreter itself and pip. Every Python
+# dependency of the appliance and of the harness comes from pyproject.toml, resolved in
+# uv.lock and listed in build/wheel-versions.txt. Adding a `python3-*` line below is a
+# mistake even when Debian's version looks fine: it would create a second, unresolved
+# source for the same import, and the two would disagree the first time either moved.
+# docs/adr/0002-python-dependencies-from-pinned-wheels.md says why the split is here.
 #
 # Regenerate with: sh build/gather-apt-versions.sh
 
@@ -43,13 +47,6 @@ python3=3.13.5-1
 # this commit; the assertion is what settles it.
 libsecp256k1-2=0.5.0-2+b1
 
-# The QR channel, both directions. Appliance dependencies, not harness ones:
-# aobs/ui/qrcodes.py imports qrcode and aobs/ui/qrdecode.py imports zxingcpp and PIL.
-# `python3-segno` is not what Debian packages either, which is why qrcode is the encoder.
-python3-qrcode=8.2-1
-python3-zxing-cpp=2.3.0-4
-python3-pil=11.1.0-5+deb13u4
-
 # `loadkeys` and the maps it loads. The Keymap adapter shells out to the first and reads
 # the second. console-data is what makes layouts() return more than the default, and the
 # full set ships deliberately: a user on AZERTY or ABNT2 typing a BIP39 passphrase
@@ -65,9 +62,6 @@ linux-image-amd64=6.12.107-1
 # The test tier only. The ISO carries no test runner and no package manager, and
 # build/verify.py fails the build if any name below reaches the rootfs.
 
-python3-pytest=8.3.5-2
-python3-hypothesis=6.130.5-2
-
 # HARNESS GROUP, NEVER THE APPLIANCE GROUP. verify.py fails the build if either name
 # reaches the rootfs, and it matters twice over here: an appliance carrying git would
 # have a network utility in the image. Both are needed by real tests rather than mocks —
@@ -78,8 +72,14 @@ python3-hypothesis=6.130.5-2
 git=1:2.47.3-0+deb13u1
 gnupg=2.4.7-21+deb13u1
 
-# Installs build/wheel-versions.txt into both tiers, from pre-fetched wheels only.
-# --no-index at install time, and removed from the rootfs before the initramfs is packed.
+# Installs build/wheel-versions.txt, --no-index, from pre-fetched wheels only.
+#
+# It sits in the HARNESS group even though the image build uses it, and that is deliberate
+# rather than sloppy: the two groups answer "may this survive into the shipped rootfs?",
+# and for pip the answer is no. build/mkiso.sh installs it transiently, installs the
+# wheels with it, then removes it, and build/verify.py fails the build if any package
+# manager is present in the image it is about to pack. A third `@group buildtime` would
+# have made the parser contract answer a different question than the one that matters.
 python3-pip=25.1.1+dfsg-1
 
 # The builder's own tools. Not installed into either tier's Python environment — listed

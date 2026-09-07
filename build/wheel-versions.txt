@@ -1,43 +1,72 @@
-# The Python layer, pinned by version AND sha256, because Debian trixie ships it below
-# what this application declares. docs/adr/0002-python-dependencies-from-pinned-wheels.md
-# holds the decision and the numbers; the short form is:
+# EVERY Python package in the image, and none of them from Debian.
+# docs/adr/0002-python-dependencies-from-pinned-wheels.md holds the decision.
 #
-#   textual        app runs on 8.2.7   trixie has 2.1.2    six majors back
-#   rich           app runs on 15.0.0  trixie has 13.9.4   two majors back
-#   cryptography   app declares >=44   trixie has 43.0.0   below the declared floor
-#   argon2-cffi    app declares >=23.1 trixie has 21.1.0    below the declared floor
-#   pytest-asyncio app declares >=1.3  trixie has 0.25.1    below the declared floor
+# This file is DERIVED, and `pyproject.toml` plus `uv.lock` are the source:
 #
-# Everything Debian CAN serve at an acceptable version still comes from apt — python3
-# itself, qrcode, zxing-cpp, pil, libsecp256k1, kbd, busybox, the kernel. See
-# build/apt-versions.txt. Two lists, one rule: the authoritative test tier installs the
-# exact versions the ISO installs, from both.
+#   uv export --frozen --no-emit-project --no-annotate --no-header              # appliance
+#   uv export --frozen --no-emit-project --no-annotate --no-header --extra test # both tiers
 #
-# `python3-pip` installs these with --no-index from build/inputs/, so the build still
-# touches no network, and pip is removed from the rootfs before the initramfs is packed.
+# Regenerate with: sh build/gather-wheel-versions.sh
 #
-# These are TOP-LEVEL PINS, not the closure. build/fetch-inputs.sh (M2) resolves the
-# transitive set — markdown-it-py, mdit-py-plugins, platformdirs, pygments,
-# typing-extensions, cffi, pycparser, argon2-cffi-bindings, backports-asyncio-runner —
-# and writes every wheel's hash into build/inputs.sha256, which is what the build gates
-# on. A wheel whose hash is not in that file stops the build; it does not get fetched.
+# WHY NOT THE HASHES HERE. `uv.lock` already carries a sha256 for every artifact of every
+# package, and build/fetch-inputs.sh reads them from there. Copying them into a second
+# file would create two places for one fact and no mechanism to keep them equal — the
+# exact failure mode `docs/reproducible-build.md` exists to prevent. So: versions here,
+# for a human to read in a diff; hashes in `uv.lock`, for the build to gate on; and
+# build/inputs.sha256, which is what actually stops the build, derived from the lock.
 #
-# The wheels are prebuilt binaries for three of these, which is in tension with the
-# decision to vendor embit rather than take its PyPI wheel (that wheel bundles a
-# libsecp256k1 blob). The distinction the ADR draws: a blob in the INPUT ARCHIVE is
-# hash-pinned, published and rebuildable-against, exactly like a .deb. A blob in the
-# REPOSITORY is neither. embit stays vendored from source.
+# The `# @group` markers are MACHINE-READABLE AND LOAD-BEARING, exactly as in
+# build/apt-versions.txt: build/Dockerfile.test installs BOTH groups, build/mkiso.sh
+# installs the appliance group ONLY, and build/verify.py fails the build if a name from
+# the harness group reaches the rootfs. A package outside any group is a parse error.
+#
+# Three of these ship prebuilt binaries — cryptography (its own Rust and OpenSSL),
+# pillow, zxing-cpp — and argon2-cffi-bindings and cffi compile against libffi. The ADR
+# draws the line at where a blob lives: in the input archive, hash-pinned and published,
+# it is no different in kind from a .deb; in the repository it would be. `embit` stays
+# vendored from source for that reason and its own wheel stays out.
 
 # @group appliance
+# Installed into the rootfs. 19 packages, the closure of `[project].dependencies`.
 
-textual==8.2.7 --hash=sha256:4caaa13a90bc4cf9c6c862c067ccd34fe84e9c161710a2a907a8026313b6bd73
-rich==15.0.0 --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb
-argon2-cffi==25.1.0 --hash=sha256:fdc8b074db390fccb6eb4a3604ae7231f219aa669a2652e0f20e16ba513d5741
+argon2-cffi==25.1.0
+argon2-cffi-bindings==26.1.0
+cffi==2.1.1
+cryptography==50.0.0
+pillow==12.3.0
+qrcode==8.2
+textual==8.2.8
+zxing-cpp==3.1.1
 
-# cp311-abi3, not cp313: cryptography ships stable-ABI wheels, so one file covers every
-# CPython from 3.11 up. manylinux_2_28 against trixie's glibc 2.41 — satisfied.
-cryptography==47.0.0 --hash=sha256:0024b87d47ae2399165a6bfb20d24888881eeab83ae2566d62467c5ff0030ce7
+# Transitive, and listed rather than implied so that a version change shows up in a diff
+# instead of only in the lock.
+linkify-it-py==2.1.1
+markdown-it-py==4.2.0
+mdit-py-plugins==0.6.1
+mdurl==0.1.2
+platformdirs==4.11.4
+pycparser==3.0
+pygments==2.21.0
+rich==15.0.0
+typing-extensions==4.16.0
+uc-micro-py==2.0.0
+
+# In the lock, never in the image: qrcode pulls it under `sys_platform == 'win32'`, which
+# is false for every artifact this build produces. Kept visible so its absence from
+# build/inputs.sha256 reads as intentional rather than as a missing fetch.
+colorama==0.4.6  # marker: sys_platform == 'win32'
 
 # @group harness
+# The test tier only. The ISO carries no test runner, and build/verify.py fails the build
+# if any name below reaches the rootfs.
 
-pytest-asyncio==1.3.0 --hash=sha256:611e26147c7f77640e6d0a92a38ed17c3e9848063698d5c93d5aa7aa11cebff5
+hypothesis==6.165.10
+pytest==9.1.1
+pytest-asyncio==1.4.0
+urtypes==1.0.1
+
+# Transitive, harness side.
+iniconfig==2.3.0
+packaging==26.3
+pluggy==1.6.0
+sortedcontainers==2.4.0

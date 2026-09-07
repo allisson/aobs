@@ -36,8 +36,16 @@ Get the inherited code and the pinned base into this repo, with nothing built ye
       `# @group appliance` / `# @group harness` markers. A package outside any group is a parse error,
       never a guess — in the predecessor a prose comment on the wrong side of the split put a package
       manager in the rootfs and nothing noticed.
-- [ ] `build/wheel-versions.txt`: the Python layer Debian ships below the app's declared floors,
-      pinned by version and sha256. See `docs/adr/0002-python-dependencies-from-pinned-wheels.md`.
+- [ ] Fix `pyproject.toml`'s dependency groups. `textual`, `pillow` and `zxing-cpp` sat under the
+      `test` extra while being imported by appliance code — `aobs/ui/screens/scan.py` calls
+      `qrdecode.decode_frame`, which needs `zxingcpp` and `PIL` — and the comment there asserted the
+      opposite of what the code does. The groups are now load-bearing: `dependencies` is what the
+      rootfs gets, `test` is what only the tier gets.
+- [ ] `build/wheel-versions.txt` + `build/gather-wheel-versions.sh`: **every** Python package, both
+      groups, derived from `pyproject.toml` and `uv.lock`. Versions in the list for a human to read;
+      hashes only in the lock, so there is one place for one fact. See
+      `docs/adr/0002-python-dependencies-from-pinned-wheels.md`, including why the layer is not split
+      package by package between apt and PyPI.
 - [ ] `docs/adr/0001-debian-base-and-stock-kernel.md`,
       `docs/adr/0002-python-dependencies-from-pinned-wheels.md`, `docs/overview.md`, `CLAUDE.md`,
       this file.
@@ -47,6 +55,10 @@ Get the inherited code and the pinned base into this repo, with nothing built ye
       they are rewritten against the Debian build at M2 and M5 respectively, not ported. **This is
       the one place where importing the predecessor loses coverage**, and it is recorded here so it
       cannot be forgotten: until M2 the build has no assertions under test.
+- [ ] Two assertions in `tests/test_structure.py` are guarded because their subjects are deferred:
+      the `docs/test-harness.md` port-table check skips until M2, and the ADVISORIES/README
+      cross-check skips until M5. Both guards are listed for removal in those milestones — a
+      permanent skip is a deleted test with extra steps.
 
 **Exit**: the fast suite runs on a dev machine. Nothing else is claimed.
 
@@ -63,12 +75,17 @@ app was written for. It ships an older one — six majors older — and two cryp
 proving that the app runs unchanged on Debian's interpreter, against Debian's `libsecp256k1`, with the
 wheel layer installed the way the image will install it.
 
-- [ ] `build/Dockerfile.test` on `debian:trixie-slim` at the pinned snapshot, installing **both** apt
-      groups and **both** wheel groups — the authoritative tier.
+- [ ] `build/Dockerfile.test` on `debian:trixie-slim` at the pinned snapshot, installing both apt
+      groups and both wheel groups — the authoritative tier.
 - [ ] Wheels install from pre-fetched files with `--no-index`, the same way `mkiso.sh` will do it. A
       tier that reaches PyPI at test time is not testing what ships.
 - [ ] Full suite green on Debian's `python3` 3.13.5. `pyproject.toml` says `>=3.12`; the predecessor
-      ran 3.14, so 3.13 is a version neither has exercised.
+      ran Alpine's 3.14 and this machine runs 3.13.12, so Debian's 3.13.5 is close to but not the same
+      as anything the suite has passed on.
+- [ ] Confirm every appliance wheel has a `manylinux` build compatible with trixie's glibc 2.41 for
+      CPython 3.13 — `cryptography` ships `cp311-abi3`, but `pillow`, `zxing-cpp`, `cffi` and
+      `argon2-cffi-bindings` are per-version and must be checked rather than assumed. A missing wheel
+      means a compiler in the build, which `docs/adr/0001` spent the Alpine kernel config to avoid.
 - [ ] Confirm the vendored `embit` and `ur2` build and pass there — Debian packages neither.
 - [ ] Verify Debian's `libsecp256k1-2` 0.5.0 exports `secp256k1_schnorrsig_sign32` and
       `secp256k1_keypair_create`. **Unverified today.** If it does not, this milestone grows a
@@ -76,6 +93,10 @@ wheel layer installed the way the image will install it.
 - [ ] Assert every EC operation goes through that `.so` and never embit's pure-Python fallback.
 - [ ] `build/verify.py` parses **both** pin files and asserts the two groups stay disjoint — two lists
       is a thing the build checks, not a thing that can drift.
+- [ ] **No test may be skipped in this tier.** Three entropy tests carry
+      `@linux_getrandom_only` because `os.GRND_NONBLOCK` does not exist off Linux, so they skip on a
+      dev Mac and the ordering guarantee in `docs/entropy-mixing.md` is guarded only here. A tier
+      that reports skips is not authoritative; make a non-zero skip count fail it.
 
 **Exit**: the full suite passes inside the authoritative tier, at the exact versions the ISO will
 install, from both lists. One ECDSA and one Schnorr signature verified against a known-answer fixture.
@@ -111,6 +132,8 @@ the build" property from `docs/adr/0001` partly goes away — that is a finding 
 - [ ] `cpio | zstd` the whole rootfs into the initramfs.
 - [ ] `xorriso` into a hybrid ISO: `isolinux` for BIOS, `grub-efi` for UEFI. Secure Boot is **not**
       supported in v0.1.
+- [ ] Write `docs/test-harness.md` and remove the skip guard in
+      `tests/test_structure.py::test_there_is_no_screen_port`.
 - [ ] `build/verify.py`: every build-time assertion as a pure function, each fed a deliberately broken
       input by the suite to prove it still bites — this is where `tests/test_build_verifier.py` comes
       back, written against the Debian build rather than ported from the Alpine one. Minimum set — no harness package in the rootfs, no
@@ -196,7 +219,10 @@ Everything below this line waits.
       predecessor's README made and should keep making — GitHub serves the ISO, the manifest, the
       signature and the README together, so the fingerprint must come from somewhere else; and the
       maintainer's key lives on an ordinary networked computer.
-- [ ] `ADVISORIES.txt` and its policy. An empty list is not an attestation.
+- [ ] `ADVISORIES.txt` and its policy. An empty list is not an attestation. Removing the `skipif` on
+      `tests/test_structure.py::test_the_readme_carries_the_advisory_list_verbatim` is part of this,
+      and `build/release-preflight.sh` must refuse a release whose `ADVISORIES.txt` is missing —
+      otherwise the skip silently protects the very drift the test exists to catch.
 - [ ] Cut and sign v0.1.0 from a clean tagged tree, with the boot-checklist run record published
       beside the ISO.
 
