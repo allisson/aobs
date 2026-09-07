@@ -97,7 +97,13 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/inputs
-          key: inputs-${{ hashFiles('build/apt-versions.txt', 'build/requirements.appliance.txt', 'build/requirements.test.txt', 'build/snapshot.env') }}
+          # `build/inputs.sha256` is in the key, and it is the one that actually makes a hit mean
+          # "the same bytes as last time". The pin files alone do not: the M2 closure fix changed
+          # what those same eight pins RESOLVE to — the appliance pool went from 37 packages to 57
+          # — with every pin file byte-identical. A key over pins only would have restored the
+          # stale pool and failed the step below, which is the right failure but the wrong reason
+          # to pay for a CI run.
+          key: inputs-${{ hashFiles('build/inputs.sha256', 'build/apt-versions.txt', 'build/requirements.appliance.txt', 'build/requirements.test.txt', 'build/snapshot.env') }}
 
       - name: Fetch inputs
         if: steps.inputs.outputs.cache-hit != 'true'
@@ -113,6 +119,18 @@ jobs:
           present=$(find build/inputs -type f | wc -l)
           echo "inputs: $named named, $present present"
           test "$named" -eq "$present"
+
+      # The closure checks, which need a fetched pool and so cannot run in the `pins` job. They
+      # read the RESOLVED pool rather than the pin files, and that is the point: not one of the
+      # names they catch is pinned anywhere. `systemd` reaches the closure through
+      # `linux-image-amd64` -> `initramfs-tools` -> `udev`, and a Debian Python library would
+      # arrive as a dependency of something unrelated to Python. `build/verify.py`'s pin-file
+      # checks read the eight names a human typed and cannot see either.
+      #
+      # An explicit `--closure` flag rather than "run if the directory exists": a check that
+      # silently passes when its input is absent passes loudest exactly when it was skipped.
+      - name: No init system and no Debian Python library in the appliance closure
+        run: python3 build/verify.py --closure build/inputs/deb/appliance
 
       - name: Build the container
         run: docker build -f build/Dockerfile.test -t aobs-test .

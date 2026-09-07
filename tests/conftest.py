@@ -44,7 +44,6 @@ NATIVE_EC_BACKEND = "ctypes_secp256k1"
 #: as much a failure as one that skips without being here — a stale entry is a lie about what the
 #: suite covers.
 SKIPS_ALLOWED = {
-    "tests/test_structure.py::test_there_is_no_screen_port": "docs/test-harness.md arrives at M2",
     "tests/test_structure.py::test_the_readme_carries_the_advisory_list_verbatim": (
         "ADVISORIES.txt and the README's advisory section arrive at M5"
     ),
