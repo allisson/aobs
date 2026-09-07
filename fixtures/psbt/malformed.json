@@ -1,0 +1,12 @@
+{
+  "name": "malformed",
+  "description": "A PSBT truncated mid-map.",
+  "traces_to": "docs/psbt-review-model.md \u2014 what blocks signing",
+  "network": "signet",
+  "expected": {
+    "refusal": {
+      "reason": "malformed",
+      "input_index": null
+    }
+  }
+}

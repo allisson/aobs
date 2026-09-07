@@ -1,0 +1,13 @@
+# The pinned archive, as apt sees it. Both suites, because the kernel security update
+# lives in the second one: at the snapshot in build/snapshot.env, `linux-image-amd64` is
+# 6.12.94-1 in trixie/main and 6.12.107-1 in trixie-security. Pinning only main would
+# ship an appliance kernel three point releases behind, silently.
+#
+# `check-valid-until=no` is a consequence of pinning a snapshot, not a weakening of it:
+# the Release file's Valid-Until is long past by construction. Signature verification is
+# NOT disabled — the archive keyring still has to check out.
+#
+# ${DEBIAN_SNAPSHOT} and ${DEBIAN_SUITE} are substituted from build/snapshot.env.
+
+deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/ ${DEBIAN_SUITE} main
+deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}/ ${DEBIAN_SUITE}-security main

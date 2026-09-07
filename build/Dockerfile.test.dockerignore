@@ -1,0 +1,18 @@
+# The build context for build/Dockerfile.test. Without this, `COPY . /src` sweeps in .venv and
+# .git — hundreds of MiB of host-resolved packages, which is exactly the set this tier exists to
+# NOT test.
+.git
+.venv
+out
+release
+build/sources
+
+# NOT build/inputs — that directory IS the build. It is gitignored because
+# build/fetch-inputs.sh produces it, but the image installs from it and
+# build/inputs.sha256 gates it.
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.hypothesis
+*.log

@@ -1,0 +1,28 @@
+{
+  "name": "honest_p2wpkh",
+  "description": "A two-input BIP84 spend with one payment and one real change output.",
+  "traces_to": "docs/psbt-review-model.md \u2014 the proof rule and the headline number",
+  "network": "signet",
+  "expected": {
+    "refusal": null,
+    "outputs": [
+      {
+        "index": 0,
+        "category": "payment",
+        "sats": 1400000
+      },
+      {
+        "index": 1,
+        "category": "change_proven",
+        "sats": 82500,
+        "proven_path": "m/84h/1h/0h/1/0"
+      }
+    ],
+    "headline": {
+      "payments_sats": 1400000,
+      "fee_sats": 3420,
+      "total_leaving_sats": 1403420
+    },
+    "transaction_warnings": []
+  }
+}

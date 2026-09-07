@@ -1,0 +1,72 @@
+# EVERY Python package in the image, and none of them from Debian.
+# docs/adr/0002-python-dependencies-from-pinned-wheels.md holds the decision.
+#
+# This file is DERIVED, and `pyproject.toml` plus `uv.lock` are the source:
+#
+#   uv export --frozen --no-emit-project --no-annotate --no-header              # appliance
+#   uv export --frozen --no-emit-project --no-annotate --no-header --extra test # both tiers
+#
+# Regenerate with: sh build/gather-wheel-versions.sh
+#
+# WHY NOT THE HASHES HERE. `uv.lock` already carries a sha256 for every artifact of every
+# package, and build/fetch-inputs.sh reads them from there. Copying them into a second
+# file would create two places for one fact and no mechanism to keep them equal — the
+# exact failure mode `docs/reproducible-build.md` exists to prevent. So: versions here,
+# for a human to read in a diff; hashes in `uv.lock`, for the build to gate on; and
+# build/inputs.sha256, which is what actually stops the build, derived from the lock.
+#
+# The `# @group` markers are MACHINE-READABLE AND LOAD-BEARING, exactly as in
+# build/apt-versions.txt: build/Dockerfile.test installs BOTH groups, build/mkiso.sh
+# installs the appliance group ONLY, and build/verify.py fails the build if a name from
+# the harness group reaches the rootfs. A package outside any group is a parse error.
+#
+# Three of these ship prebuilt binaries — cryptography (its own Rust and OpenSSL),
+# pillow, zxing-cpp — and argon2-cffi-bindings and cffi compile against libffi. The ADR
+# draws the line at where a blob lives: in the input archive, hash-pinned and published,
+# it is no different in kind from a .deb; in the repository it would be. `embit` stays
+# vendored from source for that reason and its own wheel stays out.
+
+# @group appliance
+# Installed into the rootfs. 19 packages, the closure of `[project].dependencies`.
+
+argon2-cffi==25.1.0
+argon2-cffi-bindings==26.1.0
+cffi==2.1.1
+cryptography==50.0.0
+pillow==12.3.0
+qrcode==8.2
+textual==8.2.8
+zxing-cpp==3.1.1
+
+# Transitive, and listed rather than implied so that a version change shows up in a diff
+# instead of only in the lock.
+linkify-it-py==2.1.1
+markdown-it-py==4.2.0
+mdit-py-plugins==0.6.1
+mdurl==0.1.2
+platformdirs==4.11.4
+pycparser==3.0
+pygments==2.21.0
+rich==15.0.0
+typing-extensions==4.16.0
+uc-micro-py==2.0.0
+
+# In the lock, never in the image: qrcode pulls it under `sys_platform == 'win32'`, which
+# is false for every artifact this build produces. Kept visible so its absence from
+# build/inputs.sha256 reads as intentional rather than as a missing fetch.
+colorama==0.4.6  # marker: sys_platform == 'win32'
+
+# @group harness
+# The test tier only. The ISO carries no test runner, and build/verify.py fails the build
+# if any name below reaches the rootfs.
+
+hypothesis==6.165.10
+pytest==9.1.1
+pytest-asyncio==1.4.0
+urtypes==1.0.1
+
+# Transitive, harness side.
+iniconfig==2.3.0
+packaging==26.3
+pluggy==1.6.0
+sortedcontainers==2.4.0
