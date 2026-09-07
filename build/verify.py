@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import re
 import sys
-from pathlib import Path
+from collections.abc import Iterable
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -156,6 +157,98 @@ def no_apt_package_shadows_a_wheel(
             )
 
 
+#: Names that must never appear in the appliance closure. `linux-image-amd64` resolves to
+#: `initramfs-tools` -> `udev` -> `systemd`, which would put an init system in the pool of an
+#: appliance whose first published claim is that it has none. `docs/boot-pipeline.md` says why the
+#: kernel is extracted rather than installed; this is what fails the build if that ever changes.
+#:
+#: `libsystemd0` and `libudev1` are deliberately NOT here. They are shared libraries pulled by
+#: `util-linux`, not daemons, and "no systemd" and "no libsystemd0" are different statements. Only
+#: the first is claimed, so only the first is checked.
+FORBIDDEN_IN_APPLIANCE_CLOSURE = frozenset(
+    {"systemd", "systemd-sysv", "udev", "initramfs-tools", "libsystemd-shared", "dracut-install"}
+)
+
+
+def closure_is_free_of_init_system(names: set[str]) -> None:
+    """No init system reached the appliance pool.
+
+    Checked over the RESOLVED CLOSURE rather than the pin list, because none of these is pinned:
+    every one arrives as a transitive dependency of the kernel metapackage. Measured 2026-09-07,
+    the closure is 78 packages with the kernel resolved and 57 without, and all six names below are
+    in the difference.
+    """
+    found = sorted(names & FORBIDDEN_IN_APPLIANCE_CLOSURE)
+    if found:
+        raise PinFileError(
+            f"the appliance closure contains {found}. The kernel is fetched unresolved and "
+            "unpacked with dpkg-deb -x precisely so that it does not drag an init system in "
+            "(docs/boot-pipeline.md); something is resolving it instead"
+        )
+
+
+def no_python_package_in_closure(names: set[str], wheels: dict[str, dict[str, str]]) -> None:
+    """`docs/adr/0002`'s seam, applied where it actually bites.
+
+    `no_apt_package_shadows_a_wheel` reads the eight names a human typed into
+    `build/apt-versions.txt`. A `python3-*` package arriving as a TRANSITIVE dependency never
+    appears there and would pass it silently, which is the same two-resolvers-over-one-import-graph
+    collision arriving by a route nobody is watching.
+    """
+    pinned = {name for names_ in wheels.values() for name in names_}
+    normalised = {_normalise(name): name for name in pinned}
+
+    for name in sorted(names):
+        if not name.startswith("python3-"):
+            continue
+        if name in APT_PYTHON_ALLOWED or _is_interpreter_packaging(name):
+            continue
+        wheel = normalised.get(_normalise(name[len("python3-") :]))
+        shadowed = f", which is the wheel {wheel!r}" if wheel else ""
+        raise PinFileError(
+            f"the appliance closure contains the Debian Python package {name!r}{shadowed}. "
+            "Every Python package comes from a wheel (docs/adr/0002). It is not in "
+            "build/apt-versions.txt, so it arrived as a transitive dependency — the pin that "
+            "pulled it in is what has to change"
+        )
+
+
+#: How Debian decomposes CPython itself, as opposed to how it packages a library written in Python.
+#: `python3-minimal`, `python3.13`, `python3.13-minimal`, `libpython3-stdlib` and
+#: `libpython3.13-*` are the interpreter `build/apt-versions.txt` pins as `python3`; they are not a
+#: second resolution of anything in `uv.lock`, and there is no wheel they could shadow.
+#:
+#: The pin-list check never had to draw this line, because a human writes `python3` there and the
+#: decomposition never appears. The closure check does, and getting it wrong in either direction
+#: matters: too broad and `python3-cryptography` walks through as "interpreter packaging"; too
+#: narrow and the build fails on its own interpreter.
+_INTERPRETER_PACKAGING = re.compile(r"^(python3-minimal|python3\.\d+(-minimal)?|libpython3(\.\d+)?-\w+)$")
+
+
+def _is_interpreter_packaging(name: str) -> bool:
+    """Is this Debian shipping CPython, rather than Debian shipping a Python library?"""
+    return bool(_INTERPRETER_PACKAGING.match(name))
+
+
+def closure_from_pool(paths: Iterable[str]) -> set[str]:
+    """Package names from a pool of `.deb` filenames.
+
+    Debian's filename is `name_version_arch.deb`, and the name never contains an underscore, so
+    the first field is the package. Reading the pool rather than asking apt keeps this a pure
+    function the suite can feed a broken input.
+    """
+    names = set()
+    for path in paths:
+        stem = PurePosixPath(path).name
+        if not stem.endswith(".deb"):
+            continue
+        name, _, rest = stem.partition("_")
+        if not name or not rest:
+            raise PinFileError(f"{stem!r} is not a Debian package filename")
+        names.add(name)
+    return names
+
+
 def _normalise(distribution: str) -> str:
     """PEP 503 normalisation, so `zxing-cpp`, `zxing_cpp` and `Zxing.CPP` are one name."""
     return re.sub(r"[-_.]+", "-", distribution).lower()
@@ -173,6 +266,21 @@ def main() -> int:
         counts = ", ".join(f"{group} {len(parsed[group])}" for group in GROUPS)
         print(f"{label}: {counts}")
     print("pin files: groups disjoint, no Debian Python package")
+
+    # The closure checks need a pool to read, and the CI job that checks the pin files does not
+    # fetch one. They are therefore an EXPLICIT MODE rather than something that runs when a
+    # directory happens to exist: "assert only if the input is present" is a check that passes
+    # loudest exactly when it has been skipped.
+    if "--closure" in sys.argv:
+        pool = Path(sys.argv[sys.argv.index("--closure") + 1])
+        if not pool.is_dir():
+            raise PinFileError(f"{pool} is not a directory; --closure needs the fetched pool")
+        names = closure_from_pool(p.name for p in pool.glob("*.deb"))
+        if not names:
+            raise PinFileError(f"{pool} holds no .deb; the pool is empty, not clean")
+        closure_is_free_of_init_system(names)
+        no_python_package_in_closure(names, wheels)
+        print(f"appliance closure: {len(names)} packages, no init system, no Debian Python library")
     return 0
 
 

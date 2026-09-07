@@ -181,3 +181,86 @@ def test_the_interpreter_and_the_transient_pip_are_the_two_allowed_exceptions() 
         verify.parse_pin_file(GOOD + "python3-pip=25.1.1+dfsg-1\n"),
         verify.parse_pin_file(WHEEL_TEXT),
     )
+
+
+# --- The closure assertions ----------------------------------------------------------------------
+#
+# These read the RESOLVED POOL rather than a pin file, and that difference is the whole point: not
+# one of the names they catch is pinned anywhere. `systemd` arrives through
+# `linux-image-amd64` -> `initramfs-tools` -> `udev`, and a Debian Python library would arrive as a
+# dependency of something that has nothing to do with Python. The pin-file checks read the eight
+# names a human typed and cannot see either.
+
+
+def test_a_deb_filename_yields_its_package_name() -> None:
+    """Debian's `name_version_arch.deb`, and the name never contains an underscore."""
+    assert verify.closure_from_pool(
+        ["libc6_2.41-12_amd64.deb", "tzdata_2026b-0+deb13u1_all.deb", "Packages.gz"]
+    ) == {"libc6", "tzdata"}
+
+
+def test_something_that_is_not_a_debian_filename_is_an_error_not_a_skip() -> None:
+    """A pool member this cannot parse is a pool this has not checked. Silently dropping it would
+    make every assertion below vacuous for exactly the file nobody expected to be there."""
+    with pytest.raises(verify.PinFileError, match="not a Debian package filename"):
+        verify.closure_from_pool(["libc6.deb"])
+
+
+def test_an_init_system_in_the_closure_fails_the_build() -> None:
+    """The appliance's first published claim is that it has no init system. Measured 2026-09-07:
+    the closure is 78 packages with the kernel resolved and 57 without, and `systemd`, `udev`,
+    `initramfs-tools`, `libsystemd-shared` and `dracut-install` are all in the difference."""
+    for offender in ("systemd", "udev", "initramfs-tools", "libsystemd-shared", "dracut-install"):
+        with pytest.raises(verify.PinFileError, match=offender):
+            verify.closure_is_free_of_init_system({"dash", "python3", offender})
+
+
+def test_libsystemd0_and_libudev1_are_deliberately_allowed() -> None:
+    """They are shared libraries pulled by `util-linux`, not daemons. "No systemd" and "no
+    libsystemd0" are different statements; `docs/boot-pipeline.md` claims only the first, so
+    failing on the second would be the build asserting something the project does not say."""
+    verify.closure_is_free_of_init_system({"util-linux", "libsystemd0", "libudev1"})
+
+
+def test_a_debian_python_library_reaching_the_closure_fails_the_build() -> None:
+    """`no_apt_package_shadows_a_wheel` reads `build/apt-versions.txt`, where a transitive
+    dependency never appears. This is the same `docs/adr/0002` collision arriving by the route
+    nobody is watching."""
+    wheels = verify.parse_pin_file(WHEEL_TEXT)
+    with pytest.raises(verify.PinFileError, match="python3-zxing-cpp"):
+        verify.no_python_package_in_closure({"python3", "python3-zxing-cpp"}, wheels)
+
+
+def test_the_closure_check_names_the_wheel_it_collides_with() -> None:
+    """Which of the two lists is wrong is the thing the reader needs, and normalisation is what
+    makes `python3-zxing-cpp` and the wheel `zxing-cpp` one name."""
+    wheels = verify.parse_pin_file(WHEEL_TEXT)
+    with pytest.raises(verify.PinFileError, match="the wheel 'zxing-cpp'"):
+        verify.no_python_package_in_closure({"python3-zxing-cpp"}, wheels)
+
+
+def test_debians_decomposition_of_cpython_is_not_a_shadowed_wheel() -> None:
+    """`python3-minimal`, `python3.13`, `python3.13-minimal` and the `libpython3*` pair are how
+    Debian ships the interpreter `build/apt-versions.txt` pins as `python3`. They are not a second
+    resolution of anything in `uv.lock` and there is no wheel they could shadow.
+
+    The pin-file check never had to draw this line, because a human writes `python3` and the
+    decomposition never appears there. Getting it wrong in either direction matters: too broad and
+    `python3-cryptography` walks through as interpreter packaging, too narrow and the build fails
+    on its own interpreter."""
+    wheels = verify.parse_pin_file(WHEEL_TEXT)
+    verify.no_python_package_in_closure(
+        {
+            "python3",
+            "python3-minimal",
+            "python3.13",
+            "python3.13-minimal",
+            "libpython3-stdlib",
+            "libpython3.13-stdlib",
+            "libpython3.13-minimal",
+        },
+        wheels,
+    )
+    # ...and the line is drawn at the right place: a library is still caught.
+    with pytest.raises(verify.PinFileError, match="python3-cryptography"):
+        verify.no_python_package_in_closure({"python3-minimal", "python3-cryptography"}, wheels)
