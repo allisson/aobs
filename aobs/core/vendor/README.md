@@ -31,9 +31,20 @@ documented at length in `docs/boot-pipeline.md`:
 - **`PublicKey.schnorr_verify` segfaults** against any `libsecp256k1` ≥ 0.3.0. embit binds
   `secp256k1_schnorrsig_verify` with four arguments where the C function takes five, the fourth
   being `msglen`. It is a crash, not an exception. The appliance only signs, so nothing calls it.
-- **`libsecp256k1` ≥ 0.8.0 cannot be used**, because upstream removed the deprecated
-  `secp256k1_schnorrsig_sign` alias that embit binds. embit's own `except: pass` hides this until
-  taproot signing.
+- **`libsecp256k1` ≥ 0.7 cannot be used, and the failure is earlier and louder than the note this
+  replaces claimed.** Two deprecated aliases are involved, not one. `secp256k1_schnorrsig_sign`,
+  removed in 0.8, is hidden by embit's own `except: pass` until taproot signing — that was the
+  ceiling recorded here. But `ctypes_secp256k1._init()` also binds
+  **`secp256k1_ec_privkey_negate`** unconditionally, and upstream had removed that by 0.7: the
+  library loads, `_init` raises `AttributeError` on the first `argtypes` assignment, and
+  `secp256k1.py`'s bare `except:` turns the whole ctypes module into a silent `py_secp256k1`
+  fallback. Measured against Homebrew's `libsecp256k1.7.dylib` on 2026-09-07: the library resolves,
+  exports every BIP86 symbol, and is rejected anyway.
+
+  Debian trixie's 0.5.0 is below both ceilings and exports `secp256k1_ec_privkey_negate`, verified
+  from the `.deb` in the pinned snapshot — so the appliance is fine today. The day a bumped base
+  crosses 0.7, this becomes a pure-Python signer that passes its tests. `build/verify.py`'s symbol
+  assertion is what has to catch it.
 
 Signing itself is correct against Alpine's `libsecp256k1` and was checked independently — the
 signature verifies; it merely uses a different BIP340-legal nonce than the bundled blob does.

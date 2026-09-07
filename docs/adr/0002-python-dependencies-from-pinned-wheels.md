@@ -75,8 +75,22 @@ Rust and OpenSSL build, plus `pillow` and `zxing-cpp` — and `cffi` and `argon2
 against `libffi`. That is in visible tension with the predecessor's decision to vendor `embit` from
 source *specifically to keep its PyPI wheel's prebuilt `libsecp256k1` blob out of the repository*.
 
-The line is where the blob lives. A binary in the **input archive** is hash-pinned, published beside
-the release, and verified byte for byte by an independent rebuild — indistinguishable in kind from a
-`.deb`, which is also a prebuilt binary nobody in this project compiled. A binary in the
-**repository** is none of those things: carried in the source tree, reviewed by nobody, diffed by
-nobody. `embit` stays vendored from source, and its wheel stays out.
+The line is where the blob lives *and what it does*. A binary in the **input archive** is
+hash-pinned, published beside the release, and verified byte for byte by an independent rebuild —
+indistinguishable in kind from a `.deb`, which is also a prebuilt binary nobody in this project
+compiled. A binary in the **repository** is none of those things: carried in the source tree,
+reviewed by nobody, diffed by nobody.
+
+**That test alone would license installing `embit` from its wheel, and it must not.** An earlier
+draft of this ADR said as much and was wrong. `embit`'s wheel ships
+`util/prebuilt/libsecp256k1_*.so`, and the objection to it is not opacity — it is that
+`_find_library()` returns the prebuilt path whenever that file merely *exists* and does not fall
+through when *loading* it fails. The blob's presence is therefore enough to silently select
+`py_secp256k1`, embit's pure-Python elliptic curve arithmetic, defeating the one EC rule this project
+has. `aobs/core/vendor/README.md` records that this is precisely how the Alpine predecessor's
+authoritative tier signed in pure Python for its entire life, at ~48x, with nothing anywhere saying
+so. Hash-pinning that blob would have pinned the failure, not prevented it.
+
+So the rule has a second clause: a prebuilt binary is acceptable in the input archive **unless its
+mere presence changes which code runs**. `embit` stays vendored from source, from git rather than
+PyPI, and its wheel stays out. `tests/test_structure.py` asserts no binary is in that tree.
