@@ -17,50 +17,57 @@ something a command answers rather than something a person judges.
 
 Get the inherited code and the pinned base into this repo, with nothing built yet.
 
-- [ ] Copy `aobs/`, `tests/`, `fixtures/`, `pyproject.toml` from the predecessor as a squashed commit
-      on `bootstrap`. No git history import — the old history is 78 issues of decisions about a kernel
-      this project no longer builds.
-- [ ] Copy the app-level documents over unchanged: `psbt-review-model`, `review-screen`, `seed-entry`,
+- [x] Copy `aobs/`, `tests/`, `fixtures/`, `pyproject.toml` from the predecessor. No git history
+      import — the old history is 78 issues of decisions about a kernel this project no longer builds.
+      Landed on `m0-bootstrap` across six commits rather than one squashed commit, because three of
+      them are corrections worth reading separately: the Python-layer seam, the libsecp256k1
+      verification, and the embit sdist findings.
+- [x] Copy the app-level documents over unchanged: `psbt-review-model`, `review-screen`, `seed-entry`,
       `secret-hygiene`, `address-verification`, `entropy-mixing`, `export-password`,
       `encrypted-wallet-qr`, `network-selection`, `qr-emit-parameters`, `scan-feedback`,
       `failure-states`.
-- [ ] Seed `CONTEXT.md`, revising the terms the base-OS switch changes: `Offline`, `Amnesic`,
+- [x] Seed `CONTEXT.md`, revising the terms the base-OS switch changes: `Offline`, `Amnesic`,
       `No data path`, `Boot medium`, `Input archive`, `Source archive`, `Reproducibility contract`.
-- [ ] Pick the `snapshot.debian.org` timestamp and record it in one place both the build and the test
+- [x] Pick the `snapshot.debian.org` timestamp and record it in one place both the build and the test
       tier read — `build/snapshot.env`.
-- [ ] `build/apt-repositories`: both `trixie` and `trixie-security` at that instant. The second is not
+- [x] `build/apt-repositories`: both `trixie` and `trixie-security` at that instant. The second is not
       optional — at this snapshot `linux-image-amd64` is 6.12.94-1 in main and **6.12.107-1** in
       security, so pinning main alone would ship an appliance kernel thirteen point releases behind,
       silently.
-- [ ] Generate `build/apt-versions.txt` from that snapshot, with the machine-readable
+- [x] Generate `build/apt-versions.txt` from that snapshot, with the machine-readable
       `# @group appliance` / `# @group harness` markers. A package outside any group is a parse error,
       never a guess — in the predecessor a prose comment on the wrong side of the split put a package
       manager in the rootfs and nothing noticed.
-- [ ] Fix `pyproject.toml`'s dependency groups. `textual`, `pillow` and `zxing-cpp` sat under the
+- [x] Fix `pyproject.toml`'s dependency groups. `textual`, `pillow` and `zxing-cpp` sat under the
       `test` extra while being imported by appliance code — `aobs/ui/screens/scan.py` calls
       `qrdecode.decode_frame`, which needs `zxingcpp` and `PIL` — and the comment there asserted the
       opposite of what the code does. The groups are now load-bearing: `dependencies` is what the
       rootfs gets, `test` is what only the tier gets.
-- [ ] `build/wheel-versions.txt` + `build/gather-wheel-versions.sh`: **every** Python package, both
+- [x] `build/wheel-versions.txt` + `build/gather-wheel-versions.sh`: **every** Python package, both
       groups, derived from `pyproject.toml` and `uv.lock`. Versions in the list for a human to read;
       hashes only in the lock, so there is one place for one fact. See
       `docs/adr/0002-python-dependencies-from-pinned-wheels.md`, including why the layer is not split
       package by package between apt and PyPI.
-- [ ] `docs/adr/0001-debian-base-and-stock-kernel.md`,
+- [x] `docs/adr/0001-debian-base-and-stock-kernel.md`,
       `docs/adr/0002-python-dependencies-from-pinned-wheels.md`, `docs/overview.md`, `CLAUDE.md`,
       this file.
-- [ ] Fix `.gitignore`: the Python-packaging default ignores `build/`, which is source here.
-- [ ] Drop `tests/test_build_verifier.py` and `tests/test_verify_release.py`. Both test subjects that
+- [x] Fix `.gitignore`: the Python-packaging default ignores `build/`, which is source here.
+- [x] Drop `tests/test_build_verifier.py` and `tests/test_verify_release.py`. Both test subjects that
       no longer exist — the Alpine `build/gather.py`, `build/verify.py` and `verify-release.sh` — so
       they are rewritten against the Debian build at M2 and M5 respectively, not ported. **This is
       the one place where importing the predecessor loses coverage**, and it is recorded here so it
       cannot be forgotten: until M2 the build has no assertions under test.
-- [ ] Two assertions in `tests/test_structure.py` are guarded because their subjects are deferred:
+- [x] Two assertions in `tests/test_structure.py` are guarded because their subjects are deferred:
       the `docs/test-harness.md` port-table check skips until M2, and the ADVISORIES/README
       cross-check skips until M5. Both guards are listed for removal in those milestones — a
       permanent skip is a deleted test with extra steps.
 
-**Exit**: the fast suite runs on a dev machine. Nothing else is claimed.
+**Exit**: met. 692 passed, 9 skipped, 2 deselected (the opt-in regtest suite), 0 failed.
+
+**Nothing else is claimed, and one thing specifically is not.** That run took 22 m 31 s because this
+dev machine has no loadable `libsecp256k1`, so every EC operation went through embit's
+`py_secp256k1` — the code path `docs/boot-pipeline.md` forbids on the appliance. It is evidence that
+the suite runs. It is not evidence about the code that ships; see `CLAUDE.md` and M1.
 
 ---
 
