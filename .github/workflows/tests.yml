@@ -78,8 +78,12 @@ jobs:
       # cache hit means "the same pins as last time" and a pin change is a cache miss by
       # construction — never a stale pool silently reused.
       #
-      # This cache is also what keeps us honest with snapshot.debian.org, which rate-limits: with
-      # it, the archive is contacted when a pin changes, not on every push and pull request.
+      # The cache is a speed optimisation and nothing more. On a miss, `fetch-inputs.sh` fetches
+      # from deb.debian.org and verifies the result against the committed `build/inputs.sha256` —
+      # hashes that were produced from snapshot.debian.org by a human running `--refresh`. Measured
+      # 2026-09-07: the mirror served all 169 MB in 6 s and the pool matched the snapshot-derived
+      # hashes byte for byte, while snapshot itself hung this job past ten minutes from a runner.
+      # Which host served a byte is not what makes the build reproducible; the hash file is.
       - name: Cache build/inputs
         id: inputs
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
