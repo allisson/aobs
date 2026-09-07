@@ -87,9 +87,12 @@ wheel layer installed the way the image will install it.
       `argon2-cffi-bindings` are per-version and must be checked rather than assumed. A missing wheel
       means a compiler in the build, which `docs/adr/0001` spent the Alpine kernel config to avoid.
 - [ ] Confirm the vendored `embit` and `ur2` build and pass there — Debian packages neither.
-- [ ] Verify Debian's `libsecp256k1-2` 0.5.0 exports `secp256k1_schnorrsig_sign32` and
-      `secp256k1_keypair_create`. **Unverified today.** If it does not, this milestone grows a
-      build-from-upstream stage and `docs/adr/0001` gets an amendment.
+- [x] **Done, ahead of the milestone.** Debian's `libsecp256k1-2` 0.5.0-2+b1, pulled from the pinned
+      snapshot and inspected, exports `secp256k1_schnorrsig_sign32`, `secp256k1_keypair_create`,
+      `secp256k1_xonly_pubkey_from_pubkey`, `secp256k1_ecdh` and `secp256k1_ecdsa_sign_recoverable`
+      — BIP86's modules were enabled — and also the long-deprecated `secp256k1_ec_privkey_negate`
+      alias that the vendored embit's loader binds unconditionally. No build-from-upstream stage is
+      needed and `docs/adr/0001` stands.
 - [ ] Assert every EC operation goes through that `.so` and never embit's pure-Python fallback.
       **Measured, and worse than a performance note**: with no `libsecp256k1` to `ctypes`-load, the
       vendored embit silently resolves to `py_secp256k1` — 1.73 ms per `ec_pubkey_create` against
@@ -108,8 +111,16 @@ wheel layer installed the way the image will install it.
 **Exit**: the full suite passes inside the authoritative tier, at the exact versions the ISO will
 install, from both lists. One ECDSA and one Schnorr signature verified against a known-answer fixture.
 
-**Risk**: `libsecp256k1` is the live one. If Debian's build lacks the BIP86 modules, the "no compiler in
-the build" property from `docs/adr/0001` partly goes away — that is a finding to stop on, not to absorb.
+**Risk**: the `manylinux` question below is now the live one — `libsecp256k1` is settled.
+
+**And a standing condition, not a task**: on a machine without a loadable libsecp256k1 the vendored
+embit resolves to `py_secp256k1` and the suite still passes, 50-80x slower. Homebrew's 0.7 counts as
+"without": it dropped the deprecated alias embit binds, so the library loads and embit rejects it.
+The decision was to leave embit's vendored loader alone and make **this container the place the suite
+is actually run** — so a green run on a dev machine is not evidence about the code that ships, and no
+milestone may cite one. The same silent fallback is what a future Debian shipping 0.7+ would cause on
+the appliance itself; `build/verify.py`'s symbol assertion is the only thing standing between that and
+a pure-Python signer.
 
 ---
 

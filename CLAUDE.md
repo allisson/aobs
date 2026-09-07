@@ -20,6 +20,13 @@ this project's Alpine ancestry and are now absence — see
 
 **`aobs/core/` may not import any adapter, `aobs.ui`, or `aobs.ports`.** A test enforces it.
 
+**A green suite on a dev machine is not evidence.** Without a loadable `libsecp256k1` the vendored
+embit silently resolves to `py_secp256k1`, and every EC operation runs 50-80x slower through the code
+path `docs/boot-pipeline.md` forbids on the appliance — while passing. Homebrew's 0.7 counts as
+"without": it dropped the deprecated alias embit's loader binds. The authoritative tier is
+`build/Dockerfile.test`, and that is where the full suite is run and where a claim about it comes
+from. Locally, run the files you are working on.
+
 **The build fails rather than warns** at the first stage where a published claim stops being true.
 Every build-time assertion is a pure function in `build/verify.py`, and the suite feeds each one a
 deliberately broken input to prove it still bites.

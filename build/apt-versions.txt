@@ -41,10 +41,17 @@ util-linux=2.41.5-0+deb13u1
 python3=3.13.5-1
 
 # Every EC operation on the appliance — derivation, ECDSA, Schnorr, address proof — runs
-# here and never in embit's pure-Python fallback. Debian ships this prebuilt, so the
-# build asserts secp256k1_schnorrsig_sign32 and secp256k1_keypair_create resolve in the
-# shipped .so rather than trusting that BIP86's modules were enabled. UNVERIFIED as of
-# this commit; the assertion is what settles it.
+# here and never in embit's pure-Python fallback.
+#
+# VERIFIED against this exact .deb, not assumed: the shipped
+# usr/lib/x86_64-linux-gnu/libsecp256k1.so.2 exports secp256k1_schnorrsig_sign32 and
+# secp256k1_keypair_create (so BIP86's modules were enabled) AND the long-deprecated
+# secp256k1_ec_privkey_negate alias, which the vendored embit's ctypes loader binds
+# unconditionally and which upstream removed by 0.7. Both halves matter, and the second is
+# the one that will break first: a future Debian shipping 0.7+ makes embit's loader raise,
+# and secp256k1.py's bare `except:` turns that into a silent pure-Python appliance. That is
+# what the build-time assertion in build/verify.py is for. Do not bump this pin without
+# re-running it.
 libsecp256k1-2=0.5.0-2+b1
 
 # `loadkeys` and the maps it loads. The Keymap adapter shells out to the first and reads
