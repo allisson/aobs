@@ -91,6 +91,13 @@ wheel layer installed the way the image will install it.
       `secp256k1_keypair_create`. **Unverified today.** If it does not, this milestone grows a
       build-from-upstream stage and `docs/adr/0001` gets an amendment.
 - [ ] Assert every EC operation goes through that `.so` and never embit's pure-Python fallback.
+      **Measured, and worse than a performance note**: with no `libsecp256k1` to `ctypes`-load, the
+      vendored embit silently resolves to `py_secp256k1` — 1.73 ms per `ec_pubkey_create` against
+      tens of microseconds for the C library, which is why the suite takes 22 minutes on a machine
+      without it. The cost is the visible half. The other half is that such a run exercises the exact
+      code path `docs/boot-pipeline.md` forbids on the appliance, and passes. So the assertion is not
+      only a build-time check: the suite itself must refuse to run against the fallback, or say so on
+      every line of output.
 - [ ] `build/verify.py` parses **both** pin files and asserts the two groups stay disjoint — two lists
       is a thing the build checks, not a thing that can drift.
 - [ ] **No test may be skipped in this tier.** Three entropy tests carry
