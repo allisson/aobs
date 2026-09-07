@@ -100,18 +100,20 @@ wheel layer installed the way the image will install it.
       RECORD file. `--ignore-installed` would leave two copies with `sys.path` deciding the winner,
       which is `docs/adr/0002`'s "two resolvers over one import graph" arriving through pip's own
       dependencies. One directory, declared first on `PYTHONPATH`, is the answer.
-- [ ] Full suite green on Debian's `python3` 3.13.5. `pyproject.toml` says `>=3.12`; the predecessor
+- [x] Full suite green on Debian's `python3` 3.13.5. `pyproject.toml` says `>=3.12`; the predecessor
       ran Alpine's 3.14 and this machine runs 3.13.12, so Debian's 3.13.5 is close to but not the same
       as anything the suite has passed on.
 
-      **Observed, and deliberately not yet checked off.** In `build/Dockerfile.test`, with the
-      session gates above in place: `720 passed, 4 skipped, 2 deselected, 0 failed` in 496 s,
-      reporting `python 3.13.5, EC backend ctypes_secp256k1, authoritative tier yes`. The four
-      skips are exactly `SKIPS_ALLOWED` and none was stale, so the skip policy passed by staying
-      silent. That run was the tier image under **qemu on an arm64 Mac** — the same x86_64
-      userland, the same `libsecp256k1`, the same wheels, but a host this project's own rule says
-      a milestone may not cite. The box closes on CI's native x86_64 run, and the numbers written
-      here then come from that run.
+      **Measured**, in `build/Dockerfile.test` on CI's native x86_64, run
+      [34166600257](https://github.com/allisson/aobs/actions/runs/34166600257) on
+      [#3](https://github.com/allisson/aobs/pull/3): **720 passed, 4 skipped, 2 deselected,
+      0 failed** in 427 s, the run reporting `python 3.13.5, EC backend ctypes_secp256k1,
+      authoritative tier yes`. The skip policy passed by staying silent — the four skips were
+      exactly `SKIPS_ALLOWED` and none was stale.
+
+      The same image under qemu on an arm64 Mac gave the same 720/4/2 in 496 s. That is recorded
+      as corroboration and is **not** what closes this box: the rule is that a claim about the
+      suite comes from the tier, and a dev machine is not where this project cites one.
 - [x] **Confirmed.** Every appliance wheel has a `manylinux` build for CPython 3.13:
       `fetch-inputs.sh` runs `pip download --only-binary :all: --platform manylinux_2_28_x86_64
       --platform manylinux2014_x86_64 --python-version 3.13`, which fails if any package would need
@@ -185,10 +187,20 @@ wheel layer installed the way the image will install it.
       in the same container. `skip_policy_violations()` is a pure function and is fed its own
       broken inputs in `tests/test_tier_gates.py`, the same way `build/verify.py` is.
 
-**Exit**: the full suite passes inside the authoritative tier, at the exact versions the ISO will
-install, from both lists. One ECDSA and one Schnorr signature verified against a known-answer fixture.
+**Exit**: met. The full suite passes inside the authoritative tier, at the exact versions the ISO
+will install, from both lists — 720 passed, 4 skipped, 2 deselected, 0 failed. The two signatures
+are `tests/test_structure.py::test_both_signature_schemes_produce_the_expected_bytes`: the BIP84
+ECDSA against a pinned known-answer vector, and the BIP86 Schnorr signed by the live backend and
+verified by the pure-Python one — no Schnorr vector is pinned, because BIP340 does not promise a
+byte-stable signature and pinning one would assert something the spec never said.
 
-**Risk**: the `manylinux` question below is now the live one — `libsecp256k1` is settled.
+**Nothing else is claimed.** The four remaining skips are named in `SKIPS_ALLOWED` and their
+subjects arrive at M2 and M5. Nothing here has been booted: M1 needs no image, and every claim in
+`docs/threat-model.md` that a running appliance answers is still unanswered until M3.
+
+**Risk**: none of M1's is now live — `libsecp256k1` is settled and `manylinux` is confirmed for all
+44 wheels. The next one belongs to M2: whether `mmdebstrap --mode=unshare` works in the CI runner
+without `--privileged`.
 
 **And a standing condition, not a task**: on a machine without a loadable libsecp256k1 the vendored
 embit resolves to `py_secp256k1` and the suite still passes, 50-80x slower. Homebrew's 0.7 counts as
