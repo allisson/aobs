@@ -82,18 +82,41 @@ app was written for. It ships an older one — six majors older — and two cryp
 proving that the app runs unchanged on Debian's interpreter, against Debian's `libsecp256k1`, with the
 wheel layer installed the way the image will install it.
 
-- [ ] `build/Dockerfile.test` on `debian:trixie-slim` at the pinned snapshot, installing both apt
-      groups and both wheel groups — the authoritative tier.
-- [ ] Wheels install from pre-fetched files with `--no-index`, the same way `mkiso.sh` will do it. A
-      tier that reaches PyPI at test time is not testing what ships.
+- [x] `build/Dockerfile.test` on `debian:trixie-slim`, installing both apt groups and both wheel
+      groups from `build/inputs/` — the authoritative tier. `.github/workflows/tests.yml` runs it on
+      every push to main and every pull request.
+- [x] Wheels install from pre-fetched files with `--no-index`, the same way `mkiso.sh` will.
+- [x] **`build/fetch-inputs.sh` moved here from M2**, because the tier needs it too and not only the
+      image build. snapshot.debian.org rate-limits — measured 2026-09-07, five consecutive
+      `InRelease` fetches returned 503 and the same URL returned 200 once retries were added — so a
+      tier that apt-ed from it on every push would be flaky and abusive. It also cannot use HTTPS
+      from `debian:trixie-slim`, which ships no `ca-certificates`; installing those first would mean
+      pulling an unpinned package from an unpinned mirror *before* the step that does the pinning.
+      Both problems disappear when the tier installs from a hash-gated local pool: 189 files,
+      313 MiB, two `.deb` pools and two wheel pools, gated on hash **and** set equality.
+- [x] The Python layer installs with `pip --target /opt/aobs-python`, not into `dist-packages`.
+      Pinning `python3-pip` in apt drags Debian's `python3-wheel` and `python3-packaging` in, and
+      dpkg's `packaging` 25.0 then blocks the lock's 26.3 — pip will not uninstall a package with no
+      RECORD file. `--ignore-installed` would leave two copies with `sys.path` deciding the winner,
+      which is `docs/adr/0002`'s "two resolvers over one import graph" arriving through pip's own
+      dependencies. One directory, declared first on `PYTHONPATH`, is the answer.
 - [ ] Full suite green on Debian's `python3` 3.13.5. `pyproject.toml` says `>=3.12`; the predecessor
       ran Alpine's 3.14 and this machine runs 3.13.12, so Debian's 3.13.5 is close to but not the same
       as anything the suite has passed on.
-- [ ] Confirm every appliance wheel has a `manylinux` build compatible with trixie's glibc 2.41 for
-      CPython 3.13 — `cryptography` ships `cp311-abi3`, but `pillow`, `zxing-cpp`, `cffi` and
-      `argon2-cffi-bindings` are per-version and must be checked rather than assumed. A missing wheel
-      means a compiler in the build, which `docs/adr/0001` spent the Alpine kernel config to avoid.
-- [ ] Confirm the vendored `embit` and `ur2` build and pass there — Debian packages neither.
+- [x] **Confirmed.** Every appliance wheel has a `manylinux` build for CPython 3.13:
+      `fetch-inputs.sh` runs `pip download --only-binary :all: --platform manylinux_2_28_x86_64
+      --platform manylinux2014_x86_64 --python-version 3.13`, which fails if any package would need
+      a source distribution, and it succeeds for all 18 appliance and 26 harness wheels.
+      `cryptography` is `cp311-abi3`, `zxing-cpp` is `cp312-abi3`, `argon2-cffi-bindings` is
+      `cp310-abi3`, and `pillow` and `cffi` are `cp313`. No compiler in the build.
+- [x] The vendored `embit` and `ur2` pass there.
+- [x] **First defect this tier caught, and the reason it exists.**
+      `aobs/adapters/real/keymap.py`'s `PREFERRED` carried Alpine's xkb keymap naming — `gb`, `br`,
+      `us-dvorak`. Debian's `console-data` ships the traditional console naming — `uk`,
+      `br-abnt2`, `dvorak` — the exact inverse. `offered()` filters the list to what is installed,
+      so wrong names do not raise: the picker silently offered `us, de, fr, es, it`, having dropped
+      **ABNT2**, which is the layout `CONTEXT.md` names as the worked example of a user creating a
+      wallet they can never reopen. Corrected against the image's own 216-map tree.
 - [x] **Done, ahead of the milestone.** Debian's `libsecp256k1-2` 0.5.0-2+b1, pulled from the pinned
       snapshot and inspected, exports `secp256k1_schnorrsig_sign32`, `secp256k1_keypair_create`,
       `secp256k1_xonly_pubkey_from_pubkey`, `secp256k1_ecdh` and `secp256k1_ecdsa_sign_recoverable`
@@ -136,10 +159,13 @@ a pure-Python signer.
 - [ ] `mmdebstrap --mode=unshare` builds the rootfs from the pinned snapshot. **No `--privileged`.**
       Verify unshare mode works in the CI runner early; if it does not, that is a finding, not a
       licence to reach for `--privileged`.
-- [ ] `build/fetch-inputs.sh`: the one networked step, and not part of the build. It resolves both
-      pin files' closures — `.deb`s from the snapshot, wheels from PyPI — into `build/inputs/`, and
-      the build refuses to start unless every byte matches `build/inputs.sha256`
-      — on hash **and** on set equality. There is no second, offline-only path to go stale.
+- [x] `build/fetch-inputs.sh` — done at M1, see above. `mkiso.sh` consumes the same pool: the
+      `deb/appliance` closure is downloaded separately from `deb/harness` precisely so the appliance
+      group is complete on its own.
+- [ ] **Purge the transient `pip` with `--auto-remove`.** Installing it into the rootfs pulls
+      `python3-wheel` and `python3-packaging`; removing pip alone would leave both behind, and a
+      `python3-packaging` in the image is a harness package in the rootfs. `build/verify.py` must
+      assert all three are gone, not just pip.
 - [ ] Install Debian's `linux-image-amd64` (6.12 LTS, the same series the predecessor compiled by
       hand). No kernel compile, no `kernel.config`, no toolchain.
 - [ ] Prune the modules tree to the generic allowlist — `i915`, `amdgpu`, `nouveau`, `simpledrm`,

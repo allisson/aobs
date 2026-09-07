@@ -1,0 +1,104 @@
+# The authoritative test tier, and the only tier CI runs.
+#
+# `debian:trixie-slim` installing **the exact packages the ISO installs** — the `.deb` closure from
+# `build/apt-versions.txt` and the wheel closure from `uv.lock` — entirely from `build/inputs/`,
+# which `build/fetch-inputs.sh` populated and `build/inputs.sha256` gates. A skew in `zxing-cpp`,
+# `cryptography`, `textual` or `libsecp256k1` fails here rather than on the appliance.
+#
+#     sh build/fetch-inputs.sh                                 # once, or when a pin changes
+#     docker build -f build/Dockerfile.test -t aobs-test .      # only when the pins change
+#     docker run --rm -v "$PWD:/src" -w /src aobs-test          # the dev loop
+#
+# The bind mount is what makes this a dev loop rather than a CI job: the image carries the pinned
+# userland, the working tree comes from the host, and no rebuild is needed to run an edit. CI runs
+# `docker run --rm aobs-test` with no mount, so what it judges is the copy baked in below.
+#
+# THIS BUILD TOUCHES NO NETWORK. Not a stylistic preference: snapshot.debian.org rate-limits
+# (measured 2026-09-07 — five consecutive `InRelease` fetches returned 503, and the same URL
+# returned 200 once retries were added), and `debian:trixie-slim` ships no `ca-certificates`, so an
+# apt-from-snapshot tier would be both flaky and unable to use HTTPS without first pulling an
+# unpinned package from an unpinned mirror. `build/fetch-inputs.sh` holds the whole argument.
+#
+# There is no second tier running on the host Python, deliberately. The predecessor had one and
+# retired it: with `embit` vendored without a prebuilt blob, a machine with no system
+# `libsecp256k1` falls back to `py_secp256k1`, which took that job from ~17 s to ~6 minutes. This
+# repository measured the same thing at 1.73 ms per `ec_pubkey_create` and a 22-minute suite. A
+# tier that is 50-80x slower, testing differently-resolved libraries, is not a dev loop and is not
+# a signal. `CLAUDE.md` states the rule.
+FROM debian:trixie-slim
+
+SHELL ["/bin/sh", "-euxc"]
+
+# Nothing below may reach the network, and this is what makes that checkable rather than promised:
+# no sources, so an accidental `apt-get update` has nowhere to go.
+RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; \
+    printf 'Acquire::http::Proxy "http://127.0.0.1:9";\n' > /etc/apt/apt.conf.d/99offline
+
+WORKDIR /src
+
+# --- The gate ------------------------------------------------------------------------------------
+#
+# Hash and set equality, before a single package is installed. `sha256sum -c` fails on a changed
+# byte; the count check fails on an *extra* file, which is how an unpinned package would otherwise
+# reach an image that claims every input is pinned.
+COPY build/inputs.sha256 build/apt-versions.txt build/requirements.appliance.txt build/requirements.test.txt /src/build/
+COPY build/inputs /src/build/inputs
+RUN sha256sum -c build/inputs.sha256; \
+    named=$(wc -l < build/inputs.sha256); \
+    present=$(find build/inputs -type f | wc -l); \
+    echo "inputs: $named named, $present present"; \
+    test "$named" -eq "$present"
+
+# --- The apt layer -------------------------------------------------------------------------------
+#
+# The harness pool is the union closure — the appliance group plus the harness group — because this
+# tier is the one place both halves are meant to coexist. `build/mkiso.sh` will install
+# `deb/appliance` only, and `build/verify.py` fails the image build if a harness name reaches the
+# rootfs.
+#
+# The harness group also carries the builder's own tools (`mmdebstrap`, `xorriso`, `isolinux`,
+# `grub-efi-amd64-bin`), which this tier does not need. They are installed anyway rather than
+# hand-filtered, because the two groups answer "may this survive into the shipped rootfs?" and for
+# builder tools the answer is also no. Paying a few tens of MiB here is cheaper than a third group
+# whose boundary answers a different question than the one that guards the image.
+RUN apt-get install -y --no-install-recommends ./build/inputs/deb/harness/*.deb; \
+    rm -rf /var/lib/apt/lists/*
+
+# --- The Python layer ----------------------------------------------------------------------------
+#
+# `--no-index` so pip cannot reach PyPI, `--find-links` at the local pool, and `--require-hashes`
+# so every wheel is checked against `uv.lock` even though it was already checked above.
+#
+# `--target`, and that is the load-bearing flag. Pinning `python3-pip` in apt drags Debian's
+# `python3-wheel` and `python3-packaging` in with it, and `packaging` 25.0 from dpkg then blocks
+# the lock's `packaging` 26.3: pip refuses to uninstall a dpkg-owned package with no RECORD file.
+# `--ignore-installed` would get past that by leaving TWO copies on disk, with which one gets
+# imported decided by `sys.path` order — precisely the "two resolvers over one import graph"
+# failure `docs/adr/0002` exists to prevent, arriving through pip's own dependencies.
+#
+# So the Python layer is one directory, ahead of Debian's `dist-packages` on `PYTHONPATH`. Nothing
+# is uninstalled, nothing is shadowed by accident, and the layer is a discrete thing the build can
+# hash and a reviewer can list. `build/mkiso.sh` will do the same at M2, which is also how the
+# transient `pip` leaves no trace: the appliance group does not contain it, so the rootfs never has
+# `packaging` to collide with in the first place.
+RUN pip install --break-system-packages --no-cache-dir \
+        --no-index --find-links build/inputs/wheels/test \
+        --target /opt/aobs-python \
+        --require-hashes -r build/requirements.test.txt; \
+    python3 -c "import sys; sys.path.insert(0, '/opt/aobs-python'); import textual, cryptography, argon2, qrcode, zxingcpp, PIL, pytest; print('python layer imports')"
+
+# --- What this tier is allowed to assert ---------------------------------------------------------
+#
+# `tests/test_structure.py` and `tests/test_real_adapters.py` read this. It gates the assertions
+# that are about the APPLIANCE's environment rather than about Python: the live EC backend being
+# `ctypes_secp256k1`, and the `getrandom` ordering. On a dev host those would be testing whichever
+# libraries that host happens to have, which is not a claim worth making.
+ENV AOBS_AUTHORITATIVE_TIER=1
+
+COPY . /src
+
+# The package is put on the path rather than installed: what runs here is the tree as committed.
+# `/opt/aobs-python` first, so the wheel layer wins over Debian's dist-packages by declaration
+# rather than by whatever order the interpreter happens to assemble.
+ENV PYTHONPATH=/opt/aobs-python:/src
+CMD ["python3", "-m", "pytest", "-q"]

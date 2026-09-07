@@ -47,15 +47,30 @@ LOADKEYS = "loadkeys"
 #: Brazilian ABNT2 map is `br`, and Dvorak is `us-dvorak`. Naming them the way the fake does would
 #: have offered a picker whose non-US entries all failed to load — which is the failure this port
 #: exists to catch, arrived at by being tidy.
+#: The names are DEBIAN's, from `console-data`, and they are the inverse of Alpine's.
+#:
+#: Alpine's `kbd-misc` shipped the xkb naming — `gb`, `br`, `us-dvorak` — and this list used to
+#: carry those. Debian's `console-data` ships the traditional console naming instead: `uk`,
+#: `br-abnt2`, `dvorak`. Verified by listing the pinned image's own keymap tree (216 maps):
+#: `uk.kmap.gz`, `br-abnt2.kmap.gz` and `dvorak.kmap.gz` are all present, and no `gb*` or
+#: `us-dvorak*` file exists.
+#:
+#: The failure this prevents is silent by construction: `offered()` filters this list down to
+#: what is installed, so wrong names do not raise — the picker simply stops offering those
+#: layouts. Before this correction the authoritative tier measured the picker offering
+#: `us, de, fr, es, it`, having quietly dropped **ABNT2**, which is the very layout
+#: `CONTEXT.md`'s `Keymap picker` entry names as the worked example of a user creating a wallet
+#: they can never reopen. `br-latin1` also exists in the image and is NOT what is wanted; ABNT2
+#: is the physical Brazilian layout.
 PREFERRED: tuple[str, ...] = (
     "us",
-    "gb",
+    "uk",
     "de",
     "fr",  # AZERTY
-    "br",  # ABNT2
+    "br-abnt2",  # ABNT2
     "es",
     "it",
-    "us-dvorak",
+    "dvorak",  # US Dvorak
 )
 
 #: The suffixes `kbd` uses, longest first so `.map.gz` is not read as `.map` plus rubbish.

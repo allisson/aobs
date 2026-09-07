@@ -1,0 +1,135 @@
+# The one tier `docs/roadmap.md` M1 names, on every push to main and every pull request: a
+# `debian:trixie-slim` container with apt pointed at the pinned snapshot, installing the exact
+# package versions the ISO installs and the exact Python versions `uv.lock` resolves. A skew in
+# `zxing-cpp`, `cryptography`, `textual` or `libsecp256k1` fails here rather than on the appliance.
+#
+# There is no second job running the suite on the runner's own Python, and that is a decision the
+# predecessor made the hard way. With `embit` vendored without its prebuilt blob, a machine that
+# has no system `libsecp256k1` silently falls back to `py_secp256k1` — measured here at 1.73 ms per
+# `ec_pubkey_create` and a 22-minute suite. Such a job is 50-80x slower, tests differently-resolved
+# libraries, and passes while exercising the one code path `docs/boot-pipeline.md` forbids on the
+# appliance. It is not a signal. `CLAUDE.md` states the rule.
+#
+# The regtest suite is deliberately absent: it needs a `bitcoind` and stays opt-in, so a
+# contributor with no node still gets the full default suite. `docs/boot-checklist.md` holds what
+# only a boot can check, and no runner can check any of it.
+#
+# Every action is pinned to a commit SHA, not a tag. A tag is a movable pointer, and a repository
+# whose entire selling point is that every input is pinned cannot make an exception for the thing
+# that builds it.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pins:
+    name: the pinned lists agree with uv.lock
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # `uv` from pip at a pinned version rather than a marketplace action. One less third-party
+      # action to pin by SHA, and the version that resolves the lock here is the version named
+      # here — visible in the diff, like every other pin in this repository.
+      - name: Install uv
+        run: |
+          python3 -m pip install --quiet --user uv==0.10.11
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # docs/adr/0002 keeps every wheel hash in uv.lock so there is one place for one fact.
+      # build/requirements.*.txt are a second copy, because pip needs a form it can read and
+      # neither the image build nor this tier carries uv. This step is the mechanism that makes
+      # the copy safe: regenerate both and fail if either differs from what is committed.
+      - name: Requirement files match the lock
+        run: sh build/gather-requirements.sh --check
+
+      # The version list is derived from the same lock, and drifts the same way.
+      - name: build/wheel-versions.txt matches the lock
+        run: |
+          sh build/gather-wheel-versions.sh > /tmp/fresh.txt
+          grep -oE '^[a-z0-9._-]+==[^ ]+' build/wheel-versions.txt | sort > /tmp/committed.pins
+          grep -oE '^[a-z0-9._-]+==[^ ]+' /tmp/fresh.txt | sort > /tmp/fresh.pins
+          diff -u /tmp/committed.pins /tmp/fresh.pins
+
+  authoritative:
+    name: authoritative tier (debian trixie, pinned apt + wheels)
+    runs-on: ubuntu-latest
+    # The suite takes minutes here, not the 22 the pure-Python fallback costs, because the
+    # container has a real libsecp256k1. If this job ever approaches that figure, the EC backend
+    # is the first thing to check, not the runner.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # build/inputs/ is every byte the image consumes, and it is gitignored because
+      # build/fetch-inputs.sh produces it. The key is the hash of the pin files themselves, so a
+      # cache hit means "the same pins as last time" and a pin change is a cache miss by
+      # construction — never a stale pool silently reused.
+      #
+      # This cache is also what keeps us honest with snapshot.debian.org, which rate-limits: with
+      # it, the archive is contacted when a pin changes, not on every push and pull request.
+      - name: Cache build/inputs
+        id: inputs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/inputs
+          key: inputs-${{ hashFiles('build/apt-versions.txt', 'build/requirements.appliance.txt', 'build/requirements.test.txt', 'build/snapshot.env') }}
+
+      - name: Fetch inputs
+        if: steps.inputs.outputs.cache-hit != 'true'
+        run: sh build/fetch-inputs.sh
+
+      # On a cache hit the pool was not re-fetched, so verify it against the checked-in hashes
+      # before trusting it. On a miss fetch-inputs.sh has already done this; doing it twice costs
+      # a second and means the gate is never skipped by a code path.
+      - name: Inputs match build/inputs.sha256
+        run: |
+          sha256sum -c build/inputs.sha256
+          named=$(wc -l < build/inputs.sha256)
+          present=$(find build/inputs -type f | wc -l)
+          echo "inputs: $named named, $present present"
+          test "$named" -eq "$present"
+
+      - name: Build the container
+        run: docker build -f build/Dockerfile.test -t aobs-test .
+
+      # One run, not two: the suite is the expensive thing here and `-rs` makes the same run
+      # report why anything skipped.
+      #
+      # M1 requires that this tier skip nothing that is about the appliance: the three entropy
+      # tests, the EC-backend assertion and the keymap-tree assertion are guarded by
+      # AOBS_AUTHORITATIVE_TIER and by `os.GRND_NONBLOCK`, and this container is the only place
+      # they run. A tier that reports those as skipped is not authoritative — the keymap one is
+      # not hypothetical: on its first run here it failed and caught the picker silently dropping
+      # ABNT2.
+      #
+      # FOUR skips are expected, and each is named rather than tolerated in bulk:
+      #   - tests/test_structure.py:154   docs/test-harness.md arrives at M2
+      #   - tests/test_structure.py:421   ADVISORIES.txt and the README section arrive at M5
+      #   - tests/test_wallet_interop.py  two tests, no captured wallet frames — a pre-existing
+      #                                   gap inherited from the predecessor, see
+      #                                   fixtures/wallet_frames/README.md
+      # The gate is on the count so that a FIFTH skip fails the build, and it tightens as each of
+      # those four lands.
+      #
+      # No bind mount, unlike the dev loop: what CI judges is the tree as pushed, which is the
+      # copy baked into the image.
+      - name: Run the suite
+        run: |
+          set -o pipefail
+          docker run --rm aobs-test python3 -m pytest -q -rs 2>&1 | tee /tmp/out.txt
+          skipped=$(sed -n 's/.*[^0-9]\([0-9]\+\) skipped.*/\1/p' /tmp/out.txt | tail -1)
+          echo "skipped: ${skipped:-0} (allowed: 4)"
+          test "${skipped:-0}" -le 4
