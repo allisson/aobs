@@ -119,6 +119,14 @@ KEYS = "up/down choose  ·  F10 open this path  ·  F12 power off"
 #: precisely because they cannot be walked yet, and the sentence under them says why.
 SECTION = "WHAT YOU CAN DO"
 
+#: The selection marker, and the one glyph on this screen that `docs/console-appearance.md`'s
+#: budget flags: `►` is in the built-in font's repertoire, but at a position the console reaches
+#: through its unicode map rather than directly. `aobs/ui/addresstext.py` already prints `↑` and
+#: `↓` from that same range, so this is not a new risk — it is the same one, now on the first
+#: screen of the session, where the next boot answers it. If it draws as a blank or a box, this
+#: constant is the whole of the revert.
+MARKER = "►"
+
 
 def label(path: Path, app: object) -> str:
     """The line for a path: its name, and for a path that carries a setting, the setting's value.
@@ -170,7 +178,7 @@ PATH_COLUMNS = MAX_COLUMNS - 6
 
 def row(path: Path, app: object, *, selected: bool, why: str) -> str:
     """The whole rendered row: the marker, the label, and the reason at the right edge."""
-    left = f"{'>' if selected else ' '} {label(path, app)}"
+    left = f"{MARKER if selected else ' '} {label(path, app)}"
     if not why:
         return left
     return left + " " * max(2, PATH_COLUMNS - len(left) - len(why)) + why
@@ -196,7 +204,6 @@ class HomeScreen(Screen):
 
     HomeScreen #section { margin-bottom: 1; }
     HomeScreen #paths { height: auto; }
-    HomeScreen .path { margin-left: 2; }
     HomeScreen .path-unavailable { text-style: dim; }
     /* One blank row before the block and none inside it: the sentences are one statement about
        the session, and a blank between each made three paragraphs out of it. */

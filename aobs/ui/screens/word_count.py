@@ -37,7 +37,6 @@ class WordCountScreen(Screen):
 
     DEFAULT_CSS = """
     WordCountScreen #counts { height: auto; margin: 1 0; }
-    WordCountScreen .count { margin-left: 2; }
     """
 
     def __init__(self) -> None:

@@ -61,7 +61,6 @@ class KeymapScreen(Screen):
 
     DEFAULT_CSS = """
     KeymapScreen #layouts { height: auto; margin: 1 0; }
-    KeymapScreen .layout { margin-left: 2; }
     KeymapScreen #echo { margin-top: 1; }
     """
 

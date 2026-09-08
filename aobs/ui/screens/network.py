@@ -47,7 +47,6 @@ class NetworkScreen(Screen):
 
     DEFAULT_CSS = """
     NetworkScreen #networks { height: auto; margin: 1 0; }
-    NetworkScreen .network { margin-left: 2; }
     """
 
     def __init__(self, current: Network) -> None:
