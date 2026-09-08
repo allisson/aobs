@@ -496,32 +496,33 @@ re-derives both from the measured tree and fails the build if the script carries
 **The measured inputs are published against the run they came from** — unpacked rootfs, initramfs,
 kernel, ISO — because a floor derived from an unpublished number is an assertion wearing a formula.
 
-**Measured**, run [34173912095](https://github.com/allisson/aobs/actions/runs/34173912095) on
-`ubuntu-24.04`, `mmdebstrap --mode=unshare` against the 88-package pool, read off the tar listing:
+**Measured**, run [34228074569](https://github.com/allisson/aobs/actions/runs/34228074569) on
+`ubuntu-24.04`, unprivileged, from `build/mkiso.sh` end to end:
 
 | | |
 |---|---|
-| **unpacked rootfs** | **132.6 MiB** (6874 members) |
-| `usr/share/locale` | 27.3 MiB |
-| `usr/lib/python3` | 24.4 MiB |
-| `usr/share/doc` | 7.0 MiB |
-| `usr/share/keymaps` | 0.4 MiB, 216 maps |
+| **unpacked rootfs** | **155 MiB** (6264 paths) |
+| **`initramfs.zst`** | **38.2 MiB** |
+| **`vmlinuz`** | **11.6 MiB** |
+| **`bitcoin-signer-amd64.iso`** | **58.0 MiB** |
+| modules shipped | 20, of Debian's 4229 |
 | appliance closure on disk | 88 packages, 41 MiB of compressed `.deb` |
 | kernel package | 107.9 MiB compressed, unpacked separately |
 
-`floor = next_power_of_two(2 × 132.6 + 64 + 128) = next_power_of_two(457.2)` = **512 MiB**.
+`requirement = 2 × 155 + 64 + 128 = 502 MiB`, so `floor = next_power_of_two(502)` = **512 MiB**.
 
 The Alpine predecessor asserted 512 MiB from a prose estimate and happened to be right. This is the
 same number arrived at from a tree somebody built, which is the difference the roadmap asks for.
 
-**Three caveats on 132.6 MiB, and each moves it down, not up.** It is measured before the purge
-stage removes `dpkg`, `apt` and `agetty`; before `usr/share/doc` is dropped; and before
-`usr/share/locale` is dropped. The floor is therefore an upper bound, and it is stated from the
-upper bound deliberately — a floor that assumes pruning nobody has done yet is a floor that fails
-the first time a prune is skipped.
+**155 MiB is not the same 132.6 MiB this document published at the last milestone, and the
+difference is not drift.** That figure was a rootfs and nothing else, measured before anything was
+added to it or removed from it. This one is the tree that ships: `usr/share/locale`, `doc`, `man`
+and `info` are gone (27.3 MiB of locale alone), and the Python wheel layer, the app tree and the
+pruned module tree are in. The old paragraph of caveats saying the figure could only move down is
+therefore retired — it has moved, in both directions, and this is the number after both.
 
-> Still not measured: the packed initramfs and the ISO. Those need `cpio | zstd` and `xorriso`,
-> neither of which exists yet, and the compression ratio is not something to guess at.
+**What is not published here is a per-directory breakdown of the final tree.** The build does not
+emit one and this document is not going to estimate it.
 
 **No pruning of the Python stdlib.** Stripping it buys little against the risk of a missing-module
 traceback on an appliance with no recovery path.

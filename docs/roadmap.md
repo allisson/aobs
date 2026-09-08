@@ -266,12 +266,20 @@ a pure-Python signer.
       package manager, `/bin/sh` and `python3` present (the predecessor's first ISO had neither, and
       `build/init` could not have run a line), no `kernel/net`, no module outside the allowlist, no
       getty, the `libsecp256k1` symbols, the RAM floor matching the measured size.
-- [ ] Derive the RAM floor from the measured unpacked size by a stated formula, re-derived by the
-      build so the floor and the image cannot drift apart. **Publish the measured numbers** — unpacked
-      rootfs, initramfs, kernel, ISO — against the run they came from.
+- [x] Derive the RAM floor from the measured unpacked size by a stated formula, re-derived by the
+      build so the floor and the image cannot drift apart. **Published against run 34228074569**:
+      155 MiB unpacked, 38.2 MiB initramfs, 11.6 MiB kernel, 58.0 MiB ISO, floor **512 MiB**. PID 1
+      compares against the unrounded 502, not the rounded 512, because `MemTotal` on a 512 MiB
+      machine is under 512 — `docs/boot-pipeline.md` says why both numbers are in the script.
 
-**Exit**: `out/bitcoin-signer-amd64.iso` exists, every assertion passes, and the size and RAM figures
-are recorded as measurements rather than estimates.
+**Exit**: ~~`out/bitcoin-signer-amd64.iso` exists, every assertion passes, and the size and RAM
+figures are recorded as measurements rather than estimates.~~ **Met**, run
+[34228074569](https://github.com/allisson/aobs/actions/runs/34228074569): the ISO builds on
+`ubuntu-24.04` with no `--privileged`, every assertion passes, both El Torito records are present,
+and the image produced a signature in each scheme with `ctypes_secp256k1`.
+
+**Nothing in M2 proves it boots.** That is M3, and it is a gate for exactly this reason: an ISO that
+builds and asserts cleanly is what the predecessor also had.
 
 ---
 
