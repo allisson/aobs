@@ -103,8 +103,13 @@ at.** Both are recorded because both looked like they would need root and neithe
   is enough. Entries are emitted sorted, with `SOURCE_DATE_EPOCH` as every mtime, which is most of
   what `docs/reproducible-build.md` will want at M4 arrived at for free.
 
-One step still needs a namespace: stage 3d chroots into the image to make it sign. `unshare -Ur` is
-enough there, because everything in the tree is already owned by the caller.
+One step still needs a namespace: stage 3d chroots into the image to make it sign. A single-uid map
+is enough there, because everything in the tree is already owned by the caller — **but not through
+the `unshare` binary.** Ubuntu 24.04 profiles `/usr/bin/unshare` under AppArmor as a user-namespace
+gadget, and a process it confines cannot write its own `uid_map`: measured,
+`unshare: write failed /proc/self/uid_map: Operation not permitted`, *after* the namespace had been
+created. `build/unshare_exec.py` performs the same three writes from a process AppArmor has no
+opinion about. mmdebstrap is unaffected in stage 1 for the same reason — it is not profiled either.
 
 ### Why the appliance closure is resolved against an empty root
 

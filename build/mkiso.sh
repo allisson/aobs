@@ -68,7 +68,7 @@ arch=$(uname -m)
 
 missing=
 for tool in mmdebstrap newuidmap dpkg-deb dpkg-scanpackages depmod zstd xorriso \
-            mformat mcopy grub-mkstandalone python3 readelf unshare; do
+            mformat mcopy grub-mkstandalone python3 readelf; do
     command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
 done
 [ -z "$missing" ] || {
@@ -370,16 +370,14 @@ if len(schnorr.serialize()) != 64:
 print(f"signing: ok, backend {backend}")
 PYCHECK
 cp "$WORK/signcheck.py" "$ROOTFS/signcheck.py"
-# Bind-mounted one device at a time, not `mount --bind /dev`: the whole directory is a mount with
-# locked flags and a bind of it is refused inside a user namespace with `wrong fs type`. A bind
-# over an empty regular file is not, and five nodes is the whole of what this check needs.
-unshare -Urm sh -euc '
-    for node in null zero urandom random tty; do
-        : > "$1/dev/$node"
-        mount --bind "/dev/$node" "$1/dev/$node"
-    done
-    PYTHONPATH=/opt/aobs:/opt/aobs-python chroot "$1" /usr/bin/python3 /signcheck.py
-' -- "$ROOTFS"
+# NOT the `unshare` binary. On `ubuntu-24.04` it is AppArmor-profiled as a user-namespace gadget,
+# and a process it confines cannot write its own uid_map: measured,
+# `unshare: write failed /proc/self/uid_map: Operation not permitted`, after the namespace itself
+# had been created. mmdebstrap is unaffected in stage 1 because it is not a profiled binary.
+# `build/unshare_exec.py` performs the same three writes from a process AppArmor has no opinion
+# about, and binds the device nodes one at a time — see the file for why not `mount --bind /dev`.
+PYTHONPATH=/opt/aobs:/opt/aobs-python \
+    python3 "$ROOT/build/unshare_exec.py" "$ROOTFS" /usr/bin/python3 /signcheck.py
 # The bind mounts went with the namespace; the empty files they were mounted over did not, and a
 # regular file called `dev/null` in an initramfs is worse than none. `build/mkinitramfs.py` refuses
 # to pack a tree that still has one, so this is belt and braces on a mistake that would be quiet.
