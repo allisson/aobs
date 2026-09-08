@@ -55,7 +55,6 @@ class WalletQrScreen(Screen):
     WalletQrScreen #wallet-qr { width: auto; height: auto; }
     WalletQrScreen #wallet-qr-password-not-here { margin-top: 1; text-style: bold; }
     WalletQrScreen #wallet-qr-network { margin-top: 1; }
-    WalletQrScreen #wallet-qr-keys { margin-top: 1; }
     """
 
     def __init__(self, export: ExportedWallet) -> None:
@@ -82,7 +81,7 @@ class WalletQrScreen(Screen):
                 id="wallet-qr-network",
             )
             yield Static(addresstext.EXPORT_QR_INSTRUCTION, id="wallet-qr-instruction")
-            yield Static(addresstext.EXPORT_QR_KEYS, id="wallet-qr-keys")
+            yield Static(addresstext.EXPORT_QR_KEYS, id="wallet-qr-keys", classes="keys")
 
     def action_show_password(self) -> None:
         self.app.push_screen(ExportPasswordShowScreen(self.export))
@@ -100,7 +99,6 @@ class ExportPasswordShowScreen(Screen):
     DEFAULT_CSS = """
     ExportPasswordShowScreen #export-words { margin: 1 0; }
     ExportPasswordShowScreen .export-word { margin-left: 2; }
-    ExportPasswordShowScreen #export-password-keys { margin-top: 1; }
     """
 
     def __init__(self, export: ExportedWallet, *, first_showing: bool = True) -> None:
@@ -127,7 +125,7 @@ class ExportPasswordShowScreen(Screen):
                 addresstext.PASSWORD_KEYS
                 if self._first_showing
                 else addresstext.PASSWORD_AGAIN_KEYS,
-                id="export-password-keys",
+                id="export-password-keys", classes="keys",
             )
 
     def action_read_back(self) -> None:
@@ -168,7 +166,6 @@ class ExportDoneScreen(Screen):
 
     DEFAULT_CSS = """
     ExportDoneScreen #export-truth { margin-bottom: 1; text-style: bold; }
-    ExportDoneScreen #export-done-keys { margin-top: 1; }
     """
 
     def __init__(self, export: ExportedWallet) -> None:
@@ -183,7 +180,7 @@ class ExportDoneScreen(Screen):
                 id="export-truth",
             )
             yield Static(addresstext.KEEP_THEM_APART, id="export-keep-apart")
-            yield Static(addresstext.DONE_KEYS, id="export-done-keys")
+            yield Static(addresstext.DONE_KEYS, id="export-done-keys", classes="keys")
 
     def action_show_again(self) -> None:
         self.app.push_screen(ExportPasswordShowScreen(self.export, first_showing=False))

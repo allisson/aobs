@@ -81,7 +81,7 @@ class RecoveryWordsScreen(Screen):
                             )
             if self._read_back:
                 yield Static(NEXT_IS_READ_BACK, id="next-is-read-back")
-            yield Static(CONTINUE_KEYS if self._read_back else LOOK_KEYS, id="recovery-keys")
+            yield Static(CONTINUE_KEYS if self._read_back else LOOK_KEYS, id="recovery-keys", classes="keys")
 
     def on_unmount(self) -> None:
         self._words = ()

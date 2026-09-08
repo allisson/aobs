@@ -48,8 +48,6 @@ class NetworkScreen(Screen):
     DEFAULT_CSS = """
     NetworkScreen #networks { height: auto; margin: 1 0; }
     NetworkScreen .network { margin-left: 2; }
-    NetworkScreen .network-selected { text-style: bold; }
-    NetworkScreen #network-keys { margin-top: 1; }
     """
 
     def __init__(self, current: Network) -> None:
@@ -69,7 +67,7 @@ class NetworkScreen(Screen):
             with Vertical(id="networks"):
                 for index in range(len(NETWORKS)):
                     yield Static("", classes="network", id=f"network-{index}")
-            yield Static(KEYS, id="network-keys")
+            yield Static(KEYS, id="network-keys", classes="keys")
 
     def on_mount(self) -> None:
         self._repaint()

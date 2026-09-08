@@ -63,10 +63,41 @@ class SignerApp(App[None]):
         Binding("f12", "power_off", "Power off", priority=True),
     ]
 
+    #: The whole visual system, fixed by `docs/console-appearance.md`. It lives here and not five
+    #: screens deep because every rule in it is a statement about **the console** — sixteen ANSI
+    #: colours, a font whose half-bright is not guaranteed — rather than about any one screen.
     CSS = f"""
-    Screen {{ align-horizontal: center; }}
-    #frame {{ width: {MAX_COLUMNS}; max-width: 100%; height: 1fr; padding: 1 2; }}
-    #title {{ text-style: bold; margin-bottom: 1; }}
+    /* Centred both ways. Twenty rows of content on a console with forty-eight has a hole in it
+       either way; the only question is where, and split above and below reads as composition.
+       The exceptions are the screens whose content can exceed the console — centring those clips
+       at both ends, and which end gets cut is not something the user chose. */
+    Screen {{ align: center middle; }}
+    #frame {{ width: {MAX_COLUMNS}; max-width: 100%; height: auto; padding: 1 2; }}
+    ReviewScreen, AddressListScreen, ScanScreen,
+    DescriptorScreen, EmitScreen, WalletQrScreen,
+    RecoveryWordsScreen, WordEntryScreen {{ align: center top; }}
+    ReviewScreen #frame, AddressListScreen #frame, ScanScreen #frame,
+    DescriptorScreen #frame, EmitScreen #frame, WalletQrScreen #frame,
+    RecoveryWordsScreen #frame, WordEntryScreen #frame {{ height: 1fr; }}
+
+    /* The rule under the title is the title's own bottom border, so no screen grows a widget to
+       carry it. It lands on the same 92 columns as `reviewtext.ROW_COLUMNS`, which is the review
+       screen's text rule, so the two mechanisms agree to the character. */
+    #title {{ text-style: bold; border-bottom: solid ansi_white; margin-bottom: 1; }}
+    /* Except on the review screen, which draws its own three rules as text — and the widths of
+       those are fixed by `docs/review-screen.md`, not by this system. */
+    ReviewScreen #title {{ border-bottom: none; margin-bottom: 0; }}
+
+    /* The keys line is a footer. It was already the last thing every screen composed; this is the
+       rule above it. */
+    .keys {{ border-top: solid ansi_white; margin-top: 1; }}
+
+    /* Selection is the whole row, foreground and background swapped. `bold` against text that is
+       already the console's default white is nearly no signal at all, and it was the only signal
+       these five had. */
+    .path-selected, .layout-selected, .network-selected, .count-selected, .slot-current {{
+        background: ansi_white; color: ansi_black; text-style: bold;
+    }}
     """
 
     def __init__(
@@ -150,6 +181,12 @@ class SignerApp(App[None]):
     # --- startup -----------------------------------------------------------------------------
 
     def on_mount(self) -> None:
+        # Before the geometry check, so the refusal screen is drawn in the same system as the
+        # session. `ansi-dark` is the only theme whose every value is one of the sixteen colours
+        # the console has: `build/init` exports no `TERM`, so `rich` resolves the console to its
+        # `standard` system, and any RGB theme would be silently downsampled into those sixteen on
+        # the way out. `docs/console-appearance.md` has the measurement.
+        self.theme = "ansi-dark"
         columns, rows = self.size.width, self.size.height
         if not fits(columns, rows):
             # Refuse rather than degrade: a layout that has quietly reflowed is exactly where a

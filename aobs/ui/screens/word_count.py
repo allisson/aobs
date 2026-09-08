@@ -38,8 +38,6 @@ class WordCountScreen(Screen):
     DEFAULT_CSS = """
     WordCountScreen #counts { height: auto; margin: 1 0; }
     WordCountScreen .count { margin-left: 2; }
-    WordCountScreen .count-selected { text-style: bold; }
-    WordCountScreen #word-count-keys { margin-top: 1; }
     """
 
     def __init__(self) -> None:
@@ -59,7 +57,7 @@ class WordCountScreen(Screen):
             with Vertical(id="counts"):
                 for index in range(len(WORD_COUNTS)):
                     yield Static("", classes="count", id=f"count-{index}")
-            yield Static(KEYS, id="word-count-keys")
+            yield Static(KEYS, id="word-count-keys", classes="keys")
 
     def on_mount(self) -> None:
         self._repaint()

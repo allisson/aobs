@@ -46,7 +46,6 @@ class AddressVerifyScreen(Screen):
     AddressVerifyScreen #verify-address { margin-left: 2; margin-top: 1; }
     AddressVerifyScreen .verify-address-dim { text-style: dim; }
     AddressVerifyScreen #verify-note { margin-top: 1; }
-    AddressVerifyScreen #verify-keys { margin-top: 1; }
     """
 
     def __init__(self, scanned: str) -> None:
@@ -83,7 +82,7 @@ class AddressVerifyScreen(Screen):
             classes="verify-address-dim",
         )
         yield Static(addresstext.PROVEN_NOTE, id="verify-note")
-        yield Static(addresstext.KEYS, id="verify-keys")
+        yield Static(addresstext.KEYS, id="verify-keys", classes="keys")
 
     def _not_proven(self, check: AddressCheck) -> ComposeResult:
         yield FailurePanel(
@@ -100,7 +99,7 @@ class AddressVerifyScreen(Screen):
             yield Static(address, id="verify-address")
         yield Static(
             addresstext.KEYS_SEARCHABLE if check.offers_deeper_search else addresstext.KEYS,
-            id="verify-keys",
+            id="verify-keys", classes="keys",
         )
 
     def action_search_further(self) -> None:

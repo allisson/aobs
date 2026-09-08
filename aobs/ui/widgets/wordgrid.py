@@ -109,7 +109,6 @@ class WordGrid(Vertical):
     WordGrid {{ height: auto; margin: 1 0; }}
     WordGrid .grid-row {{ height: auto; }}
     WordGrid .slot {{ width: {CELL}; }}
-    WordGrid .slot-current {{ text-style: bold; }}
     WordGrid #grid-message {{ margin-top: 1; }}
     """
 

@@ -77,7 +77,6 @@ class FingerprintScreen(Screen):
     FingerprintScreen #fingerprint-network { margin-top: 1; }
     FingerprintScreen #fingerprint { margin-top: 1; text-style: bold; }
     FingerprintScreen #fingerprint-advice { margin-top: 1; }
-    FingerprintScreen #fingerprint-keys { margin-top: 1; }
     """
 
     def __init__(
@@ -106,7 +105,7 @@ class FingerprintScreen(Screen):
             yield Static(
                 RECORD_IT if self._created_here else COMPARE_IT, id="fingerprint-advice"
             )
-            yield Static(KEYS, id="fingerprint-keys")
+            yield Static(KEYS, id="fingerprint-keys", classes="keys")
 
     def action_done(self) -> None:
         self.app.return_home()  # type: ignore[attr-defined]

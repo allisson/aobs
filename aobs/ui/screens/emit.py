@@ -52,7 +52,6 @@ class EmitScreen(Screen):
     EmitScreen #qr-row { height: auto; }
     EmitScreen #qr { width: auto; height: auto; }
     EmitScreen #emit-status { margin-top: 1; }
-    EmitScreen #emit-keys { margin-top: 1; }
     """
 
     def __init__(self, signed_psbt: bytes, network: str, *, animate: bool = True) -> None:
@@ -75,7 +74,7 @@ class EmitScreen(Screen):
                 yield Static("", id="qr")
             yield Static("", id="emit-status")
             yield Static(INSTRUCTION, id="emit-instruction")
-            yield Static(KEYS, id="emit-keys")
+            yield Static(KEYS, id="emit-keys", classes="keys")
 
     def on_mount(self) -> None:
         self.advance()

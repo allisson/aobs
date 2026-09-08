@@ -37,7 +37,6 @@ class DescriptorScreen(Screen):
     DescriptorScreen #qr-row { height: auto; }
     DescriptorScreen #descriptor-qr { width: auto; height: auto; }
     DescriptorScreen #descriptor-which { margin-top: 1; text-style: bold; }
-    DescriptorScreen #descriptor-keys { margin-top: 1; }
     """
 
     def __init__(self, script_type: ScriptType = ScriptType.P2WPKH) -> None:
@@ -66,7 +65,7 @@ class DescriptorScreen(Screen):
             yield Static(addresstext.SCRIPT_TYPE_NAMES[self.script_type], id="descriptor-which")
             yield Static(addresstext.DESCRIPTOR_INSTRUCTION, id="descriptor-instruction")
             yield Static(addresstext.DESCRIPTOR_NEXT, id="descriptor-next")
-            yield Static(addresstext.DESCRIPTOR_KEYS, id="descriptor-keys")
+            yield Static(addresstext.DESCRIPTOR_KEYS, id="descriptor-keys", classes="keys")
 
     def action_toggle_script_type(self) -> None:
         self.script_type = (

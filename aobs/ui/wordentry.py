@@ -38,7 +38,6 @@ class WordEntryScreen(Screen):
     ]
 
     DEFAULT_CSS = """
-    WordEntryScreen #word-entry-keys { margin-top: 1; }
     """
 
     def __init__(self, title: str, vocabulary: Vocabulary, slots: int) -> None:
@@ -70,7 +69,7 @@ class WordEntryScreen(Screen):
             for index, line in enumerate(self.intro()):
                 yield Static(line, id=f"intro-{index}")
             yield WordGrid(self._vocabulary, self._slots)
-            yield Static(KEYS, id="word-entry-keys")
+            yield Static(KEYS, id="word-entry-keys", classes="keys")
 
     # --- keys ------------------------------------------------------------------------------------
 
