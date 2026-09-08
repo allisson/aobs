@@ -295,6 +295,14 @@ finds a framebuffer and enumerates a camera on a real machine.
 - [ ] Record the answers as a **boot-checklist run record** — the checklist is the procedure, the run
       record is the evidence, and only the second is something a stranger can check. Verdicts are
       *pass*, *fail* and *deviated*; the third is load-bearing.
+- [ ] Write `docs/threat-model.md`. **Deferred here from M2 and scheduled nowhere until now**, which
+      in this repository means it was not going to happen. M3 is where it belongs: it is the first
+      milestone with a real machine to be specific about, and the claims it has to state at their
+      true strength are the ones a boot either supports or does not.
+- [ ] Check the two claims a build cannot: that the modules tree really does leave the machine with
+      no network interface, and that the graphics decision holds. `build/modules.allow` ships no
+      DRM driver on the argument that `efifb` and `vesafb` are built in and sufficient. That
+      argument has never met a screen.
 
 **Exit**: one PSBT signed on real hardware and broadcast, and a run record with every row answered.
 
