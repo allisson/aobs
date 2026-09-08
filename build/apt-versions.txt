@@ -29,11 +29,30 @@
 # @group appliance
 # Everything below this marker is installed into the rootfs.
 
-# The base layout and the shell. Debian minbase gives /bin/sh via dash; busybox is what
-# provides `poweroff`, which build/init needs and which no init system is here to offer.
+# The base layout and the shell. Debian minbase gives /bin/sh via dash.
+#
+# `mount` IS ITS OWN PACKAGE, and its absence is what stopped the first hardware boot dead
+# at PID 1 line 62 with `mount: not found`. util-linux does NOT ship /usr/bin/mount; the
+# package named `mount` does, and docs/boot-pipeline.md asserted the opposite in three
+# places until that boot. util-linux stays named here because it is Essential and arrives
+# whether or not it is pinned, and because the purge stage deletes the `agetty` it ships —
+# a claim that needs its version in the one pinned list.
+#
+# THERE IS NO busybox. It was pinned for a `poweroff` that build/init never called: power
+# off is reboot(2) with RB_POWER_OFF in aobs/adapters/real/power.py, and Debian's busybox
+# ships /usr/bin/busybox with no applet symlinks, so the `poweroff` named in that comment
+# would not have resolved either. Nothing in the repository invoked it.
 dash=0.5.12-12
-busybox=1:1.37.0-6+b8
+mount=2.41.5-0+deb13u1
 util-linux=2.41.5-0+deb13u1
+
+# `modprobe`, for step 3 of build/init, and the same kmod that build/mkiso.sh runs `depmod`
+# from on the build host — so the modules.dep written into the image and the tool that reads
+# it at boot are one implementation. Absent until the first hardware boot, where it made
+# every module in the allowlist report `no <module> on this machine`: no camera and no USB
+# HID driver, and not one failed step to say so, because a missing module is deliberately
+# not a reason to refuse to boot.
+kmod=34.2-2
 
 # The interpreter. build/verify.py asserts both this and /bin/sh are present in the
 # rootfs: the predecessor's first ISO had neither, and build/init could not have run a
@@ -53,6 +72,18 @@ python3=3.13.5-1
 # what the build-time assertion in build/verify.py is for. Do not bump this pin without
 # re-running it.
 libsecp256k1-2=0.5.0-2+b1
+
+# THE C++ RUNTIME THE WHEELS LINK, and the second pin in this file that exists because apt cannot
+# see what the Python layer needs. `pip --target` unpacks the wheels from OUTSIDE the chroot, so no
+# installed .deb declares a dependency on anything they link, and apt resolves a closure that is
+# correct for the packages and blind to the application. Three objects in the image need this one:
+# `zxingcpp.abi3.so`, `PIL/_avif...so` and pillow's bundled `libavif`.
+#
+# Measured: without it the second hardware boot reached `exec python3 -m aobs` and died at
+# `import zxingcpp` — `libstdc++.so.6: cannot open shared object file`. The .deb was already in
+# build/inputs/deb/appliance, fetched as a dependency of `apt`, which is not installed. Being in
+# the pool is not being in the image, and only the pin puts it there.
+libstdc++6=14.2.0-19
 
 # `loadkeys` and the maps it loads. The Keymap adapter shells out to the first and reads
 # the second. console-data is what makes layouts() return more than the default, and the

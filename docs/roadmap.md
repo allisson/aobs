@@ -288,6 +288,67 @@ builds and asserts cleanly is what the predecessor also had.
 The thing the predecessor never did. No test in this repository can tell you whether the kernel boots,
 finds a framebuffer and enumerates a camera on a real machine.
 
+**First attempt, and what it cost to learn: the ISO booted and PID 1 could not run its own first
+line.** Debian's kernel came up on the target machine, the initramfs unpacked, `/init` started, and
+step 1 died with `mount: not found` — because `/usr/bin/mount` is in a package named `mount`, which
+was never pinned, while `docs/boot-pipeline.md` said in three places that `util-linux` provided it.
+`modprobe` (`kmod`) and `sysctl` (`procps`) were missing behind it, and the `modprobe` one is the
+one to remember: it would not have failed anything, it would have reported every allowlisted module
+as absent hardware and run the session with no camera and no USB HID driver.
+
+Nothing caught it because nothing was looking: `build/verify.py` asserted `/bin/sh`, `python3` and
+the identity files were present and stopped there. It now reads every `step` out of `build/init`
+itself and asserts each command resolves on PID 1's own `PATH` in the built rootfs, along with what
+the real adapters shell out to. `mount` and `kmod` are pinned, step 5 writes `/proc/sys` directly
+instead of pinning `procps` for one write, and `busybox` is gone — it was pinned for a `poweroff`
+that PID 1 never called and that Debian's applet-symlink-free build never provided.
+
+The lesson is the M2 exit criteria's, not this milestone's: "the image builds" was measured by
+assertions that between them never asked whether the image could execute a single line of PID 1.
+
+**Second attempt: all seven steps ran, and the app could not import itself.** Two root hubs closed,
+the UVC camera enumerated, `crng init done`, `exec python3 -m aobs` — and then `ImportError`, with
+the kernel panicking on init death exactly as the containment claim says it should. The fault was
+`libstdc++.so.6`, which `zxingcpp`, `PIL/_avif` and pillow's bundled `libavif` all link and the
+image did not carry. The `.deb` was already in the appliance pool as a dependency of `apt`, which is
+not installed: being in the pool is not being in the image.
+
+Apt could not have known. The wheels are unpacked from outside the chroot, so nothing an installed
+package declares mentions what they link — the same reason `libsecp256k1-2` is pinned by hand.
+`libstdc++6` is now pinned the same way, `build/signcheck.py` imports `aobs.ui.app` inside the
+chroot so the build proves the image can start and not only that it can sign, and
+`no_unresolved_shared_library` resolves every `DT_NEEDED` in the tree against the image's own
+libraries — needed as well as the import check, because Pillow loads its format plugins lazily and
+`_avif` is not on the startup import path.
+
+**And it took an unpacked initramfs and a chroot to identify a one-line fault**, because the fault
+screen showed `ImportError.` and nothing else. `docs/secret-hygiene.md` now carves out that one
+exception type: the import machinery writes the message, and it names a library, not a secret.
+
+**Third attempt: it booted to the keymap picker, and the user could not get off it. Fixed, and the
+fourth boot got through.** The appliance drew its first screen — the whole boot chain works — and
+then stopped being usable, because the picker never printed its own keys. With the key line added,
+the picker was confirmed working on the machine and the session went on past it; the gate itself is
+still open, because a boot that reaches the home screen is not a PSBT signed and broadcast. `F10` was bound, `docs/failure-states.md` fixed it, and every
+other screen printed a line; this one did not, and it is the one screen where `esc` has nowhere to
+go. `HomeScreen` turned out to have the identical defect. Both print their keys now, and a
+source-level rule in `tests/test_structure.py` fails the build for the next screen that binds a
+function key without rendering it.
+
+Worth recording as a pattern, because all three findings share it: **each fault was a claim the
+repository stated correctly in prose and never checked.** `mount` was documented as coming from
+`util-linux`; the C++ runtime was assumed to arrive with the closure; the reserved keys were fixed
+in a document that assumed screens printed them. The assertions added in this milestone are all of
+the same shape — read what the repository already says, and check the artefact against it.
+
+- [ ] **Follow-up, after the gate: drop `pillow` from the appliance.** It is in the image for one
+      line — `aobs/ui/qrdecode.py:20` wraps a captured frame as a `PIL.Image` for zxingcpp — and its
+      only other use is the *fake* frame source, which is harness-only. In exchange the image
+      carries an AVIF decoder and a bundled `libavif`. zxing-cpp's Python API also takes a raw
+      buffer with dimensions, which would remove an untrusted-input image decoder from an offline
+      signer. Deliberately **not** done alongside the boot fixes: it changes a working decode path,
+      and M3 is a gate precisely to stop that.
+
 - [ ] **Choose and characterise the target machine**: make, age, BIOS or UEFI, whether Secure Boot can
       be disabled in its firmware, built-in webcam or USB. Nothing below can be judged without this.
 - [ ] Narrow the generic module allowlist to what that machine actually needs, or record why it stays

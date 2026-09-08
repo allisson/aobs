@@ -35,6 +35,18 @@ from aobs.ui.widgets.release import ReleaseFooter
 #: short enough never to wrap inside the column budget.
 ECHO_WIDTH = 60
 
+#: The keys, in the shape every other screen already prints them — `NetworkScreen`, the structural
+#: twin of this picker, has carried its own line all along.
+#:
+#: THIS SCREEN WAS THE ONLY ONE WITHOUT IT, and the first boot that reached a screen ended with a
+#: user sitting on it unable to leave. The keys were right and documented; nothing rendered them.
+#: No `esc back` here, unlike the twin: this is the first screen, `esc` has nowhere to go, and that
+#: is exactly why the omission mattered here more than it would anywhere else.
+#:
+#: `tests/test_app_shell.py` asserts every key named here is really bound and that the confirm
+#: binding really appears here, so a rebinding that does not reach this line fails the suite.
+KEYS = "up/down choose  ·  F10 use this layout  ·  F12 power off"
+
 
 class KeymapScreen(Screen):
     """Choose a keyboard layout and prove it is right by typing on it."""
@@ -52,6 +64,7 @@ class KeymapScreen(Screen):
     KeymapScreen .layout { margin-left: 2; }
     KeymapScreen .layout-selected { text-style: bold; }
     KeymapScreen #echo { margin-top: 1; }
+    KeymapScreen #keymap-keys { margin-top: 1; }
     """
 
     def __init__(self) -> None:
@@ -81,6 +94,9 @@ class KeymapScreen(Screen):
                     yield Static(name, classes="layout", id=f"layout-{index}")
             yield Static("Type anything here to check the layout:", id="echo-prompt")
             yield Static("", id="echo")
+            # After the echo rather than before it: the echo is what the user came to this screen
+            # to do, and the keys are what they need once they have done it.
+            yield Static(KEYS, id="keymap-keys")
             # Last, and reserved: `docs/review-screen.md` counts it against the 85×43 floor.
             yield ReleaseFooter(self.app.release)  # type: ignore[attr-defined]
 

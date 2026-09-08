@@ -104,6 +104,14 @@ CHOOSE_NETWORK = "The network is chosen before a wallet is made, and fixed for g
 #: are derived on this network and changing it now would mean a different wallet.
 NETWORK_FIXED = "The network is fixed for the rest of this session."
 
+#: The keys, in the shape the other screens print them.
+#:
+#: Missing until a source-level rule in `tests/test_structure.py` went looking: this screen bound
+#: `F10` and printed nothing, exactly as the keymap picker did, and the picker is where a user
+#: actually got stuck. No `esc back` — home is the root of the session and there is nowhere behind
+#: it, which is the same reason the picker prints none either.
+KEYS = "up/down choose  ·  F10 open this path  ·  F12 power off"
+
 
 def label(path: Path, app: object) -> str:
     """The line for a path: its name, and for a path that carries a setting, the setting's value.
@@ -141,6 +149,7 @@ class HomeScreen(Screen):
     HomeScreen .path-selected { text-style: bold; }
     HomeScreen .path-unavailable { text-style: dim; }
     HomeScreen .note { margin-top: 1; }
+    HomeScreen #home-keys { margin-top: 1; }
     """
 
     def __init__(self) -> None:
@@ -179,6 +188,7 @@ class HomeScreen(Screen):
                 yield Static(NO_WALLET, classes="note", id="no-wallet")
             if notice:
                 yield Static(notice, classes="note", id="notice")
+            yield Static(KEYS, id="home-keys")
 
     def on_screen_resume(self) -> None:
         """Redraw on the way back from any path.

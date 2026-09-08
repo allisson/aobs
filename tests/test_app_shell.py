@@ -50,6 +50,7 @@ from aobs.ui.screens.word_count import WordCountScreen
 from aobs.ui.screens.refusal import RefusalScreen
 from aobs.ui.screens.review import ReviewScreen
 from aobs.ui.screens.home import NO_CAMERA, PATHS, HomeScreen
+from aobs.ui.screens.keymap import KEYS as KEYMAP_KEYS
 from aobs.ui.screens.keymap import KeymapScreen
 from aobs.ui.screens.network import NetworkScreen
 from aobs.ui.screens.scan import ScanScreen
@@ -170,6 +171,49 @@ async def test_the_echo_ignores_the_keys_that_are_doing_something_else() -> None
         await pilot.press("a", "escape", "down", "up", "b")
         await pilot.pause()
         assert str(app.screen.query_one("#echo", Static).content) == "ab"
+
+
+async def test_the_picker_tells_the_user_which_key_leaves_it() -> None:
+    """The first boot that reached a screen ended with a user stuck on this one.
+
+    The keys were right and documented; nothing rendered them. `esc` has nowhere to go on the first
+    screen, so a user who does not know the confirm key has no way forward at all.
+    """
+    app = build()
+    async with app.run_test(size=CONSOLE) as pilot:
+        await pilot.pause()
+        hints = str(app.screen.query_one("#keymap-keys", Static).content)
+        assert "F10" in hints
+        assert "F12" in hints
+        assert "up/down" in hints
+
+
+def test_every_key_the_hint_names_is_really_bound() -> None:
+    """The hint is prose and the bindings are the truth, so this is what keeps them equal.
+
+    A rebinding that does not reach `KEYMAP_KEYS` leaves the one screen a user cannot avoid telling
+    them to press a key that does nothing, which is worse than telling them nothing.
+    """
+    screen_keys = {binding.key for binding in KeymapScreen.BINDINGS}
+    app_keys = {binding.key for binding in SignerApp.BINDINGS}
+
+    named = {word.lower() for word in KEYMAP_KEYS.replace("·", " ").split()}
+    for key in ("f10", "f12"):
+        assert key in named, f"{key} is bound but the picker does not name it"
+    assert "f10" in screen_keys
+    assert "f12" in app_keys
+    # The confirm binding is the one that must appear: a user who cannot find it is stuck.
+    confirm = [binding for binding in KeymapScreen.BINDINGS if binding.action == "accept"]
+    assert len(confirm) == 1
+    assert confirm[0].key.lower() in named
+
+
+def test_the_hint_does_not_promise_enter_or_escape() -> None:
+    """`docs/failure-states.md`: confirm is never `enter` and never `esc`, and `esc` means back out
+    without acting on every screen. A hint that offered either would teach the habit the review
+    screen's `esc discard` punishes."""
+    assert "enter" not in KEYMAP_KEYS.lower()
+    assert "esc" not in KEYMAP_KEYS.lower()
 
 
 # --- The global keys ------------------------------------------------------------------------------

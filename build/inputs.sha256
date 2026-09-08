@@ -3,7 +3,6 @@ c4bb697554ef3e6588b38ffb73e27a22698c2b9525b1c7223b06d42d155e63fa  build/inputs/d
 cf31c6956ab5f65815d9d9ea1615c4f78ecd2893c31119658248a4756cee83e7  build/inputs/deb/appliance/base-passwd_3.6.7_amd64.deb
 03571d298ed24c615641d54dec4eb023ef5710a2b8cb9304acb66e372cab9c46  build/inputs/deb/appliance/bash_5.2.37-2+b9_amd64.deb
 d935a5102752a1108bdf1e815c89a84ac88d1949bf049a784178f946a09b14da  build/inputs/deb/appliance/bsdutils_1%3a2.41.5-0+deb13u1_amd64.deb
-bfe8994fbd3d60b82b11819514e78e1537b7e67ac2f4e8eb3d517a3db838cbd8  build/inputs/deb/appliance/busybox_1%3a1.37.0-6+b8_amd64.deb
 3dcbb3d9b8e6659bb02a464e54cb30cf04c736f0be2dc35e07743c5e15de838f  build/inputs/deb/appliance/console-data_2%3a1.12-9_all.deb
 1299ab6f9389a288eb2f5f3dd222c26cc777b9a2d5ecb6ee4cbd340cebcdada2  build/inputs/deb/appliance/coreutils_9.7-3_amd64.deb
 a8902cb6d8650134764a25fb80aec8589d858ef71ece1680a62e84816c37bb04  build/inputs/deb/appliance/dash_0.5.12-12_amd64.deb
@@ -19,6 +18,7 @@ c98b1130f08ef6ac3932972c56be84cfc308ce1afa37105cb06aaf47ced2d078  build/inputs/d
 9c2a27e5d4d87137211fe46631b05b2ee8892ec76aae926304e4485ba02e1015  build/inputs/deb/appliance/hostname_3.25_amd64.deb
 addf78073e1cbc5a5508937e11d2571055e29835e00ee8fab52a66775649378f  build/inputs/deb/appliance/init-system-helpers_1.69~deb13u1_all.deb
 e168cf48723c5a65570494d95016561c512d1b5fa6a95939f8567899d34512bb  build/inputs/deb/appliance/kbd_2.7.1-2_amd64.deb
+d56f9311beb17cd15447d11d91fd4de94d23a47d4619e8806b1b807b40c72e53  build/inputs/deb/appliance/kmod_34.2-2_amd64.deb
 08074f01e384bc07c0c2d79a58cf4a6523f71cf75d1808101c79617656c9a39d  build/inputs/deb/appliance/libacl1_2.3.2-2+b1_amd64.deb
 fdcc9f780c7de466c7f0038e6e242c73cb63c8f9fe2781a3185a2c810984ab0a  build/inputs/deb/appliance/libapt-pkg7.0_3.0.3_amd64.deb
 606b5ee12ea2786be607a17f40c1fb5e65c76ceaff66665bdf8f8c6c1b71d1fb  build/inputs/deb/appliance/libattr1_1%3a2.5.2-3_amd64.deb
@@ -38,6 +38,7 @@ cba4cda04244b5e481bb15524bc3c983a7d1b6f330013b9b381706a2fcb65310  build/inputs/d
 3c71917b490d1a17aed43196a2787a256ecf060526cdb20216a74bedc061b150  build/inputs/deb/appliance/libgcc-s1_14.2.0-19_amd64.deb
 d0d0265eb01770f17afd0f7c8c0622f80479dcfbbe13653a0debeec61464e622  build/inputs/deb/appliance/libgmp10_2%3a6.3.0+dfsg-3_amd64.deb
 b059ed155115ac09da295322de48ee1ed58ef5fa45edcc9e12ff0e94636ef25f  build/inputs/deb/appliance/libhogweed6t64_3.10.1-1_amd64.deb
+ee6c50ebac79aa9795e8bf9aa01d94c99984d09d22598c66be0f8ba917b62179  build/inputs/deb/appliance/libkmod2_34.2-2_amd64.deb
 abb76aecbf51479e6e193873dfddaa1b88667dc0b1db82a11286a67550ba1557  build/inputs/deb/appliance/liblastlog2-2_2.41.5-0+deb13u1_amd64.deb
 c31ec4c7c82755a38b2f3fe066fc0c5518cc91a601a268fbcd19bdacb1f22e1e  build/inputs/deb/appliance/liblz4-1_1.10.0-4_amd64.deb
 1cfcc6e0dc36f438a79b6e2189facdb9d150b08f57d190a60e01c98075c7f896  build/inputs/deb/appliance/liblzma5_5.8.1-1+deb13u1_amd64.deb
@@ -69,6 +70,7 @@ c1bf4c4c3ff48c57fabf93307dfb56996b60cfa33927afc4158b5db36fb2721e  build/inputs/d
 2f6a2aeacfc925eba8b00ac9139bc4bfccf8cacb09eb93de067074b26948eef9  build/inputs/deb/appliance/libzstd1_1.5.7+dfsg-1_amd64.deb
 ade14470c4dff8921bca6ca8b1ea20eadc0f2178b48caff3c74534b17a633292  build/inputs/deb/appliance/mawk_1.3.4.20250131-1_amd64.deb
 0788e4b0b72db1bcf74a19cb24c3511e7770ad0b341f0f30e361701c3072f53e  build/inputs/deb/appliance/media-types_13.0.0_all.deb
+eb70a615114ac40123768beb20e302554d5cb7edb33290be7e418ebe1075c878  build/inputs/deb/appliance/mount_2.41.5-0+deb13u1_amd64.deb
 190e775260a38973c415a36ae99f33ad1b37ea6ca99929d7c5d53843fc23e914  build/inputs/deb/appliance/ncurses-base_6.5+20250216-2_all.deb
 40a525f4761e9ed4b8adcd1783cb9a6467ff8008215ae99b3597825bdefc61e4  build/inputs/deb/appliance/ncurses-bin_6.5+20250216-2_amd64.deb
 76bafa92947ebd37b0a6f9ec6570412041f56edebc1c66d323731216d318471e  build/inputs/deb/appliance/netbase_6.5_all.deb
@@ -92,7 +94,6 @@ c4bb697554ef3e6588b38ffb73e27a22698c2b9525b1c7223b06d42d155e63fa  build/inputs/d
 cf31c6956ab5f65815d9d9ea1615c4f78ecd2893c31119658248a4756cee83e7  build/inputs/deb/harness/base-passwd_3.6.7_amd64.deb
 03571d298ed24c615641d54dec4eb023ef5710a2b8cb9304acb66e372cab9c46  build/inputs/deb/harness/bash_5.2.37-2+b9_amd64.deb
 d935a5102752a1108bdf1e815c89a84ac88d1949bf049a784178f946a09b14da  build/inputs/deb/harness/bsdutils_1%3a2.41.5-0+deb13u1_amd64.deb
-bfe8994fbd3d60b82b11819514e78e1537b7e67ac2f4e8eb3d517a3db838cbd8  build/inputs/deb/harness/busybox_1%3a1.37.0-6+b8_amd64.deb
 ef590f89563aa4b46c8260d49d1cea0fc1b181d19e8df3782694706adf05c184  build/inputs/deb/harness/ca-certificates_20250419_all.deb
 3dcbb3d9b8e6659bb02a464e54cb30cf04c736f0be2dc35e07743c5e15de838f  build/inputs/deb/harness/console-data_2%3a1.12-9_all.deb
 1299ab6f9389a288eb2f5f3dd222c26cc777b9a2d5ecb6ee4cbd340cebcdada2  build/inputs/deb/harness/coreutils_9.7-3_amd64.deb
@@ -125,6 +126,7 @@ c98b1130f08ef6ac3932972c56be84cfc308ce1afa37105cb06aaf47ced2d078  build/inputs/d
 addf78073e1cbc5a5508937e11d2571055e29835e00ee8fab52a66775649378f  build/inputs/deb/harness/init-system-helpers_1.69~deb13u1_all.deb
 d96fefb9b4d563e791346b5d8dee93880891b138326807e3a98bf029f01ea25c  build/inputs/deb/harness/isolinux_3%3a6.04~git20190206.bf6db5b4+dfsg1-3.1_all.deb
 e168cf48723c5a65570494d95016561c512d1b5fa6a95939f8567899d34512bb  build/inputs/deb/harness/kbd_2.7.1-2_amd64.deb
+d56f9311beb17cd15447d11d91fd4de94d23a47d4619e8806b1b807b40c72e53  build/inputs/deb/harness/kmod_34.2-2_amd64.deb
 08074f01e384bc07c0c2d79a58cf4a6523f71cf75d1808101c79617656c9a39d  build/inputs/deb/harness/libacl1_2.3.2-2+b1_amd64.deb
 fdcc9f780c7de466c7f0038e6e242c73cb63c8f9fe2781a3185a2c810984ab0a  build/inputs/deb/harness/libapt-pkg7.0_3.0.3_amd64.deb
 9d78ef8f016e7f24b5e20d1ce91939fe0f1f897e5f9059793201e930ded7eb8e  build/inputs/deb/harness/libassuan9_3.0.2-2_amd64.deb
@@ -168,6 +170,7 @@ b80bb60269492aaf4a7dd316b238db0e1fc34647f59bc0d86aeb9d298089931d  build/inputs/d
 2e7799a28deac613ffaa75bb131046e8f9311fc211b747a10cf6760f15f0c4ae  build/inputs/deb/harness/libjte2_1.22-4+b2_amd64.deb
 7da07ee674b47f1f0be7cc89317c25310086a1f1761217d0f72e6ae2c5a69b84  build/inputs/deb/harness/libk5crypto3_1.21.3-5+deb13u1_amd64.deb
 0b11ad17be0300b63ad4eeb4c6450fed24d34b7b740f23e5363dcb29ee6d5eba  build/inputs/deb/harness/libkeyutils1_1.6.3-6_amd64.deb
+ee6c50ebac79aa9795e8bf9aa01d94c99984d09d22598c66be0f8ba917b62179  build/inputs/deb/harness/libkmod2_34.2-2_amd64.deb
 47d71d6a7f2e59b9bae5f89602397594805113b95889ad18fa703cd53abafc97  build/inputs/deb/harness/libkrb5-3_1.21.3-5+deb13u1_amd64.deb
 3a0acd8b37955c0e102c756b52c97df2a31f67b96453c35dab70df218d309117  build/inputs/deb/harness/libkrb5support0_1.21.3-5+deb13u1_amd64.deb
 45bc1bfaf41a5e1136b1c1f58c495a950888da33a617de24202f3568e45b9572  build/inputs/deb/harness/libksba8_1.6.7-2+b1_amd64.deb
@@ -223,6 +226,7 @@ b4bbb8242cbf5588de7aafeb9d578a3dee1db2891f444ab454fd30bd80ccf2b4  build/inputs/d
 ade14470c4dff8921bca6ca8b1ea20eadc0f2178b48caff3c74534b17a633292  build/inputs/deb/harness/mawk_1.3.4.20250131-1_amd64.deb
 0788e4b0b72db1bcf74a19cb24c3511e7770ad0b341f0f30e361701c3072f53e  build/inputs/deb/harness/media-types_13.0.0_all.deb
 df731ee92b0ad40f9618b8b1c98c2e90635224f6b21c0905dab65ca099c8fe14  build/inputs/deb/harness/mmdebstrap_1.5.7-1+deb13u1_all.deb
+eb70a615114ac40123768beb20e302554d5cb7edb33290be7e418ebe1075c878  build/inputs/deb/harness/mount_2.41.5-0+deb13u1_amd64.deb
 190e775260a38973c415a36ae99f33ad1b37ea6ca99929d7c5d53843fc23e914  build/inputs/deb/harness/ncurses-base_6.5+20250216-2_all.deb
 40a525f4761e9ed4b8adcd1783cb9a6467ff8008215ae99b3597825bdefc61e4  build/inputs/deb/harness/ncurses-bin_6.5+20250216-2_amd64.deb
 76bafa92947ebd37b0a6f9ec6570412041f56edebc1c66d323731216d318471e  build/inputs/deb/harness/netbase_6.5_all.deb

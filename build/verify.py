@@ -17,7 +17,9 @@ anywhere in this file:
 from __future__ import annotations
 
 import argparse
+import posixpath
 import re
+import shlex
 import subprocess
 import sys
 from collections.abc import Iterable
@@ -314,6 +316,32 @@ REQUIRED_IN_ROOTFS = (
     "opt/aobs/aobs/__main__.py",
 )
 
+#: Where the loader looks in the image for a library whose object gives it no `RUNPATH` to follow.
+#: Narrower than a real `ld.so.conf` walk on purpose: if a future library lands somewhere else, this
+#: assertion fails a build that would have worked, which is the direction a check is allowed to be
+#: wrong in. The opposite — resolving a soname this list cannot actually find — ships an image that
+#: raises `ImportError` in front of a user.
+DEFAULT_LIBRARY_PATH = (
+    "/usr/lib/x86_64-linux-gnu",
+    "/usr/lib",
+    "/lib/x86_64-linux-gnu",
+    "/lib",
+    "/usr/lib64",
+    "/lib64",
+)
+
+#: The commands `build/init` invokes that are NOT `step` calls, and so are not visible to the one
+#: idiom `commands_pid1_invokes` reads. Kept explicit and short on purpose: `echo` and `printf` are
+#: dash builtins and need nothing in the image, and every name here is one a reader can check
+#: against the file in under a minute. A new bare invocation in PID 1 belongs on this line.
+INIT_COMMANDS_OUTSIDE_A_STEP = ("modprobe", "cat", "awk", "sleep", "mkdir", "python3")
+
+#: What the real adapters shell out to. `loadkeys` missing is not a boot failure — `Keymap` catches
+#: `OSError` and the fault screen names it — but it ends the session on the first screen, and a
+#: user who cannot apply their own layout is the harm `console-data` is pinned to prevent: a BIP39
+#: passphrase typed through the wrong map makes a wallet that will not reopen, silently.
+REAL_ADAPTER_COMMANDS = ("loadkeys",)
+
 #: The symbols the vendored embit binds. `secp256k1_ec_privkey_negate` is the deprecated alias
 #: embit's loader binds unconditionally, and `secp256k1_schnorrsig_sign32` is the one upstream
 #: REMOVED the old name of in 0.8.0 — against such a library embit's `except: pass` binds nothing,
@@ -393,6 +421,142 @@ def required_files_present(paths: set[str]) -> None:
     missing = sorted(path for path in REQUIRED_IN_ROOTFS if path not in paths)
     if missing:
         raise PinFileError(f"the rootfs is missing {missing}; nothing in it could start")
+
+
+def init_search_path(text: str) -> tuple[str, ...]:
+    """PID 1's `PATH`, read out of PID 1.
+
+    Copied into this file it would be a second source for one fact, and the copy would be the one
+    that stayed right when `build/init` changed. So the check resolves commands on the same
+    directories the script itself will search, whatever those become.
+    """
+    for line in text.splitlines():
+        if line.startswith("PATH="):
+            return tuple(part for part in line[len("PATH=") :].split(":") if part)
+    raise PinFileError(
+        "build/init sets no PATH. Every command below is then resolved against whatever the "
+        "kernel handed PID 1, which is not a thing this build can check"
+    )
+
+
+def commands_pid1_invokes(text: str) -> tuple[str, ...]:
+    """Every external command `build/init` runs, read from the script rather than listed here.
+
+    `step "name" cmd args...` is a fixed grammar in that file — it exists so that no failure is
+    silent — which makes it also the machine-readable record of what PID 1 needs. Reading it here
+    means the list cannot drift from the script the way a hand-kept copy does: a new `step` is
+    checked the moment it is written, with nobody having to remember this function exists.
+    """
+    found: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("step "):
+            continue
+        words = shlex.split(stripped, comments=True)
+        if len(words) < 3:
+            raise PinFileError(f"build/init has a step with no command in it: {stripped!r}")
+        command = words[2]
+        if command.startswith("$"):
+            raise PinFileError(
+                f"build/init runs {command} in a step, and a command this build cannot name is a "
+                f"command it cannot check for: {stripped!r}"
+            )
+        found.append(command)
+    if not found:
+        raise PinFileError(
+            "build/init has no `step` call in it. Either PID 1 stopped checking its own steps or "
+            "this parser stopped matching them, and both are the same size of problem"
+        )
+    return tuple(dict.fromkeys([*found, *INIT_COMMANDS_OUTSIDE_A_STEP]))
+
+
+def required_commands_present(
+    paths: set[str], commands: Iterable[str], search_path: Iterable[str]
+) -> None:
+    """The commands PID 1 and the real adapters invoke, resolvable in the image.
+
+    THIS IS THE ASSERTION THE FIRST HARDWARE BOOT NEEDED AND DID NOT HAVE. `/usr/bin/mount` is not
+    in `util-linux`; it is in a package named `mount`, which nothing pinned. PID 1 died on its
+    first line of work with `mount: not found`, and `modprobe` and `sysctl` were missing right
+    behind it — three published claims resting on binaries no assertion looked for. Every other
+    check in this file passed on that image.
+    """
+    directories = tuple(directory.lstrip("/") for directory in search_path)
+    if not directories:
+        raise PinFileError("PID 1's PATH is empty; nothing would resolve on it")
+    missing = sorted(
+        command
+        for command in commands
+        if not any(f"{directory}/{command}" in paths for directory in directories)
+    )
+    if missing:
+        raise PinFileError(
+            f"the rootfs carries none of {missing} anywhere on PID 1's PATH {list(directories)}. "
+            "A command PID 1 or a real adapter invokes and the image does not have is a machine "
+            "that stops at a message nobody can act on, not a warning"
+        )
+
+
+def parse_dynamic_report(text: str) -> list[tuple[str, tuple[str, ...], tuple[str, ...]]]:
+    """`build/mkiso.sh`'s `readelf -d` sweep, as one record per dynamic object.
+
+    `OBJECT <path>` opens a record; `NEEDED <soname>` and `RUNPATH <dirs>` belong to the record
+    above them. A `NEEDED` before any `OBJECT` is a malformed report and not something to attribute
+    to whatever object happens to come next.
+    """
+    records: list[tuple[str, list[str], list[str]]] = []
+    for line in text.splitlines():
+        keyword, _, value = line.strip().partition(" ")
+        value = value.strip()
+        if keyword == "OBJECT":
+            records.append((value, [], []))
+        elif keyword == "NEEDED":
+            if not records:
+                raise PinFileError(f"the dynamic report has a NEEDED before any OBJECT: {line!r}")
+            records[-1][1].append(value)
+        elif keyword == "RUNPATH":
+            if not records:
+                raise PinFileError(f"the dynamic report has a RUNPATH before any OBJECT: {line!r}")
+            records[-1][2].extend(part for part in value.split(":") if part)
+        elif keyword:
+            raise PinFileError(f"the dynamic report has a line this parser does not know: {line!r}")
+    return [(path, tuple(needed), tuple(runpath)) for path, needed, runpath in records]
+
+
+def no_unresolved_shared_library(
+    records: list[tuple[str, tuple[str, ...], tuple[str, ...]]], paths: set[str]
+) -> None:
+    """Every library the image links is in the image.
+
+    THE SECOND HARDWARE BOOT DIED HERE. `pip --target` unpacks the wheels from outside the chroot,
+    so nothing an installed `.deb` declares mentions what they link: `zxingcpp.abi3.so`,
+    `PIL/_avif` and pillow's bundled `libavif` all needed `libstdc++.so.6`, no package required it,
+    and the build had no assertion that could tell. The app imported at build time now too, which
+    catches the same failure for anything imported at startup — but Pillow loads its format plugins
+    lazily, so `_avif` would have shipped unresolvable and failed months later on an AVIF frame.
+    This check is the one that sees an object nothing imports yet.
+    """
+    if not records:
+        raise PinFileError("the dynamic report is empty; the readelf sweep did not run")
+    missing: list[str] = []
+    for path, needed, runpath in records:
+        origin = posixpath.dirname(path)
+        directories = [
+            posixpath.normpath(directory.replace("$ORIGIN", origin).replace("${ORIGIN}", origin))
+            for directory in runpath
+        ] + list(DEFAULT_LIBRARY_PATH)
+        for soname in needed:
+            if not any(
+                f"{directory}/{soname}".lstrip("/") in paths for directory in directories
+            ):
+                missing.append(f"{path} needs {soname}")
+    if missing:
+        raise PinFileError(
+            f"the image links libraries it does not carry: {missing[:5]}"
+            + (f" and {len(missing) - 5} more" if len(missing) > 5 else "")
+            + ". A wheel's shared-library dependency is invisible to apt, so only this check and "
+            "the pin file put it in the image"
+        )
 
 
 def no_harness_package_in_rootfs(installed: set[str], apt: dict[str, dict[str, str]]) -> None:
@@ -547,6 +711,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--files", type=Path, help="a `find .` listing of --rootfs")
     parser.add_argument("--installed", type=Path, help="package names, read before the purge")
     parser.add_argument("--symbols", type=Path, help="the image's libsecp256k1 dynamic symbols")
+    parser.add_argument("--dynamic", type=Path, help="the readelf -d sweep of every shared object")
     parser.add_argument("--allow", type=Path, help="build/modules.allow")
     parser.add_argument("--kver", help="the kernel version directory under usr/lib/modules")
     parser.add_argument("--measured-mib", type=int, help="the measured unpacked rootfs, in MiB")
@@ -599,6 +764,7 @@ def _check_rootfs(args: argparse.Namespace, apt: dict[str, dict[str, str]]) -> N
         "--files": args.files,
         "--installed": args.installed,
         "--symbols": args.symbols,
+        "--dynamic": args.dynamic,
         "--allow": args.allow,
         "--kver": args.kver,
         "--measured-mib": args.measured_mib,
@@ -639,6 +805,10 @@ def _check_rootfs(args: argparse.Namespace, apt: dict[str, dict[str, str]]) -> N
         set(args.symbols.read_text(encoding="utf-8").split())
     )
 
+    no_unresolved_shared_library(
+        parse_dynamic_report(args.dynamic.read_text(encoding="utf-8")), paths
+    )
+
     # The receipt `build/signcheck.py` left inside mmdebstrap's chroot. Its absence means the hook
     # did not run, which would leave every other assertion here passing and the only one that can
     # catch a pure-Python signer unchecked.
@@ -651,6 +821,11 @@ def _check_rootfs(args: argparse.Namespace, apt: dict[str, dict[str, str]]) -> N
 
     init_text = (args.rootfs / "init").read_text(encoding="utf-8")
     init_is_fully_substituted(init_text)
+    required_commands_present(
+        paths,
+        (*commands_pid1_invokes(init_text), *REAL_ADAPTER_COMMANDS),
+        init_search_path(init_text),
+    )
     need, floor = ram_floor(args.measured_mib)
     if f"RAM_REQUIRED_MIB={need}" not in init_text or f"RAM_FLOOR_MIB={floor}" not in init_text:
         raise PinFileError(

@@ -1,7 +1,7 @@
 # Every Python package comes from `pyproject.toml`, not from Debian
 
 `docs/adr/0001` chose Debian so that one pinned distro package set could feed both the image and the
-authoritative test tier. That works for the base OS, the kernel, `busybox`, `kbd`, `libsecp256k1` and
+authoritative test tier. That works for the base OS, the kernel, `mount`, `kmod`, `kbd`, `libsecp256k1` and
 the interpreter itself. It does not work for the Python layer, because **Debian stable ships that
 layer behind what this application declares** — in two places below the declared floor outright:
 

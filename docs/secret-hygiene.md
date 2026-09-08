@@ -101,6 +101,15 @@ So:
 
 - The top-level handler required by #12 shows **the exception type and a fixed message**. Never the
   traceback, never locals.
+- **One named carve-out: `ImportError`, whose own message is shown as well.** The message is written
+  by the import machinery rather than by application code — it names a module or a shared library,
+  `libstdc++.so.6: cannot open shared object file`, never a value a frame was holding — and it is
+  bounded to one short line. Measured, and the reason the carve-out exists: the second hardware
+  boot's missing C++ runtime reached the screen as `ImportError.` and nothing else, and identifying
+  it took the initramfs unpacked on another machine and a chroot. `docs/failure-states.md` already
+  promises the user a name they can put in a bug report; this is that promise kept for the one
+  failure class where the name is not the app's to leak. The carve-out is **by exception type**,
+  never by inspecting the text, because "does this string look like a secret?" has no answer.
 - `show_locals` is pinned off **explicitly, regardless of the library default** — a default is not a
   decision, and it can change under us on an upgrade.
 - **No logging framework, no log file, no `print` of any object that could hold key material.** The

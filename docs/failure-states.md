@@ -214,6 +214,25 @@ The rule this protects is unchanged — a user who has learned `esc` means *back
 screen where it means *proceed*. A screen whose honest label for `esc` would be a commit has a
 design problem, not a wording problem.
 
+### A key nothing renders is a key the user does not have
+
+**Every screen prints its own key line, and a source-level rule in `tests/test_structure.py`
+enforces it.** This section spent its whole length on *which* keys mean what and assumed the
+printing; the third hardware boot found what that assumption costs. The keymap picker bound `F10`,
+this document fixed `F10`, every other screen printed a line — and the picker printed none. The
+user reached the first screen of a working appliance and had no way off it: `esc` is *back out
+without acting*, and on the first screen there is nothing to back out to, so a user who does not
+know the confirm key is not inconvenienced, they are stopped.
+
+`HomeScreen` had the same defect and nobody had noticed, which is the argument for a rule rather
+than a fix. The rule is mechanical — a screen module that binds a function key must also carry that
+key in a string it renders — and it deliberately ignores two kinds of string that would let it pass
+for the wrong reason: a docstring, and `Binding("f10", ...)`'s own arguments. The second was
+measured while writing the check: counting them made every screen trivially compliant.
+
+**The first screen prints no `esc`**, and neither does home, because on both it would name an
+action that does not exist. That is the section above applied, not an exception to it.
+
 ## There is no diagnostic export, on purpose
 
 **No log file, no diagnostic QR, no "copy error details".**

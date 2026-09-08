@@ -164,7 +164,7 @@ chmod 644 "$POOL"/*.deb
 #
 # ONE `--include` PER PACKAGE. mmdebstrap does not split a comma-joined list that contains a
 # pattern; it hands apt the whole string as a single package name and apt reports
-# `Unable to locate package ?essential,dash,busybox,...`.
+# `Unable to locate package ?essential,dash,mount,...`.
 #
 # `copy://`, NOT `file://`. A `file://` URI is resolved by apt running INSIDE the chroot, where the
 # host's pool path does not exist. `copy://` reads on the host and copies in.
@@ -296,8 +296,12 @@ rm -rf "$ROOTFS/usr/bin/apt" "$ROOTFS/usr/bin/apt-get" "$ROOTFS/usr/bin/apt-cach
 rm -f "$ROOTFS/usr/sbin/agetty" "$ROOTFS/sbin/agetty"
 # Not a claim, just the largest prunable thing in the tree at 27.3 MiB. Nothing in this appliance
 # reads a locale: the console is fixed to UTF-8 and every string it shows is its own.
+#
+# `usr/share/gdb` is the newest entry and arrived with the `libstdc++6` pin: the package ships a
+# gdb auto-load Python script for a debugger that is not in this image. It is kilobytes, so it is
+# on this line for the same reason as the rest — nothing reads it — and not as a claim.
 rm -rf "$ROOTFS/usr/share/locale" "$ROOTFS/usr/share/doc" "$ROOTFS/usr/share/man" \
-       "$ROOTFS/usr/share/info" "$ROOTFS/usr/share/lintian"
+       "$ROOTFS/usr/share/info" "$ROOTFS/usr/share/lintian" "$ROOTFS/usr/share/gdb"
 
 # --- Stage 3c. PID 1 ---------------------------------------------------------------------------------
 #
@@ -327,11 +331,29 @@ paths_count=$(wc -l < "$WORK/rootfs.files" | tr -d ' ')
 readelf --dyn-syms --wide "$ROOTFS"/usr/lib/x86_64-linux-gnu/libsecp256k1.so.* \
     | awk '{ print $8 }' | sed 's/@.*//' | sort -u > "$WORK/libsecp256k1.syms"
 
+# EVERY DYNAMIC OBJECT'S `DT_NEEDED` AND `DT_RUNPATH`, for the assertion that no library the image
+# links is missing from the image. `readelf -d` is used and not `ldd`, and the reason is the same one
+# that put the signing check inside mmdebstrap's hook: `ldd` runs the loader, running the loader
+# needs a chroot, and this build has no privilege to make one. Reading the tables is something a
+# plain file read can do, and the resolution is then a pure function in `build/verify.py`.
+#
+# `-print0`/`while read` rather than a glob: the objects are in the Python layer, the library
+# directories and the plugin trees, at depths a glob would have to enumerate by hand.
+: > "$WORK/dynamic.txt"
+find "$ROOTFS" -type f \( -name '*.so' -o -name '*.so.*' \) -print | sort | while read -r object; do
+    printf 'OBJECT %s\n' "${object#"$ROOTFS"}" >> "$WORK/dynamic.txt"
+    readelf -d --wide "$object" 2>/dev/null \
+        | awk '/\(NEEDED\)/     { gsub(/[][]/, "", $NF); print "NEEDED " $NF }
+               /\(RUNPATH\)|\(RPATH\)/ { gsub(/[][]/, "", $NF); print "RUNPATH " $NF }' \
+        >> "$WORK/dynamic.txt"
+done
+
 python3 "$ROOT/build/verify.py" \
     --rootfs "$ROOTFS" \
     --files "$WORK/rootfs.files" \
     --installed "$WORK/installed.txt" \
     --symbols "$WORK/libsecp256k1.syms" \
+    --dynamic "$WORK/dynamic.txt" \
     --allow "$ROOT/build/modules.allow" \
     --kver "$KVER" \
     --measured-mib "$unpacked_mib"

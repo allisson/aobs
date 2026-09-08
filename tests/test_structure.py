@@ -8,6 +8,7 @@ notices; left to CI, the change fails here.
 from __future__ import annotations
 
 import ast
+import re
 import json
 import os
 import subprocess
@@ -150,6 +151,110 @@ def test_there_is_no_screen_port() -> None:
     port_table = (ROOT / "docs" / "test-harness.md").read_text(encoding="utf-8")
     assert "| `Screen` |" not in port_table
     assert "| `Keymap` |" in port_table
+
+
+def _function_keys_bound_but_not_printed(source: str) -> list[str]:
+    """Function keys a screen module binds and never puts on screen, given its source.
+
+    **Two kinds of string do not count as printed**, and both exclusions are the point. A
+    docstring, because the picker's own docstring could have named `F10` while the screen showed
+    the user nothing. And `Binding("f10", ...)`'s own arguments — measured while writing this: with
+    those counted, every screen trivially "prints" every key it binds and the rule passes for the
+    wrong reason. `tests/test_structure.py::test_the_printed_key_rule_bites` is what caught that.
+    """
+    tree = ast.parse(source)
+    binding_arguments = {
+        id(argument)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "Binding"
+        for argument in [*node.args, *(keyword.value for keyword in node.keywords)]
+    }
+    docstrings = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+        and isinstance(node.body[0].value.value, str)
+    }
+    bound = {
+        node.args[0].value.lower()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "Binding"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    }
+    rendered = " ".join(
+        node.value.lower()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstrings
+        and id(node) not in binding_arguments
+    )
+    # Function keys only. `up`/`down`/`escape` are the reserved vocabulary of
+    # `docs/failure-states.md` and are printed in prose — `up/down choose`, `esc back` — not as a
+    # token this check could match without guessing.
+    return [
+        f"binds {key.upper()} and never prints it"
+        for key in sorted(key for key in bound if re.fullmatch(r"f\d+", key))
+        if key not in rendered
+    ]
+
+
+def test_every_screen_that_binds_a_key_prints_that_key() -> None:
+    """A key nothing renders is a key the user does not have.
+
+    The keymap picker bound `F10`, `docs/failure-states.md` fixed it, every other screen printed
+    its own line — and the picker did not. The first boot that reached a screen ended with a user
+    sitting on it unable to leave, which is the whole cost of one missing `Static`.
+
+    Source-level on purpose: driving every screen to the point where it renders means walking the
+    whole session, and this rule is about the source saying two things consistently. What it checks
+    is narrow and mechanical: a module that binds a function key must contain that key as text
+    somewhere too.
+    """
+    screens = sorted((ROOT / "aobs" / "ui" / "screens").glob("*.py"))
+    assert len(screens) > 10, "the screen tree moved; this test is looking in the wrong place"
+
+    # Some screens keep their line in a shared text module — `reviewtext.UNLOCKED_KEYS`,
+    # `addresstext.LIST_KEYS` — so the text a screen can render is its own plus that of the
+    # `aobs.ui` modules it imports. One level, because that is the indirection the tree actually
+    # uses and a general resolver would be a guess about the next one.
+    shared = {
+        path.stem: path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "aobs" / "ui").glob("*.py"))
+    }
+    offenders: list[str] = []
+    for screen in screens:
+        source = screen.read_text(encoding="utf-8")
+        imported = "\n".join(
+            text
+            for name, text in shared.items()
+            if re.search(rf"\bimport +{re.escape(name)}\b|\bfrom +aobs\.ui\.{re.escape(name)}\b", source)
+        )
+        for complaint in _function_keys_bound_but_not_printed(source + "\n" + imported):
+            offenders.append(f"{screen.name}: {complaint}")
+    assert not offenders, offenders
+
+
+def test_the_printed_key_rule_bites() -> None:
+    """Fed a screen shaped like the picker before the fix, and one shaped like it after."""
+    bound_only = (
+        '"""A screen. Press F10 to go on."""\n'
+        'BINDINGS = [Binding("f10", "accept", "Use this layout")]\n'
+        'def compose():\n    yield Static("Keyboard layout", id="title")\n'
+    )
+    assert _function_keys_bound_but_not_printed(bound_only) == ["binds F10 and never prints it"]
+
+    printed = bound_only + 'KEYS = "F10 use this layout"\n'
+    assert _function_keys_bound_but_not_printed(printed) == []
 
 
 # --- The import closure ---------------------------------------------------------------------------
