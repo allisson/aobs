@@ -75,7 +75,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/inputs
-          key: inputs-${{ hashFiles('build/apt-versions.txt', 'build/requirements.appliance.txt', 'build/requirements.test.txt', 'build/snapshot.env') }}
+          key: inputs-${{ hashFiles('build/inputs.sha256', 'build/apt-versions.txt', 'build/requirements.appliance.txt', 'build/requirements.test.txt', 'build/snapshot.env') }}
 
       - name: Fetch inputs
         if: steps.inputs.outputs.cache-hit != 'true'
@@ -125,10 +125,19 @@ jobs:
           sudo cp build/inputs/deb/appliance/*.deb "$pool"/
           sudo sh -c "cd $pool && dpkg-scanpackages -m . > Packages && gzip -kf Packages"
           sudo chmod -R a+rX /srv
-          echo "pool: $(ls $pool/*.deb | wc -l) debs, $(du -sh $pool | cut -f1)"
+          n=$(ls $pool/*.deb | wc -l)
+          echo "pool: $n debs, $(du -sh $pool | cut -f1)"
+          # The last run silently used a STALE CACHE: 37 debs, the pre-#6 pool, and stage 3 failed
+          # rc=25 on the closure defect #6 had already fixed. The cache key now carries
+          # build/inputs.sha256, but a count is the cheap check that the key did its job — a probe
+          # that measures the wrong inputs is worse than one that does not run.
+          test "$n" -eq 57 || { echo "RESULT stage3: ABORTED — pool has $n debs, expected the 57-package closure (stale cache?)"; exit 1; }
 
           . ./build/snapshot.env
-          pkgs=$(sed -n '/^# @group appliance/,/^# @group harness/p' build/apt-versions.txt | grep -v '^#' | grep . | cut -d= -f1 | paste -sd, -)
+          # The kernel is EXCLUDED, exactly as build/fetch-inputs.sh excludes it. #6: resolving
+          # linux-image-amd64 drags initramfs-tools -> udev -> systemd into the rootfs, and the
+          # kernel is unpacked with dpkg-deb -x rather than installed. It is also not in this pool.
+          pkgs=$(sed -n '/^# @group appliance/,/^# @group harness/p' build/apt-versions.txt | grep -v '^#' | grep . | grep -v '^linux-image' | cut -d= -f1 | paste -sd, -)
           echo "packages: $pkgs"
 
           set +e
