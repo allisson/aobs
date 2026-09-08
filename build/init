@@ -120,7 +120,19 @@ echo "aobs: usb: $_hubs root hub(s) closed to new devices" > /dev/console 2>/dev
 # and is never the claim: the claim is that the module is not in the image. Debian's kernel is
 # built `CONFIG_MODULES=y`, so without this a `.ko` that is not in the image is not the same thing
 # as a `.ko` that cannot be loaded, and this line costs nothing to close that gap.
-step "could not set kernel.modules_disabled=1" sysctl -w -q kernel.modules_disabled=1
+#
+# AN `echo`, NOT `sysctl`. The two writes are identical and only one of them costs a package:
+# `sysctl` lives in `procps`, which would also put `ps`, `top`, `free`, `kill` and `pgrep` in an
+# image whose value is what is absent from it. Step 4 above already closes the USB hubs with this
+# same idiom, so this is the file's own convention rather than a shortcut.
+#
+# `step` cannot wrap it — a redirection is not a command it can pass to `"$@"` — and the write is
+# read back because this control is one-way for the life of the boot: a silent no-op here is a
+# claim in `docs/boot-pipeline.md` that stopped being true with nothing to say so.
+echo 1 > /proc/sys/kernel/modules_disabled 2>/dev/null \
+    || fail "could not write kernel.modules_disabled"
+[ "$(cat /proc/sys/kernel/modules_disabled 2>/dev/null)" = 1 ] \
+    || fail "kernel.modules_disabled did not take"
 
 # --- 6. The RAM floor ---------------------------------------------------------------------------------
 #

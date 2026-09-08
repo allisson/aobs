@@ -221,7 +221,8 @@ does only what nothing else can, in this order:
 3. **`modprobe` the allowlist**, from `/etc/aobs-modules`, and settle.
 4. **Flip `authorized_default=0` on every root hub** — after our own devices enumerate, before the
    first secret is entered.
-5. **Set `kernel.modules_disabled=1`.** One-way for the life of the boot; see below.
+5. **Set `kernel.modules_disabled=1`**, by writing `/proc/sys` directly. One-way for the life of
+   the boot; see below.
 6. Check available RAM against the floor and refuse to start below it.
 7. `exec` the app.
 
@@ -239,14 +240,52 @@ one outcome this script may not have.
 It is not written in Python, deliberately: PID 1 is the one process that cannot be restarted and is
 hardest to test, and everything it does is a `mount` or an `echo` into sysfs.
 
+### What the first hardware boot found: PID 1's commands were never checked for
+
+The first boot on real hardware stopped at step 1 with `/init: 55: mount: not found`, and the fault
+was not in PID 1. **`/usr/bin/mount` is not in `util-linux`. It is in a package named `mount`,**
+which nothing pinned — while this document said the opposite in three places, and the appliance pin
+list, the purge table and the containment claim below were all written on top of that sentence.
+
+Three of the seven steps were broken, not one, and the other two are why this is written down here
+rather than fixed quietly:
+
+| step | command | package | what it did on the machine |
+|---|---|---|---|
+| 1 | `mount` | `mount`, unpinned | the photographed failure: PID 1's first line of work |
+| 3 | `modprobe` | `kmod`, unpinned | **no failure at all.** Every module in the allowlist reported `no <module> on this machine`, exactly as a machine with none of that hardware would, and the session continued with no camera and no USB HID driver |
+| 5 | `sysctl` | `procps`, unpinned | would have hard-failed after step 3 had already gone quietly wrong |
+
+Step 3's behaviour is the finding worth keeping. A missing module is deliberately not a reason to
+refuse to boot, so the loop reports and continues — which means a missing *`modprobe`* was
+indistinguishable from unremarkable hardware. **Step 5 now writes `/proc/sys` directly** rather than
+pin `procps` for one write: `sysctl` arrives with `ps`, `top`, `free`, `kill` and `pgrep`, and step 4
+already closes the USB hubs with the same `echo`. The write is read back, because a one-way control
+that silently did nothing is a claim in this document that stopped being true with nothing to say so.
+
+`mount` and `kmod` are now pinned, and `busybox` is not: it was pinned for a `poweroff` PID 1 never
+called — power off is `reboot(2)` with `RB_POWER_OFF` in `aobs/adapters/real/power.py` — and Debian's
+`busybox` ships no applet symlinks, so that `poweroff` did not exist either. Nothing in the
+repository invoked it.
+
+**The assertion that was missing is the deliverable.** Every check in `build/verify.py` passed on
+that image: `required_files_present` names `sh`, `python3`, the identity files and the app, and
+stops. `commands_pid1_invokes` now reads every `step` in `build/init` itself — the grammar is
+already fixed, so that file is also the machine-readable record of what it needs — and
+`required_commands_present` resolves each one against PID 1's own `PATH` in the built rootfs, plus
+the commands the real adapters shell out to. It is derived from the script rather than a list beside
+it, because a hand-kept copy is what drifts.
+
 ### Containment, stated so it can be checked
 
 **There is no getty, no VT with a login, and no path from the running app to a prompt.** If the app
 exits, the kernel panics on init death rather than dropping to a shell.
 
 **That claim is about the binary, and the binary arrives whether or not it is wanted.** `util-linux`
-ships `/usr/sbin/agetty`, and `util-linux` is a pinned appliance package because PID 1 needs `mount`.
-Measured in the built rootfs: `agetty` present, five matching paths. Nothing spawns it — there is no
+ships `/usr/sbin/agetty`, and `util-linux` is in every Debian rootfs because it is `Essential: yes` —
+pinned or not, wanted or not. (This paragraph used to say it was pinned *because PID 1 needs
+`mount`*; that was the false sentence the section above is about, and the claim here never depended
+on it.) Measured in the built rootfs: `agetty` present, five matching paths. Nothing spawns it — there is no
 init system — so the *behaviour* was already as described, but "there is no getty" was false of the
 tree as built.
 
@@ -278,8 +317,10 @@ prune runs against.
 
 **`kernel.modules_disabled=1` is a second line, and is never cited as the claim.** `CONFIG_MODULES=y`
 reopened a door the old kernel had welded shut: with a loadable-module kernel, a `.ko` that is not in
-the image is not the same as a `.ko` that cannot be loaded. The sysctl is irreversible once set and
-costs one line in PID 1, so it closes that gap for the life of the session. A `modprobe` blacklist
+the image is not the same as a `.ko` that cannot be loaded. The write is irreversible once made and
+costs two lines in PID 1 — the `echo` and the read-back — so it closes that gap for the life of the
+session. It is an `echo` into `/proc/sys` and not `sysctl` for the reason given above: `sysctl` is in
+`procps`, and one write is not worth a process-inspection toolkit in the image. A `modprobe` blacklist
 exists for the same reason and with the same standing. **The claim is that the module is not in the
 image**; these two make it expensive to be wrong about, and neither is evidence for it.
 
@@ -292,7 +333,7 @@ packed. `build/verify.py` fails the build if any of them survives:
 |---|---|---|
 | `dpkg` and its database | `Essential: yes`; a Debian rootfs built the normal way always has one | it is a package manager, and the published claim says none is in the image |
 | `apt` | in the appliance pool; whether it reaches the rootfs depends on what mmdebstrap installs | same claim, and "depends on" is not something a claim may rest on |
-| `agetty` | shipped by `util-linux`, which PID 1 needs for `mount` | the containment claim above |
+| `agetty` | shipped by `util-linux`, which is `Essential: yes` and so is in every Debian rootfs | the containment claim above |
 | `usr/share/locale`, `doc`, `man`, `info` | Debian ships them | not a claim, just the largest prunable thing in the tree. Nothing here reads a locale |
 
 **`pip` is not in this table any more, and its absence is the interesting entry.** M2 specified
@@ -405,7 +446,7 @@ package is pinned twice and no dependency has two resolvers.
 
 | source | what |
 |---|---|
-| `build/apt-versions.txt` | the operating system: `dash`, `busybox`, `util-linux`, `python3`, `libsecp256k1-2`, `kbd`, `console-data`, the kernel |
+| `build/apt-versions.txt` | the operating system: `dash`, `mount`, `util-linux`, `kmod`, `python3`, `libsecp256k1-2`, `kbd`, `console-data`, the kernel |
 | `build/wheel-versions.txt` | the Python layer, hash-pinned, derived from `pyproject.toml` and `uv.lock` |
 | vendored in the app tree | **`embit`** and **`ur2`**, pinned by git SHA — Debian packages neither |
 
@@ -582,7 +623,8 @@ The rootfs assertions, each one a published claim checked before an image exists
 |---|---|
 | no harness package in the rootfs | the group split answers "may this survive into the shipped rootfs?" and is worthless unchecked |
 | no package manager: no `pip`, no `dpkg`, no `apt`, and no dpkg database | all three are installed or arrive because Debian insists, and all are removed by the purge stage. Removing `pip` alone leaves `python3-wheel` and `python3-packaging` behind, and a `python3-packaging` in the image is a harness package in the rootfs |
-| no `agetty` | `util-linux` ships it and PID 1 needs `util-linux` for `mount`. Measured present in the built rootfs, so this assertion is the only thing that makes the containment claim true |
+| no `agetty` | `util-linux` ships it and is `Essential: yes`, so it is in the rootfs whether pinned or not. Measured present in the built rootfs, so this assertion is the only thing that makes the containment claim true |
+| **every command PID 1 and the real adapters invoke, resolvable on PID 1's own `PATH`** | the assertion the first hardware boot needed and did not have. `mount` was in no pinned package, PID 1 died on its first line of work, and every other check on this page passed on that image. The list is read out of `build/init`'s own `step` grammar, so it cannot drift from the script |
 | no init system: no `systemd` binary, no `udevd`, no getty, no `login` | the appliance's first published claim. The closure reaches it through `linux-image-amd64` if the kernel is ever resolved rather than extracted |
 | `/bin/sh` and `python3` present | the predecessor's first ISO had neither, and PID 1 could not have run a line |
 | no `kernel/net`, no `kernel/drivers/net` | the network claim, at *absence* strength |

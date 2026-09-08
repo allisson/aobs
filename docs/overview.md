@@ -90,8 +90,8 @@ forever. `build/snapshot.env` holds the pin.
 Two pinned lists, and `build/verify.py` parses both, along one clean seam: **if Python imports it, it
 comes from `pyproject.toml`; everything else comes from Debian.**
 
-`build/apt-versions.txt` is the operating system — the base layout, `dash`, `busybox`, `util-linux`,
-`python3` itself, `libsecp256k1-2`, `kbd`/`console-data`, the kernel — and it pins no `python3-*`
+`build/apt-versions.txt` is the operating system — the base layout, `dash`, `mount`, `util-linux`,
+`kmod`, `python3` itself, `libsecp256k1-2`, `kbd`/`console-data`, the kernel — and it pins no `python3-*`
 package beyond the interpreter and `pip`. `build/wheel-versions.txt` is the Python layer, all 19
 appliance packages and 8 harness ones, derived from `pyproject.toml` and `uv.lock`. Debian stable
 ships that layer behind what the app declares, three of them below a declared floor;

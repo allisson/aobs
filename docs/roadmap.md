@@ -288,6 +288,24 @@ builds and asserts cleanly is what the predecessor also had.
 The thing the predecessor never did. No test in this repository can tell you whether the kernel boots,
 finds a framebuffer and enumerates a camera on a real machine.
 
+**First attempt, and what it cost to learn: the ISO booted and PID 1 could not run its own first
+line.** Debian's kernel came up on the target machine, the initramfs unpacked, `/init` started, and
+step 1 died with `mount: not found` — because `/usr/bin/mount` is in a package named `mount`, which
+was never pinned, while `docs/boot-pipeline.md` said in three places that `util-linux` provided it.
+`modprobe` (`kmod`) and `sysctl` (`procps`) were missing behind it, and the `modprobe` one is the
+one to remember: it would not have failed anything, it would have reported every allowlisted module
+as absent hardware and run the session with no camera and no USB HID driver.
+
+Nothing caught it because nothing was looking: `build/verify.py` asserted `/bin/sh`, `python3` and
+the identity files were present and stopped there. It now reads every `step` out of `build/init`
+itself and asserts each command resolves on PID 1's own `PATH` in the built rootfs, along with what
+the real adapters shell out to. `mount` and `kmod` are pinned, step 5 writes `/proc/sys` directly
+instead of pinning `procps` for one write, and `busybox` is gone — it was pinned for a `poweroff`
+that PID 1 never called and that Debian's applet-symlink-free build never provided.
+
+The lesson is the M2 exit criteria's, not this milestone's: "the image builds" was measured by
+assertions that between them never asked whether the image could execute a single line of PID 1.
+
 - [ ] **Choose and characterise the target machine**: make, age, BIOS or UEFI, whether Secure Boot can
       be disabled in its firmware, built-in webcam or USB. Nothing below can be judged without this.
 - [ ] Narrow the generic module allowlist to what that machine actually needs, or record why it stays

@@ -365,6 +365,112 @@ def test_an_image_that_could_not_start_fails_the_build(missing: str) -> None:
     assert missing in str(raised.value)
 
 
+# --- The commands PID 1 invokes ---------------------------------------------------------------------
+#
+# The first hardware boot stopped at `/init: 55: mount: not found`. `/usr/bin/mount` is in a package
+# named `mount`, not in `util-linux`, and nothing pinned it or looked for it; `modprobe` and `sysctl`
+# were missing behind it. Every assertion above passed on that image, which is what these are for.
+
+#: PID 1 as committed, read rather than imitated: a fixture would let the parser and the script
+#: drift apart, which is the whole failure this check exists to prevent.
+INIT_TEXT = (ROOT / "build" / "init").read_text(encoding="utf-8")
+
+
+def _rootfs_carrying(commands: tuple[str, ...], *, at: str = "usr/bin") -> set[str]:
+    return GOOD_ROOTFS | {f"{at}/{command}" for command in commands}
+
+
+def test_the_commands_are_read_out_of_the_committed_pid_1() -> None:
+    """Every `step` in the real script, not a list someone remembered to update."""
+    commands = verify.commands_pid1_invokes(INIT_TEXT)
+    assert "mount" in commands
+    assert "kbd_mode" in commands
+    assert "loadkeys" in commands
+    # The non-`step` invocations, which the explicit tuple contributes.
+    assert "modprobe" in commands
+    assert "awk" in commands
+    # Builtins are not commands: an image needs nothing on disk for them.
+    assert "echo" not in commands
+    assert "printf" not in commands
+
+
+def test_pid_1s_own_path_is_what_the_check_searches() -> None:
+    assert verify.init_search_path(INIT_TEXT) == ("/usr/sbin", "/usr/bin", "/sbin", "/bin")
+
+
+def test_an_init_that_sets_no_path_is_refused() -> None:
+    with pytest.raises(verify.PinFileError):
+        verify.init_search_path('step "could not mount /proc" mount -t proc proc /proc\n')
+
+
+def test_an_image_carrying_every_command_passes() -> None:
+    commands = (*verify.commands_pid1_invokes(INIT_TEXT), *verify.REAL_ADAPTER_COMMANDS)
+    verify.required_commands_present(
+        _rootfs_carrying(commands), commands, verify.init_search_path(INIT_TEXT)
+    )
+
+
+def test_the_missing_mount_that_stopped_the_first_hardware_boot_fails_the_build() -> None:
+    """The regression, stated as the boot stated it."""
+    commands = (*verify.commands_pid1_invokes(INIT_TEXT), *verify.REAL_ADAPTER_COMMANDS)
+    with pytest.raises(verify.PinFileError) as raised:
+        verify.required_commands_present(
+            _rootfs_carrying(commands) - {"usr/bin/mount"},
+            commands,
+            verify.init_search_path(INIT_TEXT),
+        )
+    assert "mount" in str(raised.value)
+
+
+@pytest.mark.parametrize("missing", ["mount", "modprobe", "kbd_mode", "cat", "awk", "loadkeys"])
+def test_any_command_absent_from_the_image_fails_the_build(missing: str) -> None:
+    commands = (*verify.commands_pid1_invokes(INIT_TEXT), *verify.REAL_ADAPTER_COMMANDS)
+    with pytest.raises(verify.PinFileError) as raised:
+        verify.required_commands_present(
+            _rootfs_carrying(commands) - {f"usr/bin/{missing}"},
+            commands,
+            verify.init_search_path(INIT_TEXT),
+        )
+    assert missing in str(raised.value)
+
+
+def test_a_command_in_any_directory_on_the_path_counts() -> None:
+    """`sbin` and `bin` are symlinks under merged-`/usr`, so the search is any-of and not `usr/bin`."""
+    verify.required_commands_present(
+        GOOD_ROOTFS | {"usr/sbin/mount"}, ("mount",), ("/usr/sbin", "/usr/bin")
+    )
+
+
+def test_an_empty_path_resolves_nothing_and_is_refused() -> None:
+    with pytest.raises(verify.PinFileError):
+        verify.required_commands_present(GOOD_ROOTFS, ("mount",), ())
+
+
+def test_a_step_with_no_command_in_it_is_an_error_not_a_skip() -> None:
+    with pytest.raises(verify.PinFileError):
+        verify.commands_pid1_invokes('PATH=/usr/bin\nstep "could not do the thing"\n')
+
+
+def test_a_step_that_runs_a_variable_cannot_be_checked_and_is_refused() -> None:
+    """A command this build cannot name is a command it cannot look for, and passing would be a
+    check that reports success for having understood nothing."""
+    with pytest.raises(verify.PinFileError):
+        verify.commands_pid1_invokes('PATH=/usr/bin\nstep "could not run it" "$TOOL" -x\n')
+
+
+def test_an_init_that_stopped_using_step_is_refused() -> None:
+    """Either PID 1 stopped checking its own steps or this parser stopped matching them. Both are
+    the same size of problem and neither may pass quietly."""
+    with pytest.raises(verify.PinFileError):
+        verify.commands_pid1_invokes("PATH=/usr/bin\nmount -t proc proc /proc\n")
+
+
+def test_the_step_helpers_own_definition_is_not_read_as_a_step() -> None:
+    commands = verify.commands_pid1_invokes(INIT_TEXT)
+    assert '"$@"' not in commands
+    assert "fail" not in commands
+
+
 def test_a_network_module_left_in_the_tree_fails_the_build() -> None:
     with pytest.raises(verify.PinFileError):
         verify.no_network_module_in_tree(

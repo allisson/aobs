@@ -29,11 +29,30 @@
 # @group appliance
 # Everything below this marker is installed into the rootfs.
 
-# The base layout and the shell. Debian minbase gives /bin/sh via dash; busybox is what
-# provides `poweroff`, which build/init needs and which no init system is here to offer.
+# The base layout and the shell. Debian minbase gives /bin/sh via dash.
+#
+# `mount` IS ITS OWN PACKAGE, and its absence is what stopped the first hardware boot dead
+# at PID 1 line 62 with `mount: not found`. util-linux does NOT ship /usr/bin/mount; the
+# package named `mount` does, and docs/boot-pipeline.md asserted the opposite in three
+# places until that boot. util-linux stays named here because it is Essential and arrives
+# whether or not it is pinned, and because the purge stage deletes the `agetty` it ships —
+# a claim that needs its version in the one pinned list.
+#
+# THERE IS NO busybox. It was pinned for a `poweroff` that build/init never called: power
+# off is reboot(2) with RB_POWER_OFF in aobs/adapters/real/power.py, and Debian's busybox
+# ships /usr/bin/busybox with no applet symlinks, so the `poweroff` named in that comment
+# would not have resolved either. Nothing in the repository invoked it.
 dash=0.5.12-12
-busybox=1:1.37.0-6+b8
+mount=2.41.5-0+deb13u1
 util-linux=2.41.5-0+deb13u1
+
+# `modprobe`, for step 3 of build/init, and the same kmod that build/mkiso.sh runs `depmod`
+# from on the build host — so the modules.dep written into the image and the tool that reads
+# it at boot are one implementation. Absent until the first hardware boot, where it made
+# every module in the allowlist report `no <module> on this machine`: no camera and no USB
+# HID driver, and not one failed step to say so, because a missing module is deliberately
+# not a reason to refuse to boot.
+kmod=34.2-2
 
 # The interpreter. build/verify.py asserts both this and /bin/sh are present in the
 # rootfs: the predecessor's first ISO had neither, and build/init could not have run a

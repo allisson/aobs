@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shlex
 import subprocess
 import sys
 from collections.abc import Iterable
@@ -314,6 +315,18 @@ REQUIRED_IN_ROOTFS = (
     "opt/aobs/aobs/__main__.py",
 )
 
+#: The commands `build/init` invokes that are NOT `step` calls, and so are not visible to the one
+#: idiom `commands_pid1_invokes` reads. Kept explicit and short on purpose: `echo` and `printf` are
+#: dash builtins and need nothing in the image, and every name here is one a reader can check
+#: against the file in under a minute. A new bare invocation in PID 1 belongs on this line.
+INIT_COMMANDS_OUTSIDE_A_STEP = ("modprobe", "cat", "awk", "sleep", "mkdir", "python3")
+
+#: What the real adapters shell out to. `loadkeys` missing is not a boot failure — `Keymap` catches
+#: `OSError` and the fault screen names it — but it ends the session on the first screen, and a
+#: user who cannot apply their own layout is the harm `console-data` is pinned to prevent: a BIP39
+#: passphrase typed through the wrong map makes a wallet that will not reopen, silently.
+REAL_ADAPTER_COMMANDS = ("loadkeys",)
+
 #: The symbols the vendored embit binds. `secp256k1_ec_privkey_negate` is the deprecated alias
 #: embit's loader binds unconditionally, and `secp256k1_schnorrsig_sign32` is the one upstream
 #: REMOVED the old name of in 0.8.0 — against such a library embit's `except: pass` binds nothing,
@@ -393,6 +406,80 @@ def required_files_present(paths: set[str]) -> None:
     missing = sorted(path for path in REQUIRED_IN_ROOTFS if path not in paths)
     if missing:
         raise PinFileError(f"the rootfs is missing {missing}; nothing in it could start")
+
+
+def init_search_path(text: str) -> tuple[str, ...]:
+    """PID 1's `PATH`, read out of PID 1.
+
+    Copied into this file it would be a second source for one fact, and the copy would be the one
+    that stayed right when `build/init` changed. So the check resolves commands on the same
+    directories the script itself will search, whatever those become.
+    """
+    for line in text.splitlines():
+        if line.startswith("PATH="):
+            return tuple(part for part in line[len("PATH=") :].split(":") if part)
+    raise PinFileError(
+        "build/init sets no PATH. Every command below is then resolved against whatever the "
+        "kernel handed PID 1, which is not a thing this build can check"
+    )
+
+
+def commands_pid1_invokes(text: str) -> tuple[str, ...]:
+    """Every external command `build/init` runs, read from the script rather than listed here.
+
+    `step "name" cmd args...` is a fixed grammar in that file — it exists so that no failure is
+    silent — which makes it also the machine-readable record of what PID 1 needs. Reading it here
+    means the list cannot drift from the script the way a hand-kept copy does: a new `step` is
+    checked the moment it is written, with nobody having to remember this function exists.
+    """
+    found: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("step "):
+            continue
+        words = shlex.split(stripped, comments=True)
+        if len(words) < 3:
+            raise PinFileError(f"build/init has a step with no command in it: {stripped!r}")
+        command = words[2]
+        if command.startswith("$"):
+            raise PinFileError(
+                f"build/init runs {command} in a step, and a command this build cannot name is a "
+                f"command it cannot check for: {stripped!r}"
+            )
+        found.append(command)
+    if not found:
+        raise PinFileError(
+            "build/init has no `step` call in it. Either PID 1 stopped checking its own steps or "
+            "this parser stopped matching them, and both are the same size of problem"
+        )
+    return tuple(dict.fromkeys([*found, *INIT_COMMANDS_OUTSIDE_A_STEP]))
+
+
+def required_commands_present(
+    paths: set[str], commands: Iterable[str], search_path: Iterable[str]
+) -> None:
+    """The commands PID 1 and the real adapters invoke, resolvable in the image.
+
+    THIS IS THE ASSERTION THE FIRST HARDWARE BOOT NEEDED AND DID NOT HAVE. `/usr/bin/mount` is not
+    in `util-linux`; it is in a package named `mount`, which nothing pinned. PID 1 died on its
+    first line of work with `mount: not found`, and `modprobe` and `sysctl` were missing right
+    behind it — three published claims resting on binaries no assertion looked for. Every other
+    check in this file passed on that image.
+    """
+    directories = tuple(directory.lstrip("/") for directory in search_path)
+    if not directories:
+        raise PinFileError("PID 1's PATH is empty; nothing would resolve on it")
+    missing = sorted(
+        command
+        for command in commands
+        if not any(f"{directory}/{command}" in paths for directory in directories)
+    )
+    if missing:
+        raise PinFileError(
+            f"the rootfs carries none of {missing} anywhere on PID 1's PATH {list(directories)}. "
+            "A command PID 1 or a real adapter invokes and the image does not have is a machine "
+            "that stops at a message nobody can act on, not a warning"
+        )
 
 
 def no_harness_package_in_rootfs(installed: set[str], apt: dict[str, dict[str, str]]) -> None:
@@ -651,6 +738,11 @@ def _check_rootfs(args: argparse.Namespace, apt: dict[str, dict[str, str]]) -> N
 
     init_text = (args.rootfs / "init").read_text(encoding="utf-8")
     init_is_fully_substituted(init_text)
+    required_commands_present(
+        paths,
+        (*commands_pid1_invokes(init_text), *REAL_ADAPTER_COMMANDS),
+        init_search_path(init_text),
+    )
     need, floor = ram_floor(args.measured_mib)
     if f"RAM_REQUIRED_MIB={need}" not in init_text or f"RAM_FLOOR_MIB={floor}" not in init_text:
         raise PinFileError(

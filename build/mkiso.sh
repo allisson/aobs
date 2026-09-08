@@ -164,7 +164,7 @@ chmod 644 "$POOL"/*.deb
 #
 # ONE `--include` PER PACKAGE. mmdebstrap does not split a comma-joined list that contains a
 # pattern; it hands apt the whole string as a single package name and apt reports
-# `Unable to locate package ?essential,dash,busybox,...`.
+# `Unable to locate package ?essential,dash,mount,...`.
 #
 # `copy://`, NOT `file://`. A `file://` URI is resolved by apt running INSIDE the chroot, where the
 # host's pool path does not exist. `copy://` reads on the host and copies in.
