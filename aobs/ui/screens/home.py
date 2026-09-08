@@ -34,7 +34,7 @@ from dataclasses import dataclass
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Static
 
@@ -113,6 +113,12 @@ NETWORK_FIXED = "The network is fixed for the rest of this session."
 #: it, which is the same reason the picker prints none either.
 KEYS = "up/down choose  ·  F10 open this path  ·  F12 power off"
 
+#: What the list under the rule is. A label rather than a heading, and uppercase because the
+#: console has one font at one weight, so case is the only typographic register there is
+#: (`docs/console-appearance.md`). It says *can do* deliberately: half these rows are on the screen
+#: precisely because they cannot be walked yet, and the sentence under them says why.
+SECTION = "WHAT YOU CAN DO"
+
 
 def label(path: Path, app: object) -> str:
     """The line for a path: its name, and for a path that carries a setting, the setting's value.
@@ -137,10 +143,10 @@ def reason(path: Path, *, camera: bool, wallet: bool, network_fixed: bool) -> st
     """Why this path cannot be walked, in the fewest words that name the missing thing.
 
     `docs/console-appearance.md` requires it to be words. Until it was, the difference between a
-    path that can be walked and one that cannot rested entirely on `text-style: dim` — and whether
-    `fbcon` renders half-bright on this appliance's panel is **not known**. If it does not, every
-    unavailable path was indistinguishable from an available one, and *sign a transaction* looked
-    exactly as walkable with no wallet loaded as with one.
+    path that can be walked and one that cannot rested entirely on `text-style: dim`, and whether
+    `fbcon` rendered half-bright at all was not known. It does, on the one panel that has been
+    photographed — which is an observation and not a guarantee, so this stays: a distinction that
+    survives only where somebody happened to look is not one the appliance can publish.
 
     A path can be short of two things at once — *sign a transaction* needs both a camera and a
     wallet — so the order here is fixed rather than meaningful. The sentence under the list is
@@ -182,10 +188,19 @@ class HomeScreen(Screen):
     ]
 
     DEFAULT_CSS = """
-    HomeScreen #paths { height: auto; margin: 1 0; }
+    /* The title row is a row, not a line: the appliance's name at the left edge, what this
+       session is at the right. The rule under it and the `bold` are the app's. */
+    HomeScreen #title { height: auto; }
+    HomeScreen #title-name { width: 1fr; text-style: bold; }
+    HomeScreen #title-state { width: auto; text-style: none; }
+
+    HomeScreen #section { margin-bottom: 1; }
+    HomeScreen #paths { height: auto; }
     HomeScreen .path { margin-left: 2; }
     HomeScreen .path-unavailable { text-style: dim; }
-    HomeScreen .note { margin-top: 1; }
+    /* One blank row before the block and none inside it: the sentences are one statement about
+       the session, and a blank between each made three paragraphs out of it. */
+    HomeScreen #notes { height: auto; margin-top: 1; }
     """
 
     def __init__(self) -> None:
@@ -201,7 +216,13 @@ class HomeScreen(Screen):
         notice = app.notice  # type: ignore[attr-defined]
 
         with Vertical(id="frame"):
-            yield Static(f"aobs  ·  {network.value}", id="title")
+            with Horizontal(id="title"):
+                yield Static("aobs", id="title-name")
+                yield Static(
+                    f"{network.value}  ·  {app.release.version_label}",  # type: ignore[attr-defined]
+                    id="title-state",
+                )
+            yield Static(SECTION, id="section")
             state = {"camera": camera, "wallet": wallet, "network_fixed": network_fixed}
             with Vertical(id="paths"):
                 for index, path in enumerate(PATHS):
@@ -219,15 +240,14 @@ class HomeScreen(Screen):
                         id=f"path-{index}",
                         classes=" ".join(classes),
                     )
-            yield Static(
-                NETWORK_FIXED if network_fixed else CHOOSE_NETWORK, classes="note", id="network"
-            )
-            if not camera:
-                yield Static(NO_CAMERA, classes="note", id="no-camera")
-            if not wallet:
-                yield Static(NO_WALLET, classes="note", id="no-wallet")
-            if notice:
-                yield Static(notice, classes="note", id="notice")
+            with Vertical(id="notes"):
+                yield Static(NETWORK_FIXED if network_fixed else CHOOSE_NETWORK, id="network")
+                if not camera:
+                    yield Static(NO_CAMERA, id="no-camera")
+                if not wallet:
+                    yield Static(NO_WALLET, id="no-wallet")
+                if notice:
+                    yield Static(notice, id="notice")
             yield Static(KEYS, id="home-keys", classes="keys")
 
     def on_screen_resume(self) -> None:

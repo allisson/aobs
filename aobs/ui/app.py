@@ -87,6 +87,10 @@ class SignerApp(App[None]):
     /* Except on the review screen, which draws its own three rules as text — and the widths of
        those are fixed by `docs/review-screen.md`, not by this system. */
     ReviewScreen #title {{ border-bottom: none; margin-bottom: 0; }}
+    /* And on the home screen, where the title is a row rather than a line: the weight belongs to
+       the name at the left edge and not to the session state at the right, and a child cannot
+       cancel a `bold` it inherits from its own container. */
+    HomeScreen #title {{ text-style: none; }}
 
     /* The keys line is a footer. It was already the last thing every screen composed; this is the
        rule above it. */

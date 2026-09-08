@@ -205,7 +205,11 @@ async def test_mainnet_is_the_default_and_costs_no_keypress() -> None:
         await reach_home(pilot)
         assert app.network is Network.MAINNET
         assert CHOOSE_NETWORK in texts(app)
-        assert "aobs  ·  mainnet" in texts(app), "the header says which chain the session is on"
+        # The right-hand end of the title row, since `docs/console-appearance.md` made the header
+        # a row: the name at the left edge, what this session is at the right. The claim is
+        # unchanged — the network is on the header without a keypress.
+        header = str(app.screen.query_one("#title-state", Static).content)
+        assert "mainnet" in header, "the header says which chain the session is on"
         assert f"{NETWORK_PATH}  ·  mainnet" in texts(app), "and so does the path beside it"
 
 

@@ -71,11 +71,16 @@ place the system spends the console's strongest available signal, because it ans
 This is the rule that is about correctness rather than looks.
 
 The home screen distinguishes a path that can be walked from one that cannot, and until now that
-distinction rested entirely on `text-style: dim`. Whether `fbcon` renders half-bright at all on
-this panel **is not known** — the photograph is too reflective to settle it, and nothing in the
-repository ever asked. If it does not, then every unavailable path on the appliance is
-indistinguishable from an available one, and *sign a transaction* looks exactly as walkable with no
+distinction rested entirely on `text-style: dim`. Whether `fbcon` renders half-bright at all was
+not known when this was written, and if it did not, every unavailable path on the appliance was
+indistinguishable from an available one — *sign a transaction* looking exactly as walkable with no
 wallet loaded as with one.
+
+**It does render.** A photograph of the appliance booted on the target machine — BIOS path,
+`vga=791`, 128×48 — shows the six rows that need a wallet visibly greyer than the four that do not.
+That is one panel and one framebuffer driver, so it is an observation and not a guarantee; the
+rule below is unchanged by it, because a distinction that survives only where somebody happened to
+look is not a distinction the appliance can publish.
 
 So: **no distinction may rest on `dim` alone.** On the home screen the reason is now on the row, in
 words, right-aligned — `needs a wallet`, `needs a camera`, `fixed for this session`. `dim` stays
@@ -100,43 +105,57 @@ carried by the line above it — a derivation path, a heading — so a console t
 costs legibility and not meaning. That is the test: `dim` may say *this matters less*, never *this
 is not available*.
 
-The first two are still worth a look on real hardware, and that is a checklist item, not a change.
+The home screen's photograph says all three do something on this panel. The first two are on
+screens nobody has photographed yet, so seeing them is still a checklist item.
 
 ## The shape of a screen
 
-Unchanged from what every screen already composes, with two additions and no new widgets:
+The home screen, which is where the treatment was chosen. Nothing here is a new widget — the two
+rules are borders on widgets that already existed:
 
 ```
-aobs  ·  mainnet
-────────────────────────────────────────────────────────────────────────────────────────────
+aobs                                                     mainnet  ·  DEVELOPMENT BUILD
+──────────────────────────────────────────────────────────────────────────────────────────
+
+WHAT YOU CAN DO
 
   > Generate a new wallet
     Type a seed in
-    Restore from an encrypted wallet QR                            needs a camera
-    Sign a transaction                                             needs a wallet
+    Restore from an encrypted wallet QR                                    needs a camera
+    Sign a transaction                                                     needs a wallet
     ...
+    Choose the network  ·  mainnet
 
 The network is chosen before a wallet is made, and fixed for good once one is.
 No wallet is loaded yet, so the paths that need one are unavailable.
-────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────
 up/down choose  ·  F10 open this path  ·  F12 power off
 ```
 
-The selection marker stays `>`, which is ASCII and therefore in the budget below. A reversed row
-does not need a marker at all; it keeps one because every list screen prints it and replacing it
-would be copy churn bought with nothing.
-
+- **The title row is a row**, not a line: the appliance's name at the left edge, what this session
+  is at the right. The weight is on the name only.
+- **A section label above the list**, uppercase. The console has one font at one weight, so case is
+  the only typographic register there is — a label cannot be "smaller" or "lighter" here, only
+  differently cased.
+- **The sentences under the list are one block**, with a blank row before it and none inside it.
+  They are one statement about the session; a blank between each made three paragraphs of it.
 - **A rule under the title, and a rule above the keys.** Both are drawn as the *border* of a widget
   that already exists — `#title`'s bottom border, the keys line's top border — so no screen grows a
   widget, and a screen that is only a message does not gain furniture it cannot fill.
 - **The keys line is a footer.** It was the last thing in the flow on every screen already; it now
   has the rule above it and the class that says so.
 
-**The right-hand end of the title row is per-screen and stays that way.** The home screen and the
-emit screen put the network there. Whether the review, confirm and address screens should too is an
-open question in `docs/network-selection.md` §*Mainnet is the default*, and this document does not
-close it — an appearance pass is exactly the wrong place to start printing the network on screens
-that a settled document deliberately left alone.
+The selection marker stays `>`, which is ASCII and therefore in the budget below. A reversed row
+does not need a marker at all; it keeps one because every list screen prints it and replacing it
+would be copy churn bought with nothing.
+
+**The right-hand end of the title row is per-screen and stays that way.** On the home screen it is
+the network and the build label — the same header `docs/network-selection.md` already names as one
+of the three places the network is stated, re-laid-out rather than moved. Whether the review,
+confirm and address screens should carry the network too is an open question in that document
+§*Mainnet is the default*, and this one does not close it: an appearance pass is exactly the wrong
+place to start printing the network on screens a settled document deliberately left alone.
 
 ## Vertically centred, but only where the content cannot overflow
 
@@ -179,8 +198,10 @@ showing all thirteen.
 
 ## Open
 
-- **Does `fbcon` render half-bright on this panel?** It decides whether the four `dim` uses are
-  doing anything at all. `docs/boot-checklist.md`.
-- **Which of the thirteen glyphs resolve?** Same checklist, same screen.
+- ~~**Does `fbcon` render half-bright on this panel?**~~ **Answered: yes**, on the target machine's
+  BIOS path at `vga=791`. Observed on the home screen, where the rows that need a wallet are
+  visibly greyer. One panel, one driver — the redundancy rule stands regardless.
+- **Which of the thirteen glyphs resolve?** Still open, and the home screen exercises none of the
+  five doubtful ones. `docs/boot-checklist.md`, one screen showing all thirteen.
 - **Which of the sixteen colours are legible on this panel?** Only needed if a palette is ever
   wanted; the system as written needs none.

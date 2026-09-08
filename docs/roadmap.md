@@ -359,12 +359,12 @@ the same shape — read what the repository already says, and check the artefact
       broadcast on signet.
 - [ ] Pull the boot medium out mid-session and keep signing. That is the cheapest check of the
       amnesia claim, and it is only a claim until someone has done it.
-- [ ] **Check what the console can actually draw**, on one screen showing all of it. Two things the
-      repository now states and has never checked, both fixed by `docs/console-appearance.md`:
-      whether `fbcon` renders **half-bright** on this panel — four screens use `dim`, and until the
-      home screen gained a worded reason the difference between a walkable path and an unwalkable
-      one rested on nothing else — and whether the console has a **glyph** for the five characters
-      outside the built-in font's repertoire: `⚠` (`aobs/ui/reviewtext.py:48`, the NOT PROVEN
+- [ ] **Check what the console can actually draw**, on one screen showing all of it. Both halves
+      are fixed by `docs/console-appearance.md`. **Half-bright is already answered — it renders**,
+      seen on the home screen on the target machine's BIOS path, where the six rows that need a
+      wallet are visibly greyer than the four that do not. One panel and one framebuffer driver, so
+      the worded reason on those rows stays. What is left is whether the console has a **glyph** for
+      the five characters outside the built-in font's repertoire: `⚠` (`aobs/ui/reviewtext.py:48`, the NOT PROVEN
       marker), `▮` and `▯` (`aobs/ui/scanning.py:45`, the slot map — the whole of the scan screen's
       feedback), and the two dashes. Same pattern as the three faults above: *a claim the repository
       stated correctly in prose and never checked.* Replacing the glyphs is deliberately **not**
