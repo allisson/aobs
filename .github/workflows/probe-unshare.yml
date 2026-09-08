@@ -118,6 +118,17 @@ jobs:
       # `[trusted=yes]` is not a weakening: these bytes were gated on build/inputs.sha256 before
       # they got here, which is a stronger statement than a signature checked at this point would
       # be. The pool has no Release file to sign in the first place.
+      #
+      # `copy://`, NOT `file://`, and this is a real constraint on mkiso.sh rather than a probe
+      # detail. Run 34172113782, against a correct 57-package pool:
+      #
+      #   E: package file /srv/pool/./gcc-14-base_14.2.0-19_amd64.deb not accessible from chroot
+      #      directory -- use copy:// instead of file:// or a bind-mount.
+      #
+      # A `file://` URI is resolved by apt running INSIDE the chroot, where the host's pool path
+      # does not exist. `copy://` reads the file on the host and copies it in. The alternative
+      # mmdebstrap offers is `--hook-dir=.../file-mirror-automount`, which bind-mounts instead;
+      # `copy://` is the smaller mechanism and needs no hook.
       - name: Stage 3 — pinned appliance closure, offline, unshare
         run: |
           pool=/srv/pool
@@ -141,7 +152,7 @@ jobs:
           echo "packages: $pkgs"
 
           set +e
-          mmdebstrap --mode=unshare --variant=custom --include="$pkgs" --aptopt='APT::Sandbox::User "root"' --aptopt='Acquire::AllowInsecureRepositories "true"' "$DEBIAN_SUITE" /tmp/rootfs.tar "deb [trusted=yes] file://$pool ./" > /tmp/s3.log 2>&1
+          mmdebstrap --mode=unshare --variant=custom --include="$pkgs" --aptopt='APT::Sandbox::User "root"' --aptopt='Acquire::AllowInsecureRepositories "true"' "$DEBIAN_SUITE" /tmp/rootfs.tar "deb [trusted=yes] copy://$pool ./" > /tmp/s3.log 2>&1
           rc=$?
           set -e
 
