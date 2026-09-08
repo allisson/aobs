@@ -105,14 +105,22 @@ mkdir -p "$WORK" "$OUT"
 
 say "stage 1: rootfs (mmdebstrap --mode=unshare, no network, no privilege)"
 
-# apt's `file:`/`copy:` method drops privileges to `_apt` before reading, so the pool has to be
-# readable by a user that is not us. A pool under a 0700 home directory fails with
-# `Permission denied` on every `Packages` file and never says why. Two things fix it, and both are
-# needed: a world-readable staging copy, and `APT::Sandbox::User "root"`.
-POOL=$WORK/pool
-mkdir -p "$POOL"
+# THE POOL IS STAGED OUTSIDE THE CHECKOUT, and this is the constraint that bit twice.
+#
+# apt's `copy:` method drops privileges to `_apt` before reading, and in unshare mode that is a
+# subuid that is nobody the host has heard of. It therefore needs every ANCESTOR of the pool to be
+# traversable by a stranger, not merely the pool and its files to be readable — and a repository
+# checkout under a home directory is not. Measured on `ubuntu-24.04`:
+# `Failed to stat - stat (13: Permission denied)`, seven times, against a pool whose own
+# permissions were 755 and whose `Packages` was 644.
+#
+# `APT::Sandbox::User "root"` is set below and is NOT sufficient on its own; the first version of
+# this script had it and failed anyway. `$TMPDIR` is avoided for the same reason — on a GitHub
+# runner it points back inside the home directory.
+POOL=$(mktemp -d /tmp/aobs-pool.XXXXXX)
+trap 'rm -rf "$POOL"' EXIT INT TERM
+chmod 755 "$POOL"
 cp "$INPUTS"/deb/appliance/*.deb "$POOL/"
-chmod 755 "$WORK" "$POOL"
 chmod 644 "$POOL"/*.deb
 ( cd "$POOL" && dpkg-scanpackages -m . > Packages 2>/dev/null && gzip -kf Packages )
 

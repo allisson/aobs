@@ -65,11 +65,14 @@ working, that is a finding to be written down here, not a licence.
 **Five constraints on stage 1 came out of that verification.** None is about namespaces; every one
 is about apt or mmdebstrap, and each was found by a build failing rather than by reading:
 
-- The `.deb` pool must be **readable by the `_apt` user**. apt's `file://` method drops privileges
-  before reading, so a pool under a `0700` home directory fails with `Permission denied` on every
-  `Packages` file and never says why.
-- `APT::Sandbox::User "root"` is set, so apt does not drop to a user that cannot read the pool the
-  build handed it.
+- The `.deb` pool must be **staged outside the checkout**, not merely made readable. apt's `copy:`
+  method drops privileges before reading, and in unshare mode that is a subuid the host has never
+  heard of — so every *ancestor* of the pool has to be traversable by a stranger, which a
+  repository under a home directory is not. Measured twice, the second time with the pool at 755
+  and its `Packages` at 644: `Failed to stat - stat (13: Permission denied)`.
+- `APT::Sandbox::User "root"` is set, and **is not sufficient on its own** — the first version of
+  `mkiso.sh` had it and failed anyway. `$TMPDIR` is no help either: on a GitHub runner it points
+  back inside the home directory.
 - **`copy://`, not `file://`.** A `file://` URI is resolved by apt running *inside* the chroot,
   where the host's pool path does not exist: `package file ... not accessible from chroot
   directory`. `copy://` reads on the host and copies in. mmdebstrap's alternative is a bind-mount
