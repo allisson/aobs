@@ -187,6 +187,7 @@ cannot be.
 | `docs/qr-emit-parameters.md`, `docs/scan-feedback.md` | The QR channel in both directions |
 | `docs/network-selection.md` | Mainnet, testnet, signet |
 | `docs/failure-states.md` | The one shape every refusal is drawn in |
+| `docs/console-appearance.md` | The console's sixteen colours and its glyph budget, and what a screen may not rest on |
 
 ## Ancestry
 
