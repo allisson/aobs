@@ -17,6 +17,7 @@ anywhere in this file:
 from __future__ import annotations
 
 import argparse
+import posixpath
 import re
 import shlex
 import subprocess
@@ -315,6 +316,20 @@ REQUIRED_IN_ROOTFS = (
     "opt/aobs/aobs/__main__.py",
 )
 
+#: Where the loader looks in the image for a library whose object gives it no `RUNPATH` to follow.
+#: Narrower than a real `ld.so.conf` walk on purpose: if a future library lands somewhere else, this
+#: assertion fails a build that would have worked, which is the direction a check is allowed to be
+#: wrong in. The opposite — resolving a soname this list cannot actually find — ships an image that
+#: raises `ImportError` in front of a user.
+DEFAULT_LIBRARY_PATH = (
+    "/usr/lib/x86_64-linux-gnu",
+    "/usr/lib",
+    "/lib/x86_64-linux-gnu",
+    "/lib",
+    "/usr/lib64",
+    "/lib64",
+)
+
 #: The commands `build/init` invokes that are NOT `step` calls, and so are not visible to the one
 #: idiom `commands_pid1_invokes` reads. Kept explicit and short on purpose: `echo` and `printf` are
 #: dash builtins and need nothing in the image, and every name here is one a reader can check
@@ -482,6 +497,68 @@ def required_commands_present(
         )
 
 
+def parse_dynamic_report(text: str) -> list[tuple[str, tuple[str, ...], tuple[str, ...]]]:
+    """`build/mkiso.sh`'s `readelf -d` sweep, as one record per dynamic object.
+
+    `OBJECT <path>` opens a record; `NEEDED <soname>` and `RUNPATH <dirs>` belong to the record
+    above them. A `NEEDED` before any `OBJECT` is a malformed report and not something to attribute
+    to whatever object happens to come next.
+    """
+    records: list[tuple[str, list[str], list[str]]] = []
+    for line in text.splitlines():
+        keyword, _, value = line.strip().partition(" ")
+        value = value.strip()
+        if keyword == "OBJECT":
+            records.append((value, [], []))
+        elif keyword == "NEEDED":
+            if not records:
+                raise PinFileError(f"the dynamic report has a NEEDED before any OBJECT: {line!r}")
+            records[-1][1].append(value)
+        elif keyword == "RUNPATH":
+            if not records:
+                raise PinFileError(f"the dynamic report has a RUNPATH before any OBJECT: {line!r}")
+            records[-1][2].extend(part for part in value.split(":") if part)
+        elif keyword:
+            raise PinFileError(f"the dynamic report has a line this parser does not know: {line!r}")
+    return [(path, tuple(needed), tuple(runpath)) for path, needed, runpath in records]
+
+
+def no_unresolved_shared_library(
+    records: list[tuple[str, tuple[str, ...], tuple[str, ...]]], paths: set[str]
+) -> None:
+    """Every library the image links is in the image.
+
+    THE SECOND HARDWARE BOOT DIED HERE. `pip --target` unpacks the wheels from outside the chroot,
+    so nothing an installed `.deb` declares mentions what they link: `zxingcpp.abi3.so`,
+    `PIL/_avif` and pillow's bundled `libavif` all needed `libstdc++.so.6`, no package required it,
+    and the build had no assertion that could tell. The app imported at build time now too, which
+    catches the same failure for anything imported at startup — but Pillow loads its format plugins
+    lazily, so `_avif` would have shipped unresolvable and failed months later on an AVIF frame.
+    This check is the one that sees an object nothing imports yet.
+    """
+    if not records:
+        raise PinFileError("the dynamic report is empty; the readelf sweep did not run")
+    missing: list[str] = []
+    for path, needed, runpath in records:
+        origin = posixpath.dirname(path)
+        directories = [
+            posixpath.normpath(directory.replace("$ORIGIN", origin).replace("${ORIGIN}", origin))
+            for directory in runpath
+        ] + list(DEFAULT_LIBRARY_PATH)
+        for soname in needed:
+            if not any(
+                f"{directory}/{soname}".lstrip("/") in paths for directory in directories
+            ):
+                missing.append(f"{path} needs {soname}")
+    if missing:
+        raise PinFileError(
+            f"the image links libraries it does not carry: {missing[:5]}"
+            + (f" and {len(missing) - 5} more" if len(missing) > 5 else "")
+            + ". A wheel's shared-library dependency is invisible to apt, so only this check and "
+            "the pin file put it in the image"
+        )
+
+
 def no_harness_package_in_rootfs(installed: set[str], apt: dict[str, dict[str, str]]) -> None:
     """The group split, checked where it is supposed to bite.
 
@@ -634,6 +711,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--files", type=Path, help="a `find .` listing of --rootfs")
     parser.add_argument("--installed", type=Path, help="package names, read before the purge")
     parser.add_argument("--symbols", type=Path, help="the image's libsecp256k1 dynamic symbols")
+    parser.add_argument("--dynamic", type=Path, help="the readelf -d sweep of every shared object")
     parser.add_argument("--allow", type=Path, help="build/modules.allow")
     parser.add_argument("--kver", help="the kernel version directory under usr/lib/modules")
     parser.add_argument("--measured-mib", type=int, help="the measured unpacked rootfs, in MiB")
@@ -686,6 +764,7 @@ def _check_rootfs(args: argparse.Namespace, apt: dict[str, dict[str, str]]) -> N
         "--files": args.files,
         "--installed": args.installed,
         "--symbols": args.symbols,
+        "--dynamic": args.dynamic,
         "--allow": args.allow,
         "--kver": args.kver,
         "--measured-mib": args.measured_mib,
@@ -724,6 +803,10 @@ def _check_rootfs(args: argparse.Namespace, apt: dict[str, dict[str, str]]) -> N
 
     libsecp256k1_exports_what_embit_binds(
         set(args.symbols.read_text(encoding="utf-8").split())
+    )
+
+    no_unresolved_shared_library(
+        parse_dynamic_report(args.dynamic.read_text(encoding="utf-8")), paths
     )
 
     # The receipt `build/signcheck.py` left inside mmdebstrap's chroot. Its absence means the hook

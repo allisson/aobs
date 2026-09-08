@@ -276,6 +276,47 @@ already fixed, so that file is also the machine-readable record of what it needs
 the commands the real adapters shell out to. It is derived from the script rather than a list beside
 it, because a hand-kept copy is what drifts.
 
+### What the second hardware boot found: the image could sign and could not start
+
+With PID 1 fixed, the appliance got through all seven steps — two root hubs closed, the UVC camera
+enumerated, `crng init done` — reached `exec python3 -m aobs`, and died there:
+
+```
+ImportError. The session cannot continue. Power off and start again.
+Kernel panic - not syncing: Attempted to kill init!  PID: 1  Comm: python3
+```
+
+The panic is this document's containment claim working: the app exited, and the kernel panicked on
+init death rather than dropping anyone to a prompt.
+
+**The fault was `libstdc++.so.6`, and it could not have been found from that screen.** `zxingcpp`,
+`PIL/_avif` and pillow's bundled `libavif` all link the C++ runtime; the image did not carry it.
+The `.deb` was *already in the appliance pool*, fetched as a dependency of `apt` — which is not
+installed — and being in the pool is not being in the image.
+
+**Why apt could not have known.** `pip --target` unpacks the wheels from OUTSIDE the chroot, by
+design (`docs/adr/0002`, and the purge section below on why `pip` may not be in the image). So no
+installed package declares a dependency on anything a wheel links, and apt resolves a closure that
+is correct for the packages and blind to the application. `libstdc++6` is therefore pinned
+explicitly, exactly as `libsecp256k1-2` is: both are libraries the Python layer needs and no `.deb`
+asks for.
+
+**Two assertions, because they catch disjoint failures.** `build/signcheck.py` now imports
+`aobs.ui.app` inside mmdebstrap's chroot — the build proved the image could *sign* long before it
+proved the image could *start* — and `no_unresolved_shared_library` reads a `readelf -d` sweep of
+every shared object in the tree and resolves each `DT_NEEDED` against the image's own libraries,
+honouring `DT_RUNPATH` so pillow's bundled directory is found the way the loader finds it. The
+import check alone would have shipped this image: importing `aobs.ui.app` does not import
+`PIL/_avif`, because Pillow loads its format plugins lazily, so two of the three broken objects
+would have survived to fail on some later frame. `readelf` and not `ldd` because running the loader
+needs a chroot and this build has no privilege to make one; reading the tables is a file read, and
+the resolution is then a pure function.
+
+**And the fault screen now names an `ImportError`.** It showed the type and nothing else, which is
+why this took an unpacked initramfs and a chroot to identify. `docs/secret-hygiene.md` carries the
+carve-out and its bounds: one exception type, chosen because the import machinery writes that
+message and it names a module or a library rather than anything the application was holding.
+
 ### Containment, stated so it can be checked
 
 **There is no getty, no VT with a login, and no path from the running app to a prompt.** If the app
@@ -624,6 +665,8 @@ The rootfs assertions, each one a published claim checked before an image exists
 | no harness package in the rootfs | the group split answers "may this survive into the shipped rootfs?" and is worthless unchecked |
 | no package manager: no `pip`, no `dpkg`, no `apt`, and no dpkg database | all three are installed or arrive because Debian insists, and all are removed by the purge stage. Removing `pip` alone leaves `python3-wheel` and `python3-packaging` behind, and a `python3-packaging` in the image is a harness package in the rootfs |
 | no `agetty` | `util-linux` ships it and is `Essential: yes`, so it is in the rootfs whether pinned or not. Measured present in the built rootfs, so this assertion is the only thing that makes the containment claim true |
+| **every library the image links is in the image** | the assertion the second hardware boot needed. `pip --target` unpacks the wheels from outside the chroot, so no installed package declares what they link and apt's closure is blind to the application. A `readelf -d` sweep, resolved against the image's own libraries and honouring `DT_RUNPATH`; `readelf` and not `ldd` because running the loader needs a chroot this build has no privilege to make |
+| **the image imports what PID 1 runs** | `build/signcheck.py`, in mmdebstrap's chroot, alongside the signing check that was already there. The build proved the image could sign long before it proved the image could start. Needed *as well as* the sweep, not instead of it: lazily imported objects like Pillow's `_avif` are invisible to an import of `aobs.ui.app`, and pure-Python import failures are invisible to `readelf` |
 | **every command PID 1 and the real adapters invoke, resolvable on PID 1's own `PATH`** | the assertion the first hardware boot needed and did not have. `mount` was in no pinned package, PID 1 died on its first line of work, and every other check on this page passed on that image. The list is read out of `build/init`'s own `step` grammar, so it cannot drift from the script |
 | no init system: no `systemd` binary, no `udevd`, no getty, no `login` | the appliance's first published claim. The closure reaches it through `linux-image-amd64` if the kernel is ever resolved rather than extracted |
 | `/bin/sh` and `python3` present | the predecessor's first ISO had neither, and PID 1 could not have run a line |

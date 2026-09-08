@@ -21,8 +21,9 @@ def excepthook(
 ) -> None:
     """The top-level handler: the described failure, and nothing else.
 
-    Never the traceback, never locals, never `str(exception)` — an exception raised from inside a
-    frame holding a mnemonic must not be trusted to be free of it.
+    Never the traceback and never locals. `str(exception)` reaches the screen only for the one type
+    `aobs.core.failure.NAMED_MESSAGE_TYPES` names, because any other exception may have been raised
+    from inside a frame holding a mnemonic and must not be trusted to be free of it.
     """
     del kind, traceback  # deliberately unused: the traceback goes nowhere
     sys.stderr.write(describe(exception) + "\n")

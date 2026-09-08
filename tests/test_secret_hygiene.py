@@ -22,7 +22,7 @@ from aobs.adapters.fake import (
     RecordingPower,
 )
 from aobs.adapters.failure_handler import excepthook
-from aobs.core.failure import describe
+from aobs.core.failure import FAILURE_MESSAGE, describe
 from aobs.core.review import review
 from aobs.core.secret import SecretBuffer
 from aobs.core.signing import SigningRefused, sign
@@ -101,6 +101,46 @@ def test_the_described_failure_is_the_type_and_a_fixed_message() -> None:
         )
         assert SENTINEL in rendered_traceback
         assert rendered_traceback not in described
+
+
+def test_an_import_error_names_what_could_not_be_imported() -> None:
+    """The one carve-out, and the reason it exists.
+
+    The second hardware boot showed `ImportError.` and nothing else; the missing library took an
+    unpacked initramfs and a chroot to find. The import machinery writes this message, it names a
+    module or a shared object, and `docs/failure-states.md` promises the user a name they can put
+    in a bug report.
+    """
+    failure = ImportError("libstdc++.so.6: cannot open shared object file: No such file or directory")
+    described = describe(failure)
+    assert described.startswith("ImportError. libstdc++.so.6: cannot open shared object file")
+    assert described.endswith(FAILURE_MESSAGE)
+
+
+def test_the_carve_out_is_by_type_and_covers_module_not_found() -> None:
+    assert describe(ModuleNotFoundError("No module named 'zxingcpp'")).startswith(
+        "ModuleNotFoundError. No module named 'zxingcpp'."
+    )
+
+
+def test_no_other_exception_type_gets_its_message_on_screen() -> None:
+    """The carve-out is one type. Everything else keeps the rule the document states."""
+    for failure in (
+        ValueError(SENTINEL),
+        RuntimeError(SENTINEL),
+        OSError(SENTINEL),
+        KeyError(SENTINEL),
+    ):
+        described = describe(failure)
+        assert SENTINEL not in described
+        assert described == f"{type(failure).__name__}. {FAILURE_MESSAGE}"
+
+
+def test_a_named_message_is_bounded_and_single_line() -> None:
+    """Whatever the import machinery says, the fault screen stays one bounded line."""
+    described = describe(ImportError("x" * 1000 + "\nand a second line"))
+    assert "\n" not in described.removesuffix("\n")
+    assert len(described) < 200 + len(FAILURE_MESSAGE) + 40
 
 
 def test_a_refusal_raised_over_a_real_wallet_leaks_nothing() -> None:

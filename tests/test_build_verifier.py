@@ -471,6 +471,104 @@ def test_the_step_helpers_own_definition_is_not_read_as_a_step() -> None:
     assert "fail" not in commands
 
 
+# --- The libraries the image links ------------------------------------------------------------------
+#
+# The second hardware boot got through PID 1 and died at `exec python3 -m aobs`: `import zxingcpp`
+# raised `libstdc++.so.6: cannot open shared object file`. The wheels are unpacked from outside the
+# chroot, so no installed .deb declares what they link and apt resolved a closure that was correct
+# for the packages and blind to the application.
+
+#: A listing with the library directory populated the way the image's is.
+LIBRARY_ROOTFS = GOOD_ROOTFS | {
+    "usr/lib/x86_64-linux-gnu/libc.so.6",
+    "usr/lib/x86_64-linux-gnu/libstdc++.so.6",
+    "opt/aobs-python/pillow.libs/libavif-8a7f9d56.so.16.4.2",
+}
+
+
+def test_the_sweep_parses_into_one_record_per_object() -> None:
+    records = verify.parse_dynamic_report(
+        "OBJECT /opt/aobs-python/zxingcpp/zxingcpp.abi3.so\n"
+        "NEEDED libstdc++.so.6\n"
+        "NEEDED libc.so.6\n"
+        "OBJECT /opt/aobs-python/PIL/_avif.cpython-313-x86_64-linux-gnu.so\n"
+        "RUNPATH $ORIGIN/../pillow.libs\n"
+        "NEEDED libavif-8a7f9d56.so.16.4.2\n"
+    )
+    assert records == [
+        ("/opt/aobs-python/zxingcpp/zxingcpp.abi3.so", ("libstdc++.so.6", "libc.so.6"), ()),
+        (
+            "/opt/aobs-python/PIL/_avif.cpython-313-x86_64-linux-gnu.so",
+            ("libavif-8a7f9d56.so.16.4.2",),
+            ("$ORIGIN/../pillow.libs",),
+        ),
+    ]
+
+
+def test_a_needed_before_any_object_is_an_error_not_an_attribution() -> None:
+    with pytest.raises(verify.PinFileError):
+        verify.parse_dynamic_report("NEEDED libstdc++.so.6\nOBJECT /usr/lib/x.so\n")
+
+
+def test_a_line_the_parser_does_not_know_is_an_error() -> None:
+    with pytest.raises(verify.PinFileError):
+        verify.parse_dynamic_report("OBJECT /usr/lib/x.so\nSONAME x.so\n")
+
+
+def test_an_image_that_carries_every_library_it_links_passes() -> None:
+    verify.no_unresolved_shared_library(
+        verify.parse_dynamic_report(
+            "OBJECT /opt/aobs-python/zxingcpp/zxingcpp.abi3.so\n"
+            "NEEDED libstdc++.so.6\n"
+            "NEEDED libc.so.6\n"
+        ),
+        LIBRARY_ROOTFS,
+    )
+
+
+def test_the_missing_c_plus_plus_runtime_that_stopped_the_second_boot_fails_the_build() -> None:
+    with pytest.raises(verify.PinFileError) as raised:
+        verify.no_unresolved_shared_library(
+            verify.parse_dynamic_report(
+                "OBJECT /opt/aobs-python/zxingcpp/zxingcpp.abi3.so\nNEEDED libstdc++.so.6\n"
+            ),
+            LIBRARY_ROOTFS - {"usr/lib/x86_64-linux-gnu/libstdc++.so.6"},
+        )
+    assert "libstdc++.so.6" in str(raised.value)
+    assert "zxingcpp" in str(raised.value)
+
+
+def test_a_runpath_with_origin_is_resolved_relative_to_the_object() -> None:
+    """Pillow's bundled libraries are found this way and nowhere on the default path, so an
+    `$ORIGIN` this check could not expand would fail a build that works."""
+    verify.no_unresolved_shared_library(
+        verify.parse_dynamic_report(
+            "OBJECT /opt/aobs-python/PIL/_avif.cpython-313-x86_64-linux-gnu.so\n"
+            "RUNPATH $ORIGIN/../pillow.libs\n"
+            "NEEDED libavif-8a7f9d56.so.16.4.2\n"
+        ),
+        LIBRARY_ROOTFS,
+    )
+
+
+def test_a_bundled_library_reachable_only_by_runpath_is_not_found_without_it() -> None:
+    """The other half of the test above: it is the RUNPATH doing the work, not a lucky default."""
+    with pytest.raises(verify.PinFileError):
+        verify.no_unresolved_shared_library(
+            verify.parse_dynamic_report(
+                "OBJECT /opt/aobs-python/PIL/_avif.cpython-313-x86_64-linux-gnu.so\n"
+                "NEEDED libavif-8a7f9d56.so.16.4.2\n"
+            ),
+            LIBRARY_ROOTFS,
+        )
+
+
+def test_an_empty_sweep_is_a_collector_that_did_not_run_and_not_a_clean_image() -> None:
+    with pytest.raises(verify.PinFileError) as raised:
+        verify.no_unresolved_shared_library([], LIBRARY_ROOTFS)
+    assert "did not run" in str(raised.value)
+
+
 def test_a_network_module_left_in_the_tree_fails_the_build() -> None:
     with pytest.raises(verify.PinFileError):
         verify.no_network_module_in_tree(

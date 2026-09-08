@@ -21,6 +21,7 @@ on the build host's disk does not, because device nodes cannot be created unpriv
 
 from __future__ import annotations
 
+import importlib
 import sys
 
 sys.path[:0] = ["/opt/aobs", "/opt/aobs-python"]
@@ -52,6 +53,26 @@ schnorr = key.schnorr_sign(digest)
 if len(schnorr.serialize()) != 64:
     sys.exit("BIP86: schnorr_sign did not return 64 bytes")
 
+# --- The app imports, inside the image ------------------------------------------------------------
+#
+# WHAT PID 1 `exec`s, IMPORTED WHERE IT WILL RUN. Until the second hardware boot this file proved
+# the EC stack and stopped there, so the build asserted that the image could sign and never that it
+# could start: `exec python3 -m aobs` died at `import zxingcpp` with `libstdc++.so.6: cannot open
+# shared object file`, and every assertion in this build had passed.
+#
+# `aobs.ui.app` and not `aobs.__main__`, because `main()` constructs the real adapters and starts a
+# Textual application — the import is the part that belongs to a build, and running the app is what
+# the machine is for. The import chain it pulls is the whole of the app's own tree plus every wheel
+# any of it imports at module scope, which is exactly the set that has to resolve before a user
+# sees a screen.
+try:
+    importlib.import_module("aobs.ui.app")
+except BaseException as failure:  # noqa: BLE001  a build may not care which failure it was
+    sys.exit(
+        f"the image cannot import what PID 1 runs: {type(failure).__name__}: {failure}. "
+        "An image that signs and cannot start is an image that fails in front of a user"
+    )
+
 # The receipt. A customize hook that silently did not run would leave every other assertion in
 # this build passing and the one that matters unchecked, so the check writes down what it found and
 # `build/verify.py` refuses an image that does not carry the file. A hook that does not run is then
@@ -59,4 +80,4 @@ if len(schnorr.serialize()) != 64:
 with open("/etc/aobs-ec-backend", "w", encoding="utf-8") as receipt:
     receipt.write(backend + "\n")
 
-print(f"signing: ok, backend {backend}")
+print(f"signing: ok, backend {backend}; aobs.ui.app imports")

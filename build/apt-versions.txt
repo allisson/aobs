@@ -73,6 +73,18 @@ python3=3.13.5-1
 # re-running it.
 libsecp256k1-2=0.5.0-2+b1
 
+# THE C++ RUNTIME THE WHEELS LINK, and the second pin in this file that exists because apt cannot
+# see what the Python layer needs. `pip --target` unpacks the wheels from OUTSIDE the chroot, so no
+# installed .deb declares a dependency on anything they link, and apt resolves a closure that is
+# correct for the packages and blind to the application. Three objects in the image need this one:
+# `zxingcpp.abi3.so`, `PIL/_avif...so` and pillow's bundled `libavif`.
+#
+# Measured: without it the second hardware boot reached `exec python3 -m aobs` and died at
+# `import zxingcpp` — `libstdc++.so.6: cannot open shared object file`. The .deb was already in
+# build/inputs/deb/appliance, fetched as a dependency of `apt`, which is not installed. Being in
+# the pool is not being in the image, and only the pin puts it there.
+libstdc++6=14.2.0-19
+
 # `loadkeys` and the maps it loads. The Keymap adapter shells out to the first and reads
 # the second. console-data is what makes layouts() return more than the default, and the
 # full set ships deliberately: a user on AZERTY or ABNT2 typing a BIP39 passphrase
