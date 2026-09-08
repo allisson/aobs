@@ -1,0 +1,159 @@
+# THROWAWAY. This workflow answers one question and is then deleted.
+#
+# `docs/roadmap.md` M2: "`mmdebstrap --mode=unshare` builds the rootfs from the pinned snapshot.
+# **No `--privileged`.** Verify unshare mode works in the CI runner early; if it does not, that is
+# a finding, not a licence to reach for `--privileged`." M1 records it as the milestone's only
+# live risk. It cannot be checked on a macOS dev machine.
+#
+# --- WHAT THE EARLIER RUNS ANSWERED, AND WHAT THEY GOT WRONG --------------------------------------
+#
+# Run 34169037757 answered the headline question: stage 2 bootstrapped 71 MiB in `--mode=unshare`
+# with no `--privileged`, on ubuntu-24.04. That retires the roadmap's risk for the mechanism.
+#
+# Its other three stages were wrong, and all three were errors in this file rather than properties
+# of the runner. Kept written down because two of them are constraints `mkiso.sh` inherits:
+#
+#   1. Bare `unshare -Ur` was used as a proxy and reported DENIED on `/proc/self/uid_map`. That is
+#      not the capability mmdebstrap needs: `unshare -Ur` writes a single-uid map from a process
+#      with no `CAP_SETUID` in the parent, while mmdebstrap shells out to setuid-root
+#      `newuidmap`/`newgidmap` and maps the whole `/etc/subuid` range. Stage 2 passing while that
+#      "failed" is the proof the proxy was wrong. Stage 1 now reports facts and draws no verdict.
+#
+#   2. `Permission denied` on every `Packages*` in the pool. apt's `file://` method drops to the
+#      `_apt` user before reading, and `_apt` cannot traverse `/home/runner` at mode 0700. Nothing
+#      to do with unshare. BOTH FIXES ARE FINDINGS FOR mkiso.sh: stage the pool somewhere
+#      world-traversable, and set `APT::Sandbox::User "root"` so apt does not drop to a user that
+#      cannot read the pool the build handed it.
+#
+#   3. Run 34169199601 then died with `syntax error: unexpected end of file` before mmdebstrap ran:
+#      a multi-line `--customize-hook` inside a YAML block scalar is a quoting trap, not a
+#      mechanism. Removed rather than patched. mmdebstrap writes a TARBALL when the target path
+#      ends in `.tar`, and a tar records ownership as data — which is why the hook existed at all.
+#      That is also a real option for `mkiso.sh` and needs no privilege at any point.
+#
+#   4. Stage 3 then failed `rc=25` on forty unsatisfiable dependencies. THAT ONE WAS NOT A PROBE
+#      BUG — it was the finding this whole workflow paid for. `build/inputs/deb/appliance` was not
+#      a closure: 37 packages where 57 are needed, complete only relative to the
+#      `debian:trixie-slim` container that resolved it. Fixed in #6, along with the second defect
+#      it exposed: resolving `linux-image-amd64` dragged `initramfs-tools` -> `udev` -> `systemd`
+#      into the pool of an appliance whose first published claim is that it has none.
+#
+# WHAT IS STILL UNANSWERED, and the only reason this workflow runs one more time, now rebased onto
+# a main that carries those fixes:
+#
+#   - Does the pinned appliance closure actually INSTALL in unshare mode? `--variant=essential`
+#     says almost nothing about `console-data`, which is debconf-driven. (`linux-image-amd64` is no
+#     longer installed at all — it is extracted — so its postinst is out of the picture.)
+#   - The sizes `docs/boot-pipeline.md` marks NOT YET MEASURED: unpacked rootfs, modules tree,
+#     keymap cost. Its RAM-floor formula has no inputs until these exist, and M2 requires the
+#     figures be measurements rather than estimates.
+#
+# Deleted once `docs/boot-pipeline.md` records them. Not for merge.
+
+name: probe — mmdebstrap unshare
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/probe-unshare.yml
+
+permissions:
+  contents: read
+
+jobs:
+  unshare:
+    name: does --mode=unshare work without --privileged
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Same key as tests.yml, so this probe rides that job's cache instead of re-fetching 313 MiB.
+      - name: Cache build/inputs
+        id: inputs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/inputs
+          key: inputs-${{ hashFiles('build/apt-versions.txt', 'build/requirements.appliance.txt', 'build/requirements.test.txt', 'build/snapshot.env') }}
+
+      - name: Fetch inputs
+        if: steps.inputs.outputs.cache-hit != 'true'
+        run: sh build/fetch-inputs.sh
+
+      - name: Install mmdebstrap
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mmdebstrap uidmap dpkg-dev
+          echo "mmdebstrap: $(dpkg-query -W -f='${Version}' mmdebstrap)"
+
+      # Facts only. NO VERDICT — an earlier revision drew one here and it was wrong.
+      - name: Stage 1 — environment facts (no verdict)
+        run: |
+          echo "runner:     $(id -un) uid=$(id -u)"
+          echo "kernel:     $(uname -r)"
+          echo "os:         $(. /etc/os-release; echo "$PRETTY_NAME")"
+          for k in kernel.unprivileged_userns_clone kernel.apparmor_restrict_unprivileged_userns user.max_user_namespaces; do
+            printf '%-48s %s\n' "$k" "$(sysctl -n "$k" 2>&1)"
+          done
+          echo "subuid:     $(grep "^$(id -un):" /etc/subuid 2>/dev/null || echo 'NO ENTRY')"
+          echo "newuidmap:  $(command -v newuidmap || echo absent)"
+          echo "home mode:  $(stat -c '%a %n' /home/runner)   # why apt's _apt user could not read the pool"
+
+      # The mechanism. Already OK (71 MiB) in run 34169037757; kept so this file stands alone and
+      # so a regression in the runner image would show here.
+      - name: Stage 2 — minimal unshare bootstrap
+        run: |
+          if mmdebstrap --mode=unshare --variant=essential noble /tmp/rootfs-minimal > /tmp/s2.log 2>&1; then
+            echo "RESULT stage2: OK — $(du -sh /tmp/rootfs-minimal 2>/dev/null | cut -f1) unpacked"
+          else
+            echo "RESULT stage2: FAILED"
+            tail -40 /tmp/s2.log
+          fi
+
+      # The pinned appliance closure, offline, from a file:// repo over the pool — the shape
+      # mkiso.sh must have, since the build may not touch the network and fetch-inputs.sh already
+      # downloads this group as a closure complete on its own for exactly that reason.
+      #
+      # `[trusted=yes]` is not a weakening: these bytes were gated on build/inputs.sha256 before
+      # they got here, which is a stronger statement than a signature checked at this point would
+      # be. The pool has no Release file to sign in the first place.
+      - name: Stage 3 — pinned appliance closure, offline, unshare
+        run: |
+          pool=/srv/pool
+          sudo mkdir -p "$pool"
+          sudo cp build/inputs/deb/appliance/*.deb "$pool"/
+          sudo sh -c "cd $pool && dpkg-scanpackages -m . > Packages && gzip -kf Packages"
+          sudo chmod -R a+rX /srv
+          echo "pool: $(ls $pool/*.deb | wc -l) debs, $(du -sh $pool | cut -f1)"
+
+          . ./build/snapshot.env
+          pkgs=$(sed -n '/^# @group appliance/,/^# @group harness/p' build/apt-versions.txt | grep -v '^#' | grep . | cut -d= -f1 | paste -sd, -)
+          echo "packages: $pkgs"
+
+          set +e
+          mmdebstrap --mode=unshare --variant=custom --include="$pkgs" --aptopt='APT::Sandbox::User "root"' --aptopt='Acquire::AllowInsecureRepositories "true"' "$DEBIAN_SUITE" /tmp/rootfs.tar "deb [trusted=yes] file://$pool ./" > /tmp/s3.log 2>&1
+          rc=$?
+          set -e
+
+          if [ "$rc" -ne 0 ] || [ ! -s /tmp/rootfs.tar ]; then
+            echo "RESULT stage3: FAILED (rc=$rc)"
+            tail -60 /tmp/s3.log
+            exit 0
+          fi
+          echo "RESULT stage3: OK — the pinned closure installs in unshare mode"
+          ls -la /tmp/rootfs.tar
+
+      # The measurements M2 needs as numbers rather than estimates: the RAM-floor box, and the
+      # "ship the full console-data keymap set, measure what it costs" box.
+      #
+      # Read off the tar listing, so nothing here needs privilege either. The initramfs figure is
+      # the one this stage does NOT produce: turning the tree into `cpio | zstd` with correct
+      # ownership is still open, and a compressed-tar size is not a stand-in for it. Said rather
+      # than approximated.
+      - name: Stage 4 — measurements off the tar
+        run: |
+          if [ ! -s /tmp/rootfs.tar ]; then echo "SKIPPED — stage 3 produced no tar"; exit 0; fi
+          tar -tvf /tmp/rootfs.tar > /tmp/listing.txt
+          echo "members: $(wc -l < /tmp/listing.txt)"
+          python3 build/probe_measure.py /tmp/listing.txt
