@@ -34,7 +34,7 @@ structural is a defect, not a rounding error.
 `build/mkiso.sh`, running unprivileged. Five stages:
 
 1. **Rootfs.** `mmdebstrap --mode=unshare`, installing the `@group appliance` closure from
-   `build/inputs/deb/appliance/` through a `file://` repository. No network, no `--privileged`.
+   `build/inputs/deb/appliance/` through a `copy://` repository. No network, no `--privileged`.
 2. **Python layer.** `pip --no-index --target /opt/aobs-python` from `build/inputs/wheels/appliance/`,
    then the transient `pip` and everything it dragged in are purged.
 3. **Kernel.** `dpkg-deb -x` of `build/inputs/deb/kernel/` into a staging directory. `vmlinuz` goes
@@ -58,14 +58,29 @@ the mode is named after, so this was not a safe assumption.
 on, so `--privileged` is not an escape hatch available to this build. If unshare mode ever stops
 working, that is a finding to be written down here, not a licence.
 
-**Two constraints on stage 1 came out of that verification**, and both are about apt rather than
-about namespaces:
+**Five constraints on stage 1 came out of that verification.** None is about namespaces; every one
+is about apt or mmdebstrap, and each was found by a build failing rather than by reading:
 
 - The `.deb` pool must be **readable by the `_apt` user**. apt's `file://` method drops privileges
   before reading, so a pool under a `0700` home directory fails with `Permission denied` on every
   `Packages` file and never says why.
 - `APT::Sandbox::User "root"` is set, so apt does not drop to a user that cannot read the pool the
   build handed it.
+- **`copy://`, not `file://`.** A `file://` URI is resolved by apt running *inside* the chroot,
+  where the host's pool path does not exist: `package file ... not accessible from chroot
+  directory`. `copy://` reads on the host and copies in. mmdebstrap's alternative is a bind-mount
+  hook; `copy://` is the smaller mechanism.
+- **`--variant=essential` does not work against a flat local repo.** mmdebstrap reports
+  `no essential packages -- skipping` and installs none of them, while apt reads `Essential: yes`
+  from that same repo perfectly well — `dpkg-scanpackages` preserves the field for all 22 and apt's
+  `?essential` pattern matches there. The selection is therefore done with **`--variant=custom` and
+  `--include='?essential'`**, using apt's pattern rather than mmdebstrap's variant machinery.
+- **One `--include` per package.** mmdebstrap does not split a comma-joined list that contains a
+  pattern; it hands apt the whole string as a single package name.
+
+The last two are the reason a rootfs exists at all, and neither is documented anywhere this project
+would have thought to look. They were found by running the build locally with the full log visible,
+after several CI rounds spent reading a truncated tail.
 
 ### Why the appliance closure is resolved against an empty root
 
@@ -181,6 +196,16 @@ hardest to test, and everything it does is a `mount` or an `echo` into sysfs.
 **There is no getty, no VT with a login, and no path from the running app to a prompt.** If the app
 exits, the kernel panics on init death rather than dropping to a shell.
 
+**That claim is about the binary, and the binary arrives whether or not it is wanted.** `util-linux`
+ships `/usr/sbin/agetty`, and `util-linux` is a pinned appliance package because PID 1 needs `mount`.
+Measured in the built rootfs: `agetty` present, five matching paths. Nothing spawns it — there is no
+init system — so the *behaviour* was already as described, but "there is no getty" was false of the
+tree as built.
+
+So the purge stage deletes it, and `build/verify.py` asserts it is gone. Narrowing the claim to
+"no getty *runs*" was the alternative and was rejected: "the binary is not in the image" is something
+a stranger can check with `ls`, and "nothing can spawn one" is an argument they have to follow.
+
 **The module claims are *absence*, and this is where Debian's kernel changed the strength.** The
 Alpine predecessor built `CONFIG_MODULES=n`, `CONFIG_NET=n`, `CONFIG_MAGIC_SYSRQ=n` and exactly two
 built-in USB class drivers, and every one of those was checkable by reading one file in the repo.
@@ -200,6 +225,24 @@ the image is not the same as a `.ko` that cannot be loaded. The sysctl is irreve
 costs one line in PID 1, so it closes that gap for the life of the session. A `modprobe` blacklist
 exists for the same reason and with the same standing. **The claim is that the module is not in the
 image**; these two make it expensive to be wrong about, and neither is evidence for it.
+
+### The purge stage
+
+Three things are installed because Debian insists, used, and then removed before the initramfs is
+packed. `build/verify.py` fails the build if any of them survives:
+
+| removed | why it was there | why it goes |
+|---|---|---|
+| `pip` (and `python3-wheel`, `python3-packaging` with it) | installs the wheel layer | removing pip alone leaves the other two, and a `python3-packaging` in the image is a harness package in the rootfs |
+| `dpkg` and its database | `Essential: yes`; a Debian rootfs built the normal way always has one | it is a package manager, and the published claim says none is in the image |
+| `agetty` | shipped by `util-linux`, which PID 1 needs for `mount` | the containment claim above |
+
+`apt` is **not** in this table because it is not in the appliance closure at all — measured: absent
+from the built rootfs. It is a harness package and the group split already keeps it out.
+
+The shape is the same in all three cases and it is the one M2 already specified for `pip`: install,
+use, remove, assert absence. The alternative each time was to narrow a published claim to fit a
+build detail, and that is the trade this project does not make.
 
 **Busybox `sh` is present in the image, and that is not a hole worth closing.** "No shell on the
 appliance" would be a claim that protects nobody — Python is in the image and can `os.execv`
@@ -343,16 +386,45 @@ Each term, and which are mechanism and which are headroom:
 **The measured inputs are published against the run they came from** — unpacked rootfs, initramfs,
 kernel, ISO — because a floor derived from an unpublished number is an assertion wearing a formula.
 
-> **Not yet measured.** The appliance closure is 88 packages and 41 MiB of compressed `.deb`, and the
-> kernel package is a further 107.9 MiB compressed. The *unpacked* rootfs, the packed initramfs and
-> the ISO have not been measured, so no floor is stated here yet. The first `mkiso.sh` run fills this
-> in with numbers and the run that produced them.
+**Measured**, run [34173912095](https://github.com/allisson/aobs/actions/runs/34173912095) on
+`ubuntu-24.04`, `mmdebstrap --mode=unshare` against the 88-package pool, read off the tar listing:
+
+| | |
+|---|---|
+| **unpacked rootfs** | **132.6 MiB** (6874 members) |
+| `usr/share/locale` | 27.3 MiB |
+| `usr/lib/python3` | 24.4 MiB |
+| `usr/share/doc` | 7.0 MiB |
+| `usr/share/keymaps` | 0.4 MiB, 216 maps |
+| appliance closure on disk | 88 packages, 41 MiB of compressed `.deb` |
+| kernel package | 107.9 MiB compressed, unpacked separately |
+
+`floor = next_power_of_two(2 × 132.6 + 64 + 128) = next_power_of_two(457.2)` = **512 MiB**.
+
+The Alpine predecessor asserted 512 MiB from a prose estimate and happened to be right. This is the
+same number arrived at from a tree somebody built, which is the difference the roadmap asks for.
+
+**Three caveats on 132.6 MiB, and each moves it down, not up.** It is measured before the purge
+stage removes `dpkg`, `apt` and `agetty`; before `usr/share/doc` is dropped; and before
+`usr/share/locale` is dropped. The floor is therefore an upper bound, and it is stated from the
+upper bound deliberately — a floor that assumes pruning nobody has done yet is a floor that fails
+the first time a prune is skipped.
+
+> Still not measured: the packed initramfs and the ISO. Those need `cpio | zstd` and `xorriso`,
+> neither of which exists yet, and the compression ratio is not something to guess at.
 
 **No pruning of the Python stdlib.** Stripping it buys little against the risk of a missing-module
 traceback on an appliance with no recovery path.
 
-**The full `console-data` set costs real resident RAM**, and the number goes here once measured. It
-is paid deliberately; see *Keyboard layout*.
+**`usr/share/locale` is the largest prunable item in the tree at 27.3 MiB** — larger than the whole
+Python stdlib's share — and nothing in this appliance reads a locale: the console is fixed to UTF-8
+and every string it displays is its own. Dropping it is the one size lever worth taking, and unlike
+the stdlib it carries no risk of a missing-import traceback.
+
+**The full `console-data` set costs 0.4 MiB, and the worry was unfounded.** 216 keymaps, gzipped.
+This document previously hedged about "a real cost in resident RAM" and `docs/roadmap.md` reserved
+the right to revisit the decision "if the measured RAM cost turns out to be absurd". It is 0.4 MiB
+against a 512 MiB floor. The question is closed and the keymap picker keeps every map.
 
 ## Failure
 
@@ -398,7 +470,8 @@ The rootfs assertions, each one a published claim checked before an image exists
 | assertion | why it exists |
 |---|---|
 | no harness package in the rootfs | the group split answers "may this survive into the shipped rootfs?" and is worthless unchecked |
-| no package manager | `pip` is installed transiently; removing it alone leaves `python3-wheel` and `python3-packaging` behind, and a `python3-packaging` in the image is a harness package in the rootfs |
+| no package manager: no `pip`, no `dpkg`, no `apt`, and no dpkg database | all three are installed or arrive because Debian insists, and all are removed by the purge stage. Removing `pip` alone leaves `python3-wheel` and `python3-packaging` behind, and a `python3-packaging` in the image is a harness package in the rootfs |
+| no `agetty` | `util-linux` ships it and PID 1 needs `util-linux` for `mount`. Measured present in the built rootfs, so this assertion is the only thing that makes the containment claim true |
 | no init system: no `systemd` binary, no `udevd`, no getty, no `login` | the appliance's first published claim. The closure reaches it through `linux-image-amd64` if the kernel is ever resolved rather than extracted |
 | `/bin/sh` and `python3` present | the predecessor's first ISO had neither, and PID 1 could not have run a line |
 | no `kernel/net`, no `kernel/drivers/net` | the network claim, at *absence* strength |
