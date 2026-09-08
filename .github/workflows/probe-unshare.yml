@@ -161,11 +161,22 @@ jobs:
           # The kernel is EXCLUDED, exactly as build/fetch-inputs.sh excludes it. #6: resolving
           # linux-image-amd64 drags initramfs-tools -> udev -> systemd into the rootfs, and the
           # kernel is unpacked with dpkg-deb -x rather than installed. It is also not in this pool.
-          pkgs=$(sed -n '/^# @group appliance/,/^# @group harness/p' build/apt-versions.txt | grep -v '^#' | grep . | grep -v '^linux-image' | cut -d= -f1 | paste -sd, -)
-          echo "packages: $pkgs"
+          # ONE --include PER PACKAGE, and `?essential` as its own flag. mmdebstrap does not split
+          # a comma-joined list that contains a pattern: run 34173406058 handed apt the entire
+          # string as a single package name and got `Unable to locate package ?essential,dash,...`.
+          #
+          # `--variant=essential` does not work here either, and that was the run before: against a
+          # flat local repo mmdebstrap reports `no essential packages -- skipping` and installs
+          # nothing, even though apt itself reads `Essential: yes` from that same repo perfectly
+          # well — `dpkg-scanpackages` preserves the field for all 22, and `?essential` matches 69
+          # packages there. So the selection is done with apt's pattern rather than mmdebstrap's
+          # variant machinery.
+          pkgs=$(sed -n '/^# @group appliance/,/^# @group harness/p' build/apt-versions.txt | grep -v '^#' | grep . | grep -v '^linux-image' | cut -d= -f1)
+          inc=$(for p in $pkgs; do printf -- "--include=%s " "$p"; done)
+          echo "packages: $(echo $pkgs | tr ' ' ',')"
 
           set +e
-          mmdebstrap --mode=unshare --variant=essential --include="$pkgs" --aptopt='APT::Sandbox::User "root"' --aptopt='Acquire::AllowInsecureRepositories "true"' "$DEBIAN_SUITE" /tmp/rootfs.tar "deb [trusted=yes] copy://$pool ./" > /tmp/s3.log 2>&1
+          mmdebstrap --mode=unshare --variant=custom --include='?essential' $inc --aptopt='APT::Sandbox::User "root"' --aptopt='Acquire::AllowInsecureRepositories "true"' "$DEBIAN_SUITE" /tmp/rootfs.tar "deb [trusted=yes] copy://$pool ./" > /tmp/s3.log 2>&1
           rc=$?
           set -e
 
