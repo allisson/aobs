@@ -12,9 +12,14 @@ and a process confined by it cannot write its own `uid_map`. `mmdebstrap` is una
 because it is not a profiled binary and because it shells out to setuid `newuidmap` over the whole
 `/etc/subuid` range.
 
-So the namespace is created here instead, from a process AppArmor has no opinion about. It is the
-same three writes `unshare -Ur` performs — `setgroups deny`, then a single-uid `uid_map` and
-`gid_map` — and nothing here needs any capability the caller did not already have.
+**The cause is not the `unshare` binary**, which was this file's first theory and was wrong. With
+`kernel.apparmor_restrict_unprivileged_userns=1` the namespace is created and then has no
+capabilities in it, so the map write is refused whoever makes it — writing `/proc/self/uid_map`
+from Python fails the same way, one step earlier and with `Permission denied` on `setgroups`.
+
+So the maps are written by `newuidmap` and `newgidmap`, which are setuid-root and can write a map
+for a process that cannot write its own. That is exactly what mmdebstrap does in stage 1, and it is
+why stage 1 works on a runner where `unshare -Ur` does not.
 
 The device nodes are bound one at a time over empty regular files. `mount --bind /dev` is refused
 inside a user namespace with `wrong fs type`, because the whole directory is a mount with locked
@@ -29,6 +34,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import subprocess
 import sys
 
 CLONE_NEWNS = 0x00020000
@@ -45,22 +51,55 @@ def _libc() -> ctypes.CDLL:
     return ctypes.CDLL(None, use_errno=True)
 
 
-def enter_namespace() -> None:
-    # `libc.unshare` rather than `os.unshare`, which is Linux-only and 3.12+. This file already
-    # calls `mount(2)` through ctypes and there is no reason for two mechanisms.
-    uid, gid = os.getuid(), os.getgid()
-    if _libc().unshare(CLONE_NEWUSER | CLONE_NEWNS) != 0:
+def _check(result: int, what: str) -> None:
+    if result != 0:
         error = ctypes.get_errno()
-        raise OSError(error, f"could not create a user namespace: {os.strerror(error)}")
-    # `setgroups deny` first, and it is not optional: without it the kernel refuses the `gid_map`
-    # write, because a process that kept its supplementary groups could otherwise drop a group by
-    # entering a namespace.
-    with open("/proc/self/setgroups", "w") as handle:
-        handle.write("deny")
-    with open("/proc/self/uid_map", "w") as handle:
-        handle.write(f"0 {uid} 1")
-    with open("/proc/self/gid_map", "w") as handle:
-        handle.write(f"0 {gid} 1")
+        raise OSError(error, f"{what}: {os.strerror(error)}")
+
+
+def fork_into_namespace() -> int:
+    """Fork a child in a new user namespace, map it with `newuidmap`, and return its pid.
+
+    **The maps are written by `newuidmap`, not by this process, and that is the whole point.**
+    Writing `/proc/self/uid_map` straight after `unshare(2)` is the documented way and it does not
+    work here: with `kernel.apparmor_restrict_unprivileged_userns=1` the namespace is created and
+    then has no capabilities in it, so the write is refused whoever makes it. Measured on
+    `ubuntu-24.04`, twice and with two different errors — `Operation not permitted` on `uid_map`
+    from `unshare -Ur`, and `Permission denied` on `setgroups` from this file's first version,
+    which is what finally identified the cause.
+
+    `newuidmap` and `newgidmap` are setuid-root with `CAP_SETUID` and `CAP_SETGID`, so they can
+    write a map for a process that cannot write its own. Mapping namespace uid 0 to the caller's
+    own uid needs no `/etc/subuid` entry, and one uid is all this needs — nothing in the check
+    reads a file owned by anybody else. This is the same mechanism mmdebstrap uses in stage 1,
+    which is why that stage works on a runner where `unshare -Ur` does not.
+
+    Two pipes rather than one: the child cannot proceed until the maps exist, and the parent cannot
+    write them until the namespace does.
+    """
+    created_read, created_write = os.pipe()
+    mapped_read, mapped_write = os.pipe()
+
+    pid = os.fork()
+    if pid == 0:
+        os.close(created_read)
+        os.close(mapped_write)
+        _check(_libc().unshare(CLONE_NEWUSER | CLONE_NEWNS), "could not create a user namespace")
+        os.write(created_write, b"1")
+        if os.read(mapped_read, 1) != b"1":
+            os._exit(70)
+        return 0
+
+    os.close(created_write)
+    os.close(mapped_read)
+    if os.read(created_read, 1) != b"1":
+        raise OSError("the child never entered a user namespace")
+    uid, gid = os.getuid(), os.getgid()
+    for tool, own in (("newuidmap", uid), ("newgidmap", gid)):
+        if subprocess.run([tool, str(pid), "0", str(own), "1"], check=False).returncode != 0:
+            raise OSError(f"{tool} could not map namespace id 0 to {own}")
+    os.write(mapped_write, b"1")
+    return pid
 
 
 def bind_devices(rootfs: str) -> None:
@@ -72,9 +111,10 @@ def bind_devices(rootfs: str) -> None:
         # `build/mkinitramfs.py` refuses to pack a tree that still has one.
         with open(target, "wb"):
             pass
-        if libc.mount(f"/dev/{node}".encode(), target.encode(), None, MS_BIND, None) != 0:
-            error = ctypes.get_errno()
-            raise OSError(error, f"could not bind /dev/{node}: {os.strerror(error)}")
+        _check(
+            libc.mount(f"/dev/{node}".encode(), target.encode(), None, MS_BIND, None),
+            f"could not bind /dev/{node}",
+        )
 
 
 def main(argv: list[str]) -> int:
@@ -83,11 +123,19 @@ def main(argv: list[str]) -> int:
         return 2
     rootfs, command = argv[0], argv[1:]
 
-    enter_namespace()
+    pid = fork_into_namespace()
+    if pid != 0:
+        # The parent's only remaining job is to be the exit status. A signalled child is reported
+        # as a non-zero status rather than as a clean run, because the whole reason this exists is
+        # that a quiet pass here would be a pure-Python signer shipping unremarked.
+        _, status = os.waitpid(pid, 0)
+        return os.waitstatus_to_exitcode(status) if os.WIFEXITED(status) else 128 + os.WTERMSIG(status)
+
     bind_devices(rootfs)
     os.chroot(rootfs)
     os.chdir("/")
     os.execv(command[0], command)
+    return 127
 
 
 if __name__ == "__main__":

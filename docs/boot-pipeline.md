@@ -104,12 +104,16 @@ at.** Both are recorded because both looked like they would need root and neithe
   what `docs/reproducible-build.md` will want at M4 arrived at for free.
 
 One step still needs a namespace: stage 3d chroots into the image to make it sign. A single-uid map
-is enough there, because everything in the tree is already owned by the caller — **but not through
-the `unshare` binary.** Ubuntu 24.04 profiles `/usr/bin/unshare` under AppArmor as a user-namespace
-gadget, and a process it confines cannot write its own `uid_map`: measured,
-`unshare: write failed /proc/self/uid_map: Operation not permitted`, *after* the namespace had been
-created. `build/unshare_exec.py` performs the same three writes from a process AppArmor has no
-opinion about. mmdebstrap is unaffected in stage 1 for the same reason — it is not profiled either.
+is enough there, because everything in the tree is already owned by the caller — **but nothing on
+this runner can write that map for itself.** With `kernel.apparmor_restrict_unprivileged_userns=1`
+the namespace is created and then has no capabilities in it, so the write is refused whoever makes
+it: measured twice, `Operation not permitted` on `uid_map` from `unshare -Ur`, and `Permission
+denied` on `setgroups` from a Python version of the same three writes.
+
+`build/unshare_exec.py` therefore forks and has **`newuidmap`** map the child, which is setuid-root
+and can write a map for a process that cannot write its own. That is the same mechanism mmdebstrap
+uses in stage 1 — and it is the answer to why stage 1 works on a host where `unshare -Ur` does not,
+a question this document had previously answered wrongly.
 
 ### Why the appliance closure is resolved against an empty root
 
