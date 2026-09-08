@@ -1,0 +1,153 @@
+#!/bin/sh
+# PID 1, and the whole of it. `docs/boot-pipeline.md` fixes what this does and in what order;
+# this file is the only place it happens.
+#
+# THERE IS NO `set -e`, and that is the single most important line in this script. An init that
+# exits is a kernel panic the user cannot read past — the message scrolls away behind
+# `Kernel panic - not syncing: Attempted to kill init` and the machine hangs on `panic=0` with
+# nothing on screen that says what went wrong. So every step checks its own result and every
+# failure lands in `fail()`, which names it on the console and holds it there forever.
+#
+# It is a POSIX shell script and not Python deliberately. PID 1 is the one process that cannot be
+# restarted and is the hardest thing in this repository to test, and everything it does is a
+# `mount` or an `echo` into sysfs. The Python that follows is `exec`d, so this script is not a
+# parent process babysitting the app: it becomes the app.
+#
+# Two placeholders below are substituted by `build/mkiso.sh` from the measured rootfs, and
+# `build/verify.py` fails the build if either survives into the image unsubstituted. The floor is
+# derived rather than written down so that it and the image cannot drift apart.
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+#: The unrounded requirement, in MiB: 2 x unpacked rootfs + 64 (Argon2id) + 128 (headroom).
+#: This is what the check compares against, because `MemTotal` on a machine with N MiB installed
+#: is always somewhat less than N — firmware reserves some and never gives it back.
+RAM_REQUIRED_MIB=@RAM_REQUIRED_MIB@
+#: The published floor: the requirement rounded up to a power of two. This is what the user is
+#: told, because it is a number they can check against a machine they own, and it is never what
+#: the comparison uses. `docs/boot-pipeline.md` states both and why they differ.
+RAM_FLOOR_MIB=@RAM_FLOOR_MIB@
+
+# --- Failure -------------------------------------------------------------------------------------
+#
+# The console may be the only output this machine has, and there is nothing to fall back to and
+# nowhere to log. So: say what failed, say it in one line a person can act on, and stop.
+fail() {
+    echo "" > /dev/console 2>/dev/null
+    echo "aobs: FAILED TO START" > /dev/console 2>/dev/null
+    echo "aobs: $*" > /dev/console 2>/dev/null
+    echo "aobs: power off with the machine's own switch; nothing was written to any disk." \
+        > /dev/console 2>/dev/null
+    # Not `exit`. Not `reboot`. Holding the message is the only useful thing left to do, and a
+    # reboot loop would flash it past the one person who needs to read it.
+    while true; do
+        sleep 3600
+    done
+}
+
+step() {
+    # Run a command, and fail with the step's own name if it does not succeed. Wrapping this is
+    # worth one function because the alternative is `|| fail "..."` on thirty lines, and the one
+    # that gets forgotten is a silent step.
+    _what=$1
+    shift
+    "$@" || fail "$_what"
+}
+
+# --- 1. The filesystems ---------------------------------------------------------------------------
+#
+# tmpfs and pseudo-filesystems only. Nothing here touches a block device, and there is no block
+# device driver in the image to touch one with.
+step "could not mount /proc"    mount -t proc     proc     /proc
+step "could not mount /sys"     mount -t sysfs    sysfs    /sys
+step "could not mount /dev"     mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts /dev/shm
+step "could not mount /dev/pts" mount -t devpts   devpts   /dev/pts
+step "could not mount /dev/shm" mount -t tmpfs    tmpfs    /dev/shm
+step "could not mount /run"     mount -t tmpfs    tmpfs    /run
+step "could not mount /tmp"     mount -t tmpfs    tmpfs    /tmp
+
+# --- 2. The console -------------------------------------------------------------------------------
+#
+# UTF-8 first, then the default keymap, and both before anything draws. The keymap picker is the
+# first screen and the user has to be able to type in it; `docs/boot-pipeline.md` explains why the
+# picker exists at all, and `aobs/adapters/real/keymap.py` documents that accepting the default is
+# a genuine no-op precisely because this line already ran.
+step "could not put the console in UTF-8" kbd_mode -u
+printf '\033%%G' > /dev/console 2>/dev/null
+step "could not load the default console keymap" loadkeys @DEFAULT_KEYMAP@
+
+# --- 3. The drivers we want, and only those ---------------------------------------------------------
+#
+# NOTHING ELSE LOADS A MODULE. There is no udev and no init system, so the alternative to loading
+# them here is the kernel's own usermode helper firing on a device match — which would run at an
+# unpredictable moment, including AFTER step 4 has closed the door on new devices. Loading them
+# here makes "our own devices have enumerated" a point in time this script can name.
+#
+# A module that is not in the image cannot be loaded and a missing one is not a reason to refuse
+# to boot: a machine with no `i915` is a machine with an AMD card. So this step reports what it
+# could not load and continues, which is the one place in this script where that is right.
+for module in $(cat /etc/aobs-modules 2>/dev/null); do
+    modprobe "$module" 2>/dev/null || echo "aobs: no $module on this machine" > /dev/console 2>/dev/null
+done
+# Give the USB bus a moment to enumerate what those drivers just claimed. This is a settle, not a
+# poll, because there is nothing to poll for: a machine with no camera is a normal session.
+sleep 2
+
+# --- 4. Close the USB bus ---------------------------------------------------------------------------
+#
+# `authorized_default=0` means the kernel will not bind a driver to anything plugged in from here
+# on. Our own keyboard and camera enumerated in step 3 and keep working; a device arriving later
+# gets a power rail and nothing else.
+#
+# After enumeration and before the first secret, which is what makes the placement load-bearing
+# rather than tidy: the first screen is the keymap picker, and no key the user presses before this
+# line is part of a mnemonic or a passphrase.
+_hubs=0
+for hub in /sys/bus/usb/devices/usb*/authorized_default; do
+    [ -w "$hub" ] || continue
+    echo 0 > "$hub" || fail "could not set authorized_default=0 on $hub"
+    _hubs=$((_hubs + 1))
+done
+# Zero hubs is not a failure. It is a machine whose USB controller driver is not in the image, or
+# one with no USB at all, and in both cases there is no bus left open to close.
+echo "aobs: usb: $_hubs root hub(s) closed to new devices" > /dev/console 2>/dev/null
+
+# --- 5. Weld the module door shut -------------------------------------------------------------------
+#
+# One-way for the life of the boot. `docs/boot-pipeline.md` is explicit that this is a SECOND LINE
+# and is never the claim: the claim is that the module is not in the image. Debian's kernel is
+# built `CONFIG_MODULES=y`, so without this a `.ko` that is not in the image is not the same thing
+# as a `.ko` that cannot be loaded, and this line costs nothing to close that gap.
+step "could not set kernel.modules_disabled=1" sysctl -w -q kernel.modules_disabled=1
+
+# --- 6. The RAM floor ---------------------------------------------------------------------------------
+#
+# The whole rootfs is resident in tmpfs and the compressed initramfs is resident beside it, so a
+# machine below the floor does not fail at boot: it fails later, part-way through a session, with
+# the OOM killer taking whichever process it likes. Refusing up front is the only version of that
+# a user can do anything about.
+_total_kib=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null)
+case "$_total_kib" in
+    ''|*[!0-9]*) fail "could not read MemTotal from /proc/meminfo" ;;
+esac
+_total_mib=$((_total_kib / 1024))
+if [ "$_total_mib" -lt "$RAM_REQUIRED_MIB" ]; then
+    fail "this machine has ${_total_mib} MiB of usable RAM; aobs needs a machine with ${RAM_FLOOR_MIB} MiB"
+fi
+
+# --- 7. Become the application ---------------------------------------------------------------------
+#
+# `exec`, so the app is PID 1 for the session and this script is not a parent that could outlive
+# it. If Python cannot start, the fall-through below is reached and says so; if it starts and then
+# dies, the kernel panics on init death rather than dropping anyone to a prompt, which is the
+# containment claim `docs/boot-pipeline.md` makes.
+PYTHONPATH=/opt/aobs:/opt/aobs-python
+PYTHONDONTWRITEBYTECODE=1
+PYTHONHASHSEED=random
+export PYTHONPATH PYTHONDONTWRITEBYTECODE PYTHONHASHSEED
+
+exec python3 -m aobs
+
+fail "python3 -m aobs could not be started"

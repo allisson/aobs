@@ -156,3 +156,49 @@ jobs:
       # copy baked into the image.
       - name: Run the suite
         run: docker run --rm aobs-test python3 -m pytest -rs
+
+  image:
+    name: the image builds, unprivileged
+    runs-on: ubuntu-24.04
+    # `ubuntu-24.04` and not `ubuntu-latest`, deliberately. This job's whole first claim is that
+    # `mmdebstrap --mode=unshare` works with no `--privileged`, and 24.04 is the release that ships
+    # `kernel.apparmor_restrict_unprivileged_userns=1` — the setting that denies exactly the
+    # `unshare(CLONE_NEWUSER)` the mode is named after. Pinning the runner keeps the claim attached
+    # to the distribution it was measured on rather than to whatever `latest` becomes.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache build/inputs
+        id: inputs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/inputs
+          key: inputs-${{ hashFiles('build/inputs.sha256', 'build/apt-versions.txt', 'build/requirements.appliance.txt', 'build/requirements.test.txt', 'build/snapshot.env') }}
+
+      - name: Fetch inputs
+        if: steps.inputs.outputs.cache-hit != 'true'
+        run: sh build/fetch-inputs.sh
+
+      # The build tools, and the one place in this repository where a version is not pinned. They
+      # are the host's, not the image's: every byte that lands in the ISO comes from
+      # `build/inputs/`, and `sha256sum -c` in stage 0 is what says so. What a differently-versioned
+      # `mmdebstrap` or `xorriso` could still change is the ARRANGEMENT of those bytes, which is a
+      # reproducibility question rather than a contents one — `docs/reproducible-build.md` at M4 is
+      # where it gets answered, and it is written down here rather than left to be discovered.
+      - name: The build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            mmdebstrap uidmap dpkg-dev kmod zstd xorriso mtools \
+            grub-efi-amd64-bin isolinux syslinux-common binutils
+          mmdebstrap --version
+
+      # No `sudo` on this line and no `--privileged` anywhere in the job. That is the claim.
+      - name: Build the ISO
+        run: sh build/mkiso.sh
+
+      - name: The measurements, as measurements
+        run: |
+          ls -l out/bitcoin-signer-amd64.iso
+          xorriso -indev out/bitcoin-signer-amd64.iso -report_el_torito plain 2>&1 | grep 'El Torito'

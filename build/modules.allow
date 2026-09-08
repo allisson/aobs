@@ -1,0 +1,56 @@
+# The module allowlist: the only drivers `build/mkiso.sh` keeps, and the only ones `build/init`
+# loads. Everything else in Debian's 4229-module tree is deleted and `modules.dep` is regenerated
+# from what is left, so a module that is not named here or pulled in as a dependency of one is not
+# in the image at all.
+#
+# `docs/boot-pipeline.md` states the claim this file makes true, and states it at ABSENCE strength:
+# the Alpine predecessor built `CONFIG_MODULES=n` and the mechanism did not exist; Debian's stock
+# kernel has every one of these as `m` and this project does not control that config.
+#
+# ONE NAME PER LINE, the module name and not the filename — `hid_generic`, not `hid-generic.ko.xz`.
+# `depmod` resolves dependencies, so a module needed only because something here needs it does not
+# belong in this file: `usbcore`, `usb_common`, `videodev` and the input core all arrive that way.
+#
+# ---------------------------------------------------------------------------------------------
+#
+# THERE IS NO GRAPHICS DRIVER HERE, and that is a change from what this document used to say.
+#
+# `docs/boot-pipeline.md` named `i915`, `amdgpu`, `nouveau` and `simpledrm`. Measured against the
+# pinned kernel's own config, three facts moved that decision:
+#
+#   * `CONFIG_DRM_SIMPLEDRM is not set`. The module does not exist in Debian's kernel, so a quarter
+#     of the old allowlist named a file that was never going to be found.
+#   * `CONFIG_FB_EFI=y` and `CONFIG_FB_VESA=y`. **Both firmware framebuffers are built in**, so the
+#     console mechanism the document actually names — fbcon over a firmware framebuffer — needs no
+#     module on either firmware path. UEFI gets `efifb` at the GOP's resolution; BIOS gets `vesafb`
+#     at the `vga=791` mode.
+#   * The three DRM drivers need firmware blobs this image does not ship. Loading one would take
+#     the framebuffer away from a driver that is working and hand it to one that may not come up —
+#     trading a console that is guaranteed for a console that is faster, on an appliance that draws
+#     QR codes and text.
+#
+# They also cost about 70 MiB of the 98 MiB module tree, which is the least interesting of the
+# three reasons and the only one that would have been reversible.
+
+# --- USB host controllers -----------------------------------------------------------------------
+#
+# Without one of these there is no USB bus at all: no keyboard, no camera, and nothing for
+# `authorized_default=0` to close. They are not dependencies of `usbhid` — a host controller and a
+# device driver are unrelated in the module graph — so they have to be named.
+xhci_pci
+ehci_pci
+ohci_pci
+uhci_hcd
+
+# --- Human interface devices ----------------------------------------------------------------------
+#
+# `usbhid` is the transport and `hid_generic` is the driver that actually binds a keyboard. Naming
+# only the first is the mistake that produces a machine with an enumerated keyboard and no keys.
+usbhid
+hid_generic
+
+# --- The camera ---------------------------------------------------------------------------------
+#
+# UVC, and nothing else. `aobs/adapters/real/frames.py` reads raw frames from `/dev/video*` through
+# `ioctl`; `videodev` arrives as a dependency and is what creates that node.
+uvcvideo
