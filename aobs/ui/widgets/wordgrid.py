@@ -187,6 +187,30 @@ class WordGrid(Vertical):
         self._words[self._cursor] = word
         self._advance()
 
+    def settle(self) -> bool:
+        """Resolve whatever the current slot is being typed into. `False` if it is not a word.
+
+        The grid has always done this when the cursor *left* a slot — `move()` below — and `F10`
+        was the one path that did not, which made a full grid refuse to be read: a slot displays
+        the word its buffer resolves to, so a user who typed the last word and pressed `F10` saw
+        every slot filled and a message counting one of them as empty. `docs/seed-entry.md`
+        §*`F10` settles the slot it is standing on*.
+
+        Not the auto-commit #41 rejected. That rule is dangerous because it has to guess where the
+        next word begins; here there is no next word to guess about.
+        """
+        if not self._typed:
+            return True
+        word = self.vocabulary.resolve(self._typed)
+        if word is None:
+            self._message = self.vocabulary.rejected
+            self._repaint()
+            return False
+        self._words[self._cursor] = word
+        self._typed = ""
+        self._repaint()
+        return True
+
     def backspace(self) -> None:
         self._message = ""
         if self._typed:
@@ -206,12 +230,9 @@ class WordGrid(Vertical):
         Free navigation is the point of the grid: a checksum failure names no word, so the user
         must be able to reach slot 17 alone.
         """
-        if self._typed:
-            word = self.vocabulary.resolve(self._typed)
-            if word is not None:
-                self._words[self._cursor] = word
-            else:
-                self._message = self.vocabulary.rejected
+        # A buffer that resolves is kept, and one that does not leaves its rejection behind and is
+        # dropped by the move. `settle()` is the same rule `F10` uses, in one place.
+        self.settle()
         self._cursor = max(0, min(len(self._words) - 1, self._cursor + delta))
         self._typed = ""
         self._repaint()
