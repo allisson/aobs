@@ -129,6 +129,18 @@ jobs:
       # does not exist. `copy://` reads the file on the host and copies it in. The alternative
       # mmdebstrap offers is `--hook-dir=.../file-mirror-automount`, which bind-mounts instead;
       # `copy://` is the smaller mechanism and needs no hook.
+      # `--variant=essential`, NOT `custom`. `custom` means "install only what I name", so the
+      # Essential set sat in the pool and nothing asked for it: run 34173195638 had all 88 debs
+      # available, resolved the same 57, never unpacked `dpkg`, and died with
+      # `chroot: failed to run command 'dpkg'`. Putting the packages in the pool (#7) and selecting
+      # them are two different things.
+      #
+      # This brings `dpkg` into the rootfs, and `docs/boot-pipeline.md` claims no package manager is
+      # in the image. `dpkg` is `Essential: yes` and a Debian rootfs built the normal way always has
+      # one. The decision is that `mkiso.sh` removes `dpkg`, `apt` and the dpkg database in a late
+      # stage before `cpio` — the same shape as the transient `pip`: install, use, remove, assert
+      # absence. The claim stays as published rather than being narrowed to fit a build detail.
+      # This probe does not do that removal; it measures the tree as built, which is the upper bound.
       - name: Stage 3 — pinned appliance closure, offline, unshare
         run: |
           pool=/srv/pool
@@ -153,7 +165,7 @@ jobs:
           echo "packages: $pkgs"
 
           set +e
-          mmdebstrap --mode=unshare --variant=custom --include="$pkgs" --aptopt='APT::Sandbox::User "root"' --aptopt='Acquire::AllowInsecureRepositories "true"' "$DEBIAN_SUITE" /tmp/rootfs.tar "deb [trusted=yes] copy://$pool ./" > /tmp/s3.log 2>&1
+          mmdebstrap --mode=unshare --variant=essential --include="$pkgs" --aptopt='APT::Sandbox::User "root"' --aptopt='Acquire::AllowInsecureRepositories "true"' "$DEBIAN_SUITE" /tmp/rootfs.tar "deb [trusted=yes] copy://$pool ./" > /tmp/s3.log 2>&1
           rc=$?
           set -e
 
