@@ -46,7 +46,6 @@ class AddressListScreen(Screen):
     AddressListScreen #address-header { text-style: bold; }
     AddressListScreen #addresses { height: 1fr; margin: 1 0; }
     AddressListScreen #address-jump { margin-top: 1; }
-    AddressListScreen #address-keys { margin-top: 1; }
     """
 
     def __init__(self, script_type: ScriptType = ScriptType.P2WPKH) -> None:
@@ -85,7 +84,7 @@ class AddressListScreen(Screen):
                     yield Static(addresstext.list_row(entry), id=f"address-{row}")
             yield Static(addresstext.list_position(self.start, len(listed)), id="address-position")
             yield Static(addresstext.jump_prompt(self._digits), id="address-jump")
-            yield Static(addresstext.LIST_KEYS, id="address-keys")
+            yield Static(addresstext.LIST_KEYS, id="address-keys", classes="keys")
 
     # --- paging ------------------------------------------------------------------------------
 

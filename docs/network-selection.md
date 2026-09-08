@@ -52,7 +52,7 @@ keypress:
 
 | where | what it says |
 |---|---|
-| The home screen header | `aobs · mainnet` |
+| The home screen header | `mainnet`, at the right-hand end of the title row. It read `aobs · mainnet` as one line until `docs/console-appearance.md` made the header a row — the name at the left edge, what this session is at the right. Same screen, same keypresses, and the build label sits beside it |
 | The path's own line, beside the question | `Choose the network · mainnet` |
 | The fingerprint screen | `network mainnet · fixed for the rest of this session` |
 

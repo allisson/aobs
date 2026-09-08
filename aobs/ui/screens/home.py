@@ -34,10 +34,11 @@ from dataclasses import dataclass
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Static
 
+from aobs.ui.geometry import MAX_COLUMNS
 from aobs.ui.scanning import ScanTarget
 
 
@@ -112,6 +113,20 @@ NETWORK_FIXED = "The network is fixed for the rest of this session."
 #: it, which is the same reason the picker prints none either.
 KEYS = "up/down choose  ·  F10 open this path  ·  F12 power off"
 
+#: What the list under the rule is. A label rather than a heading, and uppercase because the
+#: console has one font at one weight, so case is the only typographic register there is
+#: (`docs/console-appearance.md`). It says *can do* deliberately: half these rows are on the screen
+#: precisely because they cannot be walked yet, and the sentence under them says why.
+SECTION = "WHAT YOU CAN DO"
+
+#: The selection marker, and the one glyph on this screen that `docs/console-appearance.md`'s
+#: budget flags: `►` is in the built-in font's repertoire, but at a position the console reaches
+#: through its unicode map rather than directly. `aobs/ui/addresstext.py` already prints `↑` and
+#: `↓` from that same range, so this is not a new risk — it is the same one, now on the first
+#: screen of the session, where the next boot answers it. If it draws as a blank or a box, this
+#: constant is the whole of the revert.
+MARKER = "►"
+
 
 def label(path: Path, app: object) -> str:
     """The line for a path: its name, and for a path that carries a setting, the setting's value.
@@ -132,6 +147,43 @@ def is_available(path: Path, *, camera: bool, wallet: bool, network_fixed: bool)
     )
 
 
+def reason(path: Path, *, camera: bool, wallet: bool, network_fixed: bool) -> str:
+    """Why this path cannot be walked, in the fewest words that name the missing thing.
+
+    `docs/console-appearance.md` requires it to be words. Until it was, the difference between a
+    path that can be walked and one that cannot rested entirely on `text-style: dim`, and whether
+    `fbcon` rendered half-bright at all was not known. It does, on the one panel that has been
+    photographed — which is an observation and not a guarantee, so this stays: a distinction that
+    survives only where somebody happened to look is not one the appliance can publish.
+
+    A path can be short of two things at once — *sign a transaction* needs both a camera and a
+    wallet — so the order here is fixed rather than meaningful. The sentence under the list is
+    where both are stated; this names one so that the row itself is never silent.
+    """
+    if path.needs_wallet and not wallet:
+        return "needs a wallet"
+    if path.needs_camera and not camera:
+        return "needs a camera"
+    if path.needs_unfixed_network and network_fixed:
+        return "fixed for this session"
+    return ""
+
+
+#: The row's own width: the 96-column budget less `#frame`'s padding and `.path`'s indent. The
+#: reason is right-aligned inside it, and that needs a number rather than a layout — **one
+#: `Static` per path**, so the selected row's reversed bar covers the whole row and `#path-N` stays
+#: the single thing a test has to read.
+PATH_COLUMNS = MAX_COLUMNS - 6
+
+
+def row(path: Path, app: object, *, selected: bool, why: str) -> str:
+    """The whole rendered row: the marker, the label, and the reason at the right edge."""
+    left = f"{MARKER if selected else ' '} {label(path, app)}"
+    if not why:
+        return left
+    return left + " " * max(2, PATH_COLUMNS - len(left) - len(why)) + why
+
+
 class HomeScreen(Screen):
     BINDINGS = [
         Binding("up", "previous", "Previous path"),
@@ -144,12 +196,18 @@ class HomeScreen(Screen):
     ]
 
     DEFAULT_CSS = """
-    HomeScreen #paths { height: auto; margin: 1 0; }
-    HomeScreen .path { margin-left: 2; }
-    HomeScreen .path-selected { text-style: bold; }
+    /* The title row is a row, not a line: the appliance's name at the left edge, what this
+       session is at the right. The rule under it and the `bold` are the app's. */
+    HomeScreen #title { height: auto; }
+    HomeScreen #title-name { width: 1fr; text-style: bold; }
+    HomeScreen #title-state { width: auto; text-style: none; }
+
+    HomeScreen #section { margin-bottom: 1; }
+    HomeScreen #paths { height: auto; }
     HomeScreen .path-unavailable { text-style: dim; }
-    HomeScreen .note { margin-top: 1; }
-    HomeScreen #home-keys { margin-top: 1; }
+    /* One blank row before the block and none inside it: the sentences are one statement about
+       the session, and a blank between each made three paragraphs out of it. */
+    HomeScreen #notes { height: auto; margin-top: 1; }
     """
 
     def __init__(self) -> None:
@@ -165,30 +223,39 @@ class HomeScreen(Screen):
         notice = app.notice  # type: ignore[attr-defined]
 
         with Vertical(id="frame"):
-            yield Static(f"aobs  ·  {network.value}", id="title")
+            with Horizontal(id="title"):
+                yield Static("aobs", id="title-name")
+                yield Static(
+                    f"{network.value}  ·  {app.release.version_label}",  # type: ignore[attr-defined]
+                    id="title-state",
+                )
+            yield Static(SECTION, id="section")
+            state = {"camera": camera, "wallet": wallet, "network_fixed": network_fixed}
             with Vertical(id="paths"):
                 for index, path in enumerate(PATHS):
-                    available = is_available(
-                        path, camera=camera, wallet=wallet, network_fixed=network_fixed
-                    )
+                    available = is_available(path, **state)
                     classes = ["path"] if available else ["path", "path-unavailable"]
                     if index == self._selected:
                         classes.append("path-selected")
                     yield Static(
-                        f"{'>' if index == self._selected else ' '} {label(path, app)}",
+                        row(
+                            path,
+                            app,
+                            selected=index == self._selected,
+                            why="" if available else reason(path, **state),
+                        ),
                         id=f"path-{index}",
                         classes=" ".join(classes),
                     )
-            yield Static(
-                NETWORK_FIXED if network_fixed else CHOOSE_NETWORK, classes="note", id="network"
-            )
-            if not camera:
-                yield Static(NO_CAMERA, classes="note", id="no-camera")
-            if not wallet:
-                yield Static(NO_WALLET, classes="note", id="no-wallet")
-            if notice:
-                yield Static(notice, classes="note", id="notice")
-            yield Static(KEYS, id="home-keys")
+            with Vertical(id="notes"):
+                yield Static(NETWORK_FIXED if network_fixed else CHOOSE_NETWORK, id="network")
+                if not camera:
+                    yield Static(NO_CAMERA, id="no-camera")
+                if not wallet:
+                    yield Static(NO_WALLET, id="no-wallet")
+                if notice:
+                    yield Static(notice, id="notice")
+            yield Static(KEYS, id="home-keys", classes="keys")
 
     def on_screen_resume(self) -> None:
         """Redraw on the way back from any path.

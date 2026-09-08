@@ -51,6 +51,28 @@ The explicit commit is also what makes short words enterable at all. **49 words 
 words**, so a user typing `add` has three live candidates, and a three-letter word never reaches four
 characters — auto-resolution would have to guess or stall.
 
+### `F10` settles the slot it is standing on, and that is not an auto-commit
+
+**The last word of a grid needs no separator after it.** `F10` resolves whatever the current slot is
+being typed into, exactly as moving off the slot with an arrow key already did, and only then counts
+the empty slots.
+
+This is not the rule #41 rejected and the collision argument does not reach it. Auto-commit is
+dangerous because it has to guess **where the next word begins** — and after `F10` there is no next
+word, so there is nothing to guess and nothing for the next word's first letter to be absorbed into.
+The separator rule is untouched between words; it is the trailing one that was never needed.
+
+Without this, the grid **looked complete and refused to be read**: the slot under the cursor displays
+what its buffer resolves to, so a user who typed the twenty-fourth word and pressed `F10` saw
+twenty-four words on the screen and the message `1 slot still to fill.` — a count that named a slot
+they could see was full. `move()` had settled the buffer since the grid was built; `F10` was the one
+path that did not, which is why the message contradicted the display rather than merely being
+unhelpful.
+
+A buffer that is **not** a word in the list is refused here as it is anywhere else: the vocabulary's
+own rejection, in the slot it happened in, and no count — the count would be a second and less useful
+answer to a question the user has not asked yet.
+
 Full-word typing keeps working for anyone who prefers it — the four-character rule is a shortcut, not a
 mode, and a full-word typist's surplus letters simply finish the word they belong to, because the slot
 stays open until the separator arrives. Numeric index entry (SeedSigner's approach) is rejected: it

@@ -359,6 +359,17 @@ the same shape — read what the repository already says, and check the artefact
       broadcast on signet.
 - [ ] Pull the boot medium out mid-session and keep signing. That is the cheapest check of the
       amnesia claim, and it is only a claim until someone has done it.
+- [ ] **Check what the console can actually draw**, on one screen showing all of it. Both halves
+      are fixed by `docs/console-appearance.md`. **Half-bright is already answered — it renders**,
+      seen on the home screen on the target machine's BIOS path, where the six rows that need a
+      wallet are visibly greyer than the four that do not. One panel and one framebuffer driver, so
+      the worded reason on those rows stays. What is left is whether the console has a **glyph** for
+      the five characters outside the built-in font's repertoire: `⚠` (`aobs/ui/reviewtext.py:48`, the NOT PROVEN
+      marker), `▮` and `▯` (`aobs/ui/scanning.py:45`, the slot map — the whole of the scan screen's
+      feedback), and the two dashes. Same pattern as the three faults above: *a claim the repository
+      stated correctly in prose and never checked.* Replacing the glyphs is deliberately **not**
+      done in advance — two of them sit inside row templates that `docs/review-screen.md` and
+      `docs/scan-feedback.md` fix character by character, and the check is cheaper than the guess.
 - [ ] Check each structural claim on the running appliance: `ls -d /proc/[0-9]*`, `cat /proc/mounts`,
       `ls /sys/block`, `command -v ip`, `cat /sys/bus/usb/devices/usb*/authorized_default`.
 - [ ] Record the answers as a **boot-checklist run record** — the checklist is the procedure, the run

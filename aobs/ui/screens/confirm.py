@@ -37,7 +37,6 @@ class ConfirmScreen(Screen):
 
     DEFAULT_CSS = """
     ConfirmScreen .confirm-line { margin-left: 3; }
-    ConfirmScreen #confirm-keys { margin-top: 1; }
     """
 
     def __init__(self, psbt_bytes: bytes, reviewed: Review) -> None:
@@ -50,7 +49,7 @@ class ConfirmScreen(Screen):
             yield Static(reviewtext.confirm_title(self.reviewed), id="title")
             for index, line in enumerate(reviewtext.confirm_lines(self.reviewed)):
                 yield Static(line, classes="confirm-line", id=f"confirm-{index}")
-            yield Static(reviewtext.CONFIRM_KEYS, id="confirm-keys")
+            yield Static(reviewtext.CONFIRM_KEYS, id="confirm-keys", classes="keys")
 
     def action_sign(self) -> None:
         """Sign the same bytes the review read, and show them going back out.

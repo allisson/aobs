@@ -51,7 +51,7 @@ from aobs.ui.screens.recovery_words import RecoveryWordsScreen
 from aobs.ui.screens.seed_entry import CHECKSUM_FAILED, READ_BACK_FAILED, SeedEntryScreen
 from aobs.ui.screens.word_count import WordCountScreen
 from aobs.ui.widgets.secretinput import EMPTY, MASK
-from aobs.ui.widgets.wordgrid import WordGrid
+from aobs.ui.widgets.wordgrid import BIP39, WordGrid
 
 from conftest import VECTOR_MNEMONIC, fixed_bytes
 
@@ -205,7 +205,11 @@ async def test_mainnet_is_the_default_and_costs_no_keypress() -> None:
         await reach_home(pilot)
         assert app.network is Network.MAINNET
         assert CHOOSE_NETWORK in texts(app)
-        assert "aobs  ·  mainnet" in texts(app), "the header says which chain the session is on"
+        # The right-hand end of the title row, since `docs/console-appearance.md` made the header
+        # a row: the name at the left edge, what this session is at the right. The claim is
+        # unchanged — the network is on the header without a keypress.
+        header = str(app.screen.query_one("#title-state", Static).content)
+        assert "mainnet" in header, "the header says which chain the session is on"
         assert f"{NETWORK_PATH}  ·  mainnet" in texts(app), "and so does the path beside it"
 
 
@@ -775,6 +779,52 @@ async def test_a_checksum_failure_names_no_word_and_leaves_every_slot_editable()
         await pilot.pause()
         assert isinstance(app.screen, PassphraseScreen)
         assert grid.words[:11] == tuple(wrong[:11]), "the eleven right ones were never retyped"
+
+
+async def test_the_last_word_needs_no_separator_after_it() -> None:
+    """Reported from the appliance: a grid the user could see was full refused to be read.
+
+    The slot under the cursor displays the word its buffer resolves to, so a user who typed the
+    twenty-fourth word and pressed `F10` — without the separator that has no next word to separate
+    it from — saw every slot filled and the message `1 slot still to fill.` `move()` had settled a
+    pending buffer since the grid was built; `F10` was the one path that did not.
+    """
+    app = build()
+    async with app.run_test(size=CONSOLE) as pilot:
+        await reach_seed_grid(pilot, app)
+        words = VECTOR_MNEMONIC.split()
+        for word in words[:-1]:
+            await pilot.press(*(word[:4] if len(word) >= 4 else word), "space")
+        last = words[-1]
+        await pilot.press(*(last[:4] if len(last) >= 4 else last))
+        await pilot.pause()
+
+        grid = app.screen.grid
+        assert grid.words[-1] == "", "the last word is typed, not committed — the state of the bug"
+        assert last in str(
+            grid.query_one(f"#slot-{len(words) - 1}", Static).content
+        ), "and the slot shows it, which is why the count contradicted the screen"
+
+        await pilot.press("f10")
+        await pilot.pause()
+
+        assert isinstance(app.screen, PassphraseScreen), "one F10, not two"
+
+
+async def test_f10_on_a_word_outside_the_list_says_so_and_does_not_count_slots() -> None:
+    """Settling is not accepting. A buffer the vocabulary refuses stops in its own slot with the
+    list's own rejection, and never with a count of empty slots — the count answers a question the
+    user has not reached yet."""
+    app = build()
+    async with app.run_test(size=CONSOLE) as pilot:
+        await reach_seed_grid(pilot, app)
+        await pilot.press("x", "y", "z", "z")
+        await pilot.press("f10")
+        await pilot.pause()
+
+        assert isinstance(app.screen, SeedEntryScreen)
+        assert app.screen.grid.message == BIP39.rejected
+        assert "still to fill" not in app.screen.grid.message
 
 
 async def test_a_typed_seed_becomes_the_session_wallet() -> None:

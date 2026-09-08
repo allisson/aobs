@@ -54,7 +54,6 @@ class DiceScreen(Screen):
     DEFAULT_CSS = """
     DiceScreen #dice-how { margin-top: 1; }
     DiceScreen #dice-count { margin-top: 1; text-style: bold; }
-    DiceScreen #dice-keys { margin-top: 1; }
     """
 
     def __init__(self) -> None:
@@ -70,7 +69,7 @@ class DiceScreen(Screen):
             yield Static(HOW, id="dice-how")
             yield Static(SKIP, id="dice-skip")
             yield Static("", id="dice-count")
-            yield Static(KEYS, id="dice-keys")
+            yield Static(KEYS, id="dice-keys", classes="keys")
 
     def on_mount(self) -> None:
         self._repaint()

@@ -54,7 +54,6 @@ class EntropyWaitScreen(Screen):
     DEFAULT_CSS = """
     EntropyWaitScreen #wait-how { margin-top: 1; text-style: bold; }
     EntropyWaitScreen #wait-proceeds { margin-top: 1; }
-    EntropyWaitScreen #wait-keys { margin-top: 1; }
     """
 
     def __init__(self, dice_rolls: str) -> None:
@@ -71,7 +70,7 @@ class EntropyWaitScreen(Screen):
             yield Static(WHY, id="wait-why")
             yield Static(HOW, id="wait-how")
             yield Static(PROCEEDS, id="wait-proceeds")
-            yield Static(KEYS, id="wait-keys")
+            yield Static(KEYS, id="wait-keys", classes="keys")
 
     def on_mount(self) -> None:
         interval = self.app.entropy_poll_interval  # type: ignore[attr-defined]

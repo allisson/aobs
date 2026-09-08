@@ -60,7 +60,6 @@ class PassphraseScreen(Screen):
     PassphraseScreen #passphrase-keymap { margin-top: 1; }
     PassphraseScreen #passphrase-field { margin-top: 1; }
     PassphraseScreen #passphrase-count { margin-top: 1; }
-    PassphraseScreen #passphrase-keys { margin-top: 1; }
     """
 
     def compose(self) -> ComposeResult:
@@ -70,7 +69,7 @@ class PassphraseScreen(Screen):
             yield Static(KEYMAP, id="passphrase-keymap")
             yield SecretInput(id="passphrase-field")
             yield Static("", id="passphrase-count")
-            yield Static(KEYS, id="passphrase-keys")
+            yield Static(KEYS, id="passphrase-keys", classes="keys")
 
     def on_mount(self) -> None:
         self._repaint()

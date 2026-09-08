@@ -61,10 +61,7 @@ class KeymapScreen(Screen):
 
     DEFAULT_CSS = """
     KeymapScreen #layouts { height: auto; margin: 1 0; }
-    KeymapScreen .layout { margin-left: 2; }
-    KeymapScreen .layout-selected { text-style: bold; }
     KeymapScreen #echo { margin-top: 1; }
-    KeymapScreen #keymap-keys { margin-top: 1; }
     """
 
     def __init__(self) -> None:
@@ -96,7 +93,7 @@ class KeymapScreen(Screen):
             yield Static("", id="echo")
             # After the echo rather than before it: the echo is what the user came to this screen
             # to do, and the keys are what they need once they have done it.
-            yield Static(KEYS, id="keymap-keys")
+            yield Static(KEYS, id="keymap-keys", classes="keys")
             # Last, and reserved: `docs/review-screen.md` counts it against the 85×43 floor.
             yield ReleaseFooter(self.app.release)  # type: ignore[attr-defined]
 

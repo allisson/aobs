@@ -38,7 +38,6 @@ class WordEntryScreen(Screen):
     ]
 
     DEFAULT_CSS = """
-    WordEntryScreen #word-entry-keys { margin-top: 1; }
     """
 
     def __init__(self, title: str, vocabulary: Vocabulary, slots: int) -> None:
@@ -70,7 +69,7 @@ class WordEntryScreen(Screen):
             for index, line in enumerate(self.intro()):
                 yield Static(line, id=f"intro-{index}")
             yield WordGrid(self._vocabulary, self._slots)
-            yield Static(KEYS, id="word-entry-keys")
+            yield Static(KEYS, id="word-entry-keys", classes="keys")
 
     # --- keys ------------------------------------------------------------------------------------
 
@@ -101,6 +100,13 @@ class WordEntryScreen(Screen):
 
     def action_accept(self) -> None:
         grid = self.grid
+        # The slot the cursor is standing on first: the last word of a grid needs no separator
+        # after it, and until it did, a grid the user could see was full refused to be read.
+        # `docs/seed-entry.md` §*`F10` settles the slot it is standing on*. A buffer that is not a
+        # word in the list stops here with the vocabulary's own rejection — the count below would
+        # be a second and less useful answer.
+        if not grid.settle():
+            return
         if not grid.filled:
             empty = self._slots - sum(1 for word in grid.words if word)
             grid.say(f"{empty} slot{'' if empty == 1 else 's'} still to fill.")
