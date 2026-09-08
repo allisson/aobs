@@ -310,6 +310,7 @@ REQUIRED_IN_ROOTFS = (
     "usr/bin/python3",
     "etc/aobs-release",
     "etc/aobs-modules",
+    "etc/aobs-ec-backend",
     "opt/aobs/aobs/__main__.py",
 )
 
@@ -638,6 +639,16 @@ def _check_rootfs(args: argparse.Namespace, apt: dict[str, dict[str, str]]) -> N
         set(args.symbols.read_text(encoding="utf-8").split())
     )
 
+    # The receipt `build/signcheck.py` left inside mmdebstrap's chroot. Its absence means the hook
+    # did not run, which would leave every other assertion here passing and the only one that can
+    # catch a pure-Python signer unchecked.
+    backend = (args.rootfs / "etc" / "aobs-ec-backend").read_text(encoding="utf-8").strip()
+    if "ctypes" not in backend:
+        raise PinFileError(
+            f"the image signed with {backend!r}, not the ctypes binding. embit picks its EC "
+            "implementation inside a bare `except:` and says nothing either way"
+        )
+
     init_text = (args.rootfs / "init").read_text(encoding="utf-8")
     init_is_fully_substituted(init_text)
     need, floor = ram_floor(args.measured_mib)
@@ -660,7 +671,8 @@ def _check_rootfs(args: argparse.Namespace, apt: dict[str, dict[str, str]]) -> N
 
     print(
         f"rootfs: {len(paths)} paths, {len(present)} modules, no package manager, no getty, "
-        f"no init system, floor {floor} MiB from {args.measured_mib} MiB measured"
+        f"no init system, EC backend {backend.rsplit('.', 1)[-1]}, "
+        f"floor {floor} MiB from {args.measured_mib} MiB measured"
     )
 
 

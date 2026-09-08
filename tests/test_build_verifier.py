@@ -299,6 +299,7 @@ GOOD_ROOTFS = {
     "usr/bin/python3",
     "etc/aobs-release",
     "etc/aobs-modules",
+    "etc/aobs-ec-backend",
     "opt/aobs/aobs/__main__.py",
     "opt/aobs-python/textual/__init__.py",
     "usr/lib/modules/6.12.0/kernel/drivers/hid/usbhid/usbhid.ko.xz",
@@ -354,7 +355,10 @@ def test_a_wheel_whose_name_merely_starts_with_a_forbidden_one_is_not_a_false_po
     )
 
 
-@pytest.mark.parametrize("missing", ["init", "usr/bin/sh", "usr/bin/python3", "etc/aobs-release"])
+@pytest.mark.parametrize(
+    "missing",
+    ["init", "usr/bin/sh", "usr/bin/python3", "etc/aobs-release", "etc/aobs-ec-backend"],
+)
 def test_an_image_that_could_not_start_fails_the_build(missing: str) -> None:
     with pytest.raises(verify.PinFileError) as raised:
         verify.required_files_present(GOOD_ROOTFS - {missing})

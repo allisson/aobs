@@ -117,6 +117,38 @@ say "stage 1: rootfs (mmdebstrap --mode=unshare, no network, no privilege)"
 # `APT::Sandbox::User "root"` is set below and is NOT sufficient on its own; the first version of
 # this script had it and failed anyway. `$TMPDIR` is avoided for the same reason — on a GitHub
 # runner it points back inside the home directory.
+# --- Stage 1a. The Python layer and the app tree, staged before the rootfs exists ---------------
+#
+# These are built first so that mmdebstrap can copy them in and then RUN THE SIGNING CHECK inside
+# its own chroot — see stage 1d. Neither needs a rootfs to produce: `pip --target` unpacks wheels
+# and the app tree is a copy.
+#
+# **`pip` is never installed into the image, and this is a correction to what M2 specified.** The
+# plan was to install it, use it and purge it with `--auto-remove`. It cannot be done:
+# `python3-pip` is a HARNESS-group package, the appliance pool does not contain it, and putting it
+# in the rootfs even transiently means installing a harness package into the image — the one thing
+# the group split exists to forbid. So the build host's pip unpacks the wheels with the target
+# platform named explicitly, and `pip`, `python3-wheel` and `python3-packaging` are absent by
+# construction rather than by removal. `build/verify.py` asserts all three are gone either way.
+
+say "stage 1a: the Python layer and the app tree"
+STAGING=$WORK/staging
+mkdir -p "$STAGING"
+python3 -m pip install \
+    --quiet --no-index --no-cache-dir \
+    --find-links "$INPUTS/wheels/appliance" \
+    --require-hashes --only-binary :all: \
+    --implementation cp --python-version 3.13 \
+    --platform manylinux_2_28_x86_64 --platform manylinux2014_x86_64 \
+    --target "$STAGING/aobs-python" \
+    -r "$ROOT/build/requirements.appliance.txt"
+find "$STAGING/aobs-python" -name '__pycache__' -type d -exec rm -rf {} +
+
+# Copied, never `pip install`ed. It is not a distribution and there is nothing for a resolver to do.
+mkdir -p "$STAGING/aobs"
+tar -C "$ROOT" -cf - aobs | tar -C "$STAGING/aobs" -xf -
+find "$STAGING/aobs" -name '__pycache__' -type d -exec rm -rf {} +
+
 POOL=$(mktemp -d /tmp/aobs-pool.XXXXXX)
 trap 'rm -rf "$POOL"' EXIT INT TERM
 chmod 755 "$POOL"
@@ -136,6 +168,19 @@ chmod 644 "$POOL"/*.deb
 #
 # `copy://`, NOT `file://`. A `file://` URI is resolved by apt running INSIDE the chroot, where the
 # host's pool path does not exist. `copy://` reads on the host and copies in.
+#
+# THE SIGNING CHECK RUNS HERE, as a customize hook, and that placement is a finding rather than a
+# convenience. It needs a chroot with a working `/dev` — `ctypes.util.find_library` shells out to
+# `ldconfig` with `stdin=DEVNULL`, and without `/dev/null` the image reports a pure-Python EC
+# backend and says nothing. The build cannot make one itself: `mknod` is denied unprivileged, and
+# on `ubuntu-24.04` with `kernel.apparmor_restrict_unprivileged_userns=1` a namespace this build
+# creates has no capabilities in it, so neither a map write nor a bind mount is available either.
+# Measured, in that order: `Operation not permitted` on uid_map, `Permission denied` on setgroups,
+# `Permission denied` on binding /dev/null.
+#
+# mmdebstrap already has all of it — it maps through setuid `newuidmap` and sets the chroot up for
+# maintainer scripts. Running the check inside its hook uses the one mechanism that demonstrably
+# works on this host, and deletes a helper rather than adding one.
 includes="--include=?essential"
 for pin in $(awk '
     /^# @group / { g = $3; next }
@@ -153,6 +198,11 @@ mmdebstrap \
     --aptopt='APT::Sandbox::User "root"' \
     --aptopt='Acquire::AllowInsecureRepositories "true"' \
     --customize-hook='rm -f "$1"/etc/resolv.conf "$1"/etc/hostname' \
+    --customize-hook="copy-in $STAGING/aobs-python /opt" \
+    --customize-hook="copy-in $STAGING/aobs /opt" \
+    --customize-hook="copy-in $ROOT/build/signcheck.py /" \
+    --customize-hook='chroot "$1" /usr/bin/python3 /signcheck.py' \
+    --customize-hook='rm -f "$1"/signcheck.py' \
     "$DEBIAN_SUITE" "$WORK/rootfs.tar" "deb [trusted=yes] copy://$POOL ./"
 
 say "stage 1: $(stat -c %s "$WORK/rootfs.tar" | awk '{printf "%.1f MiB", $1/1048576}') of tarball"
@@ -185,43 +235,6 @@ released: $released
 git-commit: $commit
 dirty: $dirty
 EOF
-
-# --- Stage 2. The Python layer -------------------------------------------------------------------
-#
-# **`pip` is never installed into the rootfs, and this is a correction to what M2 originally
-# specified.** The plan was to install it, use it and purge it with `--auto-remove`. It cannot be
-# done: `python3-pip` is a HARNESS-group package, the appliance pool does not contain it, and
-# putting it in the rootfs even transiently means installing a harness package into the image —
-# which is the one thing the group split exists to forbid.
-#
-# So the wheels are unpacked from outside by the build host's pip, with the target platform named
-# explicitly. `pip`, `python3-wheel` and `python3-packaging` are therefore absent from the image by
-# construction rather than by removal, which is a stronger position than the purge would have
-# reached. `build/verify.py` still asserts all three are gone: the assertion is what makes the
-# claim checkable, and it does not care how it came to be true.
-
-say "stage 2: the Python layer (wheels, no pip in the image)"
-python3 -m pip install \
-    --quiet \
-    --no-index \
-    --no-cache-dir \
-    --find-links "$INPUTS/wheels/appliance" \
-    --require-hashes \
-    --only-binary :all: \
-    --implementation cp \
-    --python-version 3.13 \
-    --platform manylinux_2_28_x86_64 \
-    --platform manylinux2014_x86_64 \
-    --target "$ROOTFS/opt/aobs-python" \
-    -r "$ROOT/build/requirements.appliance.txt"
-find "$ROOTFS/opt/aobs-python" -name '*.dist-info' -prune -o -name '__pycache__' -type d -exec rm -rf {} +
-
-# The app tree, copied and never `pip install`ed. It is not a distribution and there is nothing for
-# a resolver to do: `build/init` puts `/opt/aobs` on `PYTHONPATH` and `python3 -m aobs` finds it.
-say "stage 2b: the app tree"
-mkdir -p "$ROOTFS/opt/aobs"
-tar -C "$ROOT" -cf - aobs | tar -C "$ROOTFS/opt/aobs" -xf -
-find "$ROOTFS/opt/aobs" -name '__pycache__' -type d -exec rm -rf {} +
 
 # --- Stage 3. The kernel ---------------------------------------------------------------------------
 
@@ -328,62 +341,6 @@ python3 "$ROOT/build/verify.py" \
 # enough — embit binds `schnorrsig`, `xonly` and `keypair` inside their own bare `except: pass`, so
 # a library compiled without those modules imports cleanly, reports the native backend, and fails
 # at taproot signing, mid-session, with a wallet loaded.
-say "stage 3d: one signature in each scheme, from inside the image"
-
-# `unshare -Urm` and a bind-mounted `/dev`, and the reason is a finding worth the two extra lines.
-#
-# On the first run of this check the image reported `py_secp256k1` — a pure-Python signer in an
-# appliance whose whole EC story is that it never uses one. The library was present and exported
-# every symbol. What failed was `ctypes.util.find_library`, which shells out to `ldconfig -p` with
-# `stdin=subprocess.DEVNULL`: with no `/dev/null` in the tree that raises `FileNotFoundError`,
-# CPython catches it under `except OSError: pass`, and embit's own bare `except:` turns the
-# resulting `None` into the fallback backend WITHOUT ONE WORD OF OUTPUT.
-#
-# The image itself is fine — `/dev/null` is declared in the cpio header and devtmpfs is mounted by
-# PID 1's first step. The tree on disk is what lacked it, because device nodes cannot be created
-# unprivileged. So the check has to run against something shaped like the booted machine, and this
-# is the cheapest thing that is: a mount namespace with the host's `/dev` bound in.
-#
-# It is also the clearest demonstration this project has of why the backend is asserted rather than
-# assumed. Two silent excepts, one missing character device, and a signer that reports as native.
-cat > "$WORK/signcheck.py" <<'PYCHECK'
-import sys
-
-from aobs.core.vendor.embit import ec
-from aobs.core.vendor.embit.util import secp256k1
-
-backend = secp256k1.ec_pubkey_create.__module__
-if "ctypes" not in backend:
-    sys.exit(f"the image's embit resolved to {backend}, not the ctypes binding")
-
-key = ec.PrivateKey(b"\x01" * 32)
-digest = b"\x02" * 32
-
-ecdsa = key.sign(digest)
-if not key.get_public_key().verify(ecdsa, digest):
-    sys.exit("BIP84: the image could not verify its own ECDSA signature")
-
-schnorr = key.schnorr_sign(digest)
-if len(schnorr.serialize()) != 64:
-    sys.exit("BIP86: schnorr_sign did not return 64 bytes")
-
-print(f"signing: ok, backend {backend}")
-PYCHECK
-cp "$WORK/signcheck.py" "$ROOTFS/signcheck.py"
-# NOT the `unshare` binary. On `ubuntu-24.04` it is AppArmor-profiled as a user-namespace gadget,
-# and a process it confines cannot write its own uid_map: measured,
-# `unshare: write failed /proc/self/uid_map: Operation not permitted`, after the namespace itself
-# had been created. mmdebstrap is unaffected in stage 1 because it is not a profiled binary.
-# `build/unshare_exec.py` performs the same three writes from a process AppArmor has no opinion
-# about, and binds the device nodes one at a time — see the file for why not `mount --bind /dev`.
-PYTHONPATH=/opt/aobs:/opt/aobs-python \
-    python3 "$ROOT/build/unshare_exec.py" "$ROOTFS" /usr/bin/python3 /signcheck.py
-# The bind mounts went with the namespace; the empty files they were mounted over did not, and a
-# regular file called `dev/null` in an initramfs is worse than none. `build/mkinitramfs.py` refuses
-# to pack a tree that still has one, so this is belt and braces on a mistake that would be quiet.
-rm -f "$ROOTFS/signcheck.py" "$ROOTFS/dev/null" "$ROOTFS/dev/zero" "$ROOTFS/dev/urandom" \
-      "$ROOTFS/dev/random" "$ROOTFS/dev/tty"
-
 # --- Stage 4. The initramfs -------------------------------------------------------------------------
 
 say "stage 4: newc | zstd"

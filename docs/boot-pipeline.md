@@ -103,17 +103,24 @@ at.** Both are recorded because both looked like they would need root and neithe
   is enough. Entries are emitted sorted, with `SOURCE_DATE_EPOCH` as every mtime, which is most of
   what `docs/reproducible-build.md` will want at M4 arrived at for free.
 
-One step still needs a namespace: stage 3d chroots into the image to make it sign. A single-uid map
-is enough there, because everything in the tree is already owned by the caller — **but nothing on
-this runner can write that map for itself.** With `kernel.apparmor_restrict_unprivileged_userns=1`
-the namespace is created and then has no capabilities in it, so the write is refused whoever makes
-it: measured twice, `Operation not permitted` on `uid_map` from `unshare -Ur`, and `Permission
-denied` on `setgroups` from a Python version of the same three writes.
+**One check needs more than that, and where it ended up is a finding.** `build/signcheck.py` makes
+the image produce a signature with its own interpreter and its own `libsecp256k1`, and it needs a
+chroot with a working `/dev` — see the `find_library` paragraph further down for why. This build
+cannot make one on `ubuntu-24.04`: `mknod` is denied unprivileged, and with
+`kernel.apparmor_restrict_unprivileged_userns=1` a namespace the build creates has **no
+capabilities in it**, so neither writing a uid map nor bind-mounting a device node is available.
+Measured in that order: `Operation not permitted` on `uid_map` from `unshare -Ur`, `Permission
+denied` on `setgroups` from a hand-rolled equivalent, `Permission denied` on binding `/dev/null`
+after `newuidmap` had successfully mapped the process.
 
-`build/unshare_exec.py` therefore forks and has **`newuidmap`** map the child, which is setuid-root
-and can write a map for a process that cannot write its own. That is the same mechanism mmdebstrap
-uses in stage 1 — and it is the answer to why stage 1 works on a host where `unshare -Ur` does not,
-a question this document had previously answered wrongly.
+mmdebstrap already has all of it — it maps through setuid `newuidmap` and sets up the chroot for
+maintainer scripts. **So the signing check runs as one of its customize hooks in stage 1**, which
+is also why the Python layer and the app tree are staged before the rootfs rather than after it.
+That deleted a helper instead of adding one.
+
+The hook leaves a receipt at `/etc/aobs-ec-backend`, and `build/verify.py` refuses an image without
+it. A customize hook that silently did not run would leave every other assertion passing and the
+only one that can catch a pure-Python signer unchecked.
 
 ### Why the appliance closure is resolved against an empty root
 
