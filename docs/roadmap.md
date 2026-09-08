@@ -325,6 +325,22 @@ libraries — needed as well as the import check, because Pillow loads its forma
 screen showed `ImportError.` and nothing else. `docs/secret-hygiene.md` now carves out that one
 exception type: the import machinery writes the message, and it names a library, not a secret.
 
+**Third attempt: it booted to the keymap picker, and the user could not get off it. Fixed, and the
+fourth boot got through.** The appliance drew its first screen — the whole boot chain works — and
+then stopped being usable, because the picker never printed its own keys. With the key line added,
+the picker was confirmed working on the machine and the session went on past it; the gate itself is
+still open, because a boot that reaches the home screen is not a PSBT signed and broadcast. `F10` was bound, `docs/failure-states.md` fixed it, and every
+other screen printed a line; this one did not, and it is the one screen where `esc` has nowhere to
+go. `HomeScreen` turned out to have the identical defect. Both print their keys now, and a
+source-level rule in `tests/test_structure.py` fails the build for the next screen that binds a
+function key without rendering it.
+
+Worth recording as a pattern, because all three findings share it: **each fault was a claim the
+repository stated correctly in prose and never checked.** `mount` was documented as coming from
+`util-linux`; the C++ runtime was assumed to arrive with the closure; the reserved keys were fixed
+in a document that assumed screens printed them. The assertions added in this milestone are all of
+the same shape — read what the repository already says, and check the artefact against it.
+
 - [ ] **Follow-up, after the gate: drop `pillow` from the appliance.** It is in the image for one
       line — `aobs/ui/qrdecode.py:20` wraps a captured frame as a `PIL.Image` for zxingcpp — and its
       only other use is the *fake* frame source, which is harness-only. In exchange the image
