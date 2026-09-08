@@ -72,16 +72,44 @@ about namespaces:
 `build/inputs/deb/appliance/` must be **the complete closure for a rootfs that starts from nothing**,
 because that is what stage 1 starts from.
 
-This was wrong for the whole of M1 and nothing noticed, because the one consumer at the time —
-`build/Dockerfile.test` — starts *from* `debian:trixie-slim` and so never missed what that image
-already had. `fetch_debs` resolved inside that same container, and `--reinstall` re-downloads the
-packages *named on the command line* and never a transitive dependency apt considers already
-satisfied. The pool held **37** packages where the real closure is **57**: no `libc6`, no `dpkg`, no
-`tar`, no `debconf`, no `tzdata`, no `libpam-*`. The first `mmdebstrap` run against it failed with
-forty unsatisfiable dependencies.
+**The closure is 88 packages**, and getting to that number took two separate fixes because the base
+image hid the answer twice, by two different mechanisms.
 
-`build/fetch-inputs.sh` now resolves with `Dir::State::status` pointed at an empty file. What is
-installed in the container that does the resolving is not a fact about the appliance.
+**First: what the container already had installed.** This was wrong for the whole of M1 and nothing
+noticed, because the one consumer at the time — `build/Dockerfile.test` — starts *from*
+`debian:trixie-slim` and so never missed what that image already had. `fetch_debs` resolved inside
+that same container, and `--reinstall` re-downloads the packages *named on the command line* and
+never a transitive dependency apt considers already satisfied. The pool held **37** packages: no
+`libc6`, no `dpkg`, no `tar`, no `debconf`, no `tzdata`, no `libpam-*`. The first `mmdebstrap` run
+against it failed with forty unsatisfiable dependencies. Fixed by resolving with
+`Dir::State::status` pointed at an empty file.
+
+**Second: what apt refuses to mention.** **apt never lists an `Essential: yes` package as a
+dependency**, with or without an empty status file — it assumes they are present. trixie/main has 22
+such packages and the empty-root resolution picked up 5 of them, silently omitting `base-files`,
+`base-passwd`, `bash`, `coreutils`, `grep`, `sed`, `gzip`, `libc-bin`, `ncurses-base`, `perl-base`,
+`sysvinit-utils`, `hostname`, `bsdutils`, `diffutils`, `findutils`, `init-system-helpers` and
+`ncurses-bin`.
+
+That 57-package pool got every one of its members into the chroot and then died with
+`chroot: failed to run command 'dpkg': No such file or directory` while installing the essential
+packages — a complete dependency closure that is not a working userland. Fixed by asking for
+`?essential` alongside the pins, which keeps the set derived from the archive; listing the 22 names
+in `build/apt-versions.txt` would be a closure maintained by hand, and drift there is the exact
+failure mode of the 37-package pool.
+
+> **The figure 57 was published in this document and in the commit that fixed the first mechanism,
+> before the second was known.** It was a complete closure by apt's reckoning and still could not
+> boot a chroot. Recorded rather than quietly overwritten, because "the pool is now the complete
+> closure" was a claim made at a strength it had not earned.
+
+`sysvinit-utils` arrives with the Essential set and is not an init system: it provides `pidof` and
+`fstab-decode`. `build/verify.py`'s init-system assertion names daemons, not this.
+
+The count is **88 against both suites and 87 against `main` alone** — `trixie-security`'s versions
+pull `libstdc++6`. `build/apt-repositories` carries both suites for the kernel's sake, so 88 is the
+number, and the difference is recorded because a figure that moves by one with no explanation is
+how a measurement turns back into an estimate.
 
 ### Why the kernel is extracted and never installed
 
@@ -315,7 +343,7 @@ Each term, and which are mechanism and which are headroom:
 **The measured inputs are published against the run they came from** — unpacked rootfs, initramfs,
 kernel, ISO — because a floor derived from an unpublished number is an assertion wearing a formula.
 
-> **Not yet measured.** The appliance closure is 57 packages and 26 MiB of compressed `.deb`, and the
+> **Not yet measured.** The appliance closure is 88 packages and 41 MiB of compressed `.deb`, and the
 > kernel package is a further 107.9 MiB compressed. The *unpacked* rootfs, the packed initramfs and
 > the ISO have not been measured, so no floor is stated here yet. The first `mkiso.sh` run fills this
 > in with numbers and the run that produced them.

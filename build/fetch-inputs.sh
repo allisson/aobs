@@ -67,10 +67,12 @@ HASHES=build/inputs.sha256
 # union into a single directory would leave the appliance pool missing whatever it shares with the
 # harness group, and the failure would appear at image-build time as an unsatisfiable dependency.
 #
-# THE SAME FAILURE ARRIVED THROUGH THE BASE IMAGE, and it is why the appliance group resolves
-# against an empty dpkg status. Measured 2026-09-07 in the M2 unshare probe: `mmdebstrap` refused
-# the appliance pool with `libc6 ... not installable`, `dpkg ... not installable`, and thirty-nine
-# more. The pool held 37 packages; the real closure from nothing is 57. The missing ones are
+# THE SAME FAILURE ARRIVED THROUGH THE BASE IMAGE, TWICE, and by two different mechanisms. It is
+# why the appliance group resolves against an empty dpkg status AND asks for `?essential`.
+#
+# First mechanism, measured 2026-09-07 in the M2 unshare probe: `mmdebstrap` refused the appliance
+# pool with `libc6 ... not installable`, `dpkg ... not installable`, and thirty-nine more. The pool
+# held 37 packages. The missing ones are
 # exactly what `debian:trixie-slim` already had installed when this script resolved — `libc6`,
 # `dpkg`, `tar`, `coreutils`, `debconf`, `tzdata`, `libpam-*`. `--reinstall` re-downloads the
 # packages NAMED on the command line; it does not re-download a transitive dependency apt
@@ -80,6 +82,15 @@ HASHES=build/inputs.sha256
 #
 # `Dir::State::status` pointed at an empty file is what makes apt resolve as if nothing were
 # installed. It replaces `--reinstall` rather than joining it.
+#
+# Second mechanism, and the first fix did not cover it: **apt never lists an `Essential: yes`
+# package as a dependency**, with or without an empty status file. It assumes they are present.
+# So the empty-root resolution produced 57 packages that still had no `bash`, no `coreutils`, no
+# `base-files` — and mmdebstrap got all 57 into the chroot and then died with
+# `chroot: failed to run command 'dpkg'`, because that tree is not a working userland.
+#
+# THE HONEST CLOSURE IS 88, not 57, and the 57 figure was published before it was tested. See the
+# `?essential` note in fetch_debs.
 group() {
     # $1: "appliance" | "harness" — print that group's pinned name=version lines
     awk -v want="$1" '
@@ -141,8 +152,27 @@ fetch_debs() {
             # re-downloads the packages named on the command line, never a transitive dependency
             # apt considers already satisfied. See the header of the closures section.
             : > /tmp/empty-status
+
+            # AND ASK FOR THE ESSENTIAL SET BY NAME, because an empty status file is not enough.
+            # apt never lists an `Essential: yes` package as a dependency — it assumes those are
+            # always installed, and it goes on assuming it with `Dir::State::status` pointed at
+            # nothing. trixie/main has 22 such packages; resolving the pins alone yields 5 of them
+            # and silently omits `base-files`, `base-passwd`, `bash`, `coreutils`, `grep`, `sed`,
+            # `gzip`, `libc-bin`, `ncurses-base`, `perl-base`, `sysvinit-utils`, `hostname`,
+            # `bsdutils`, `diffutils`, `findutils`, `init-system-helpers` and `ncurses-bin`.
+            #
+            # Measured: mmdebstrap got all 57 packages into the chroot and then died with
+            # `chroot: failed to run command 'dpkg': No such file or directory` while installing
+            # the essential packages, because the tree it had was not yet a working userland.
+            # With `?essential` the closure is 88 (87 against `main` alone; `trixie-security` pulls
+            # `libstdc++6`) and it has one.
+            #
+            # `?essential` is an apt PATTERN, so the set stays derived from the archive. Listing
+            # the 22 names in `build/apt-versions.txt` instead would be a closure maintained by
+            # hand, which drifts the first time Debian changes the set — the exact failure mode of
+            # the 37-package pool this replaced.
             apt-get install -y --no-install-recommends --download-only \
-                -o Dir::State::status=/tmp/empty-status $PINS
+                -o Dir::State::status=/tmp/empty-status '?essential' $PINS
             cp /var/cache/apt/archives/*.deb /out/
             ls -1 /out | wc -l
         '
