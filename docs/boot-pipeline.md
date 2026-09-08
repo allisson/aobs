@@ -18,6 +18,9 @@ the next session:
 | every byte the build consumes | `build/fetch-inputs.sh`, `build/inputs.sha256` |
 | PID 1 | `build/init` |
 | the stages | `build/mkiso.sh` |
+| the module allowlist, and why there is no graphics driver in it | `build/modules.allow` |
+| the cpio writer, and why it is not `find \| cpio` | `build/mkinitramfs.py` |
+| the prune, as a pure function over `modules.dep` | `build/prune_modules.py` |
 | the fixed cmdline, per firmware path | `build/isolinux.cfg`, `build/grub.cfg` |
 | every build-time assertion, as pure functions | `build/verify.py` |
 | each assertion fed a deliberately broken input | `tests/test_build_verifier.py` |
@@ -35,11 +38,12 @@ structural is a defect, not a rounding error.
 
 1. **Rootfs.** `mmdebstrap --mode=unshare`, installing the `@group appliance` closure from
    `build/inputs/deb/appliance/` through a `copy://` repository. No network, no `--privileged`.
-2. **Python layer.** `pip --no-index --target /opt/aobs-python` from `build/inputs/wheels/appliance/`,
-   then the transient `pip` and everything it dragged in are purged.
+2. **Python layer.** The wheels from `build/inputs/wheels/appliance/`, unpacked into
+   `/opt/aobs-python` **from outside the image**, plus the app tree copied to `/opt/aobs`.
 3. **Kernel.** `dpkg-deb -x` of `build/inputs/deb/kernel/` into a staging directory. `vmlinuz` goes
-   to the ISO; `/lib/modules` is pruned to the allowlist and copied into the rootfs.
-4. **Initramfs.** `find /rootfs | cpio -H newc | zstd`.
+   to the ISO; `/lib/modules` is pruned to the allowlist and copied into the rootfs. Then the purge,
+   then PID 1 with the floor substituted into it, then the assertions.
+4. **Initramfs.** `build/mkinitramfs.py | zstd`, and **not** `find | cpio` — see below.
 5. **Image.** `xorriso` into a hybrid ISO: `isolinux` for legacy BIOS, `grub-efi` for UEFI.
 
 Every input is a pinned version with a checksum and every byte comes from `build/inputs/` over no
@@ -61,11 +65,14 @@ working, that is a finding to be written down here, not a licence.
 **Five constraints on stage 1 came out of that verification.** None is about namespaces; every one
 is about apt or mmdebstrap, and each was found by a build failing rather than by reading:
 
-- The `.deb` pool must be **readable by the `_apt` user**. apt's `file://` method drops privileges
-  before reading, so a pool under a `0700` home directory fails with `Permission denied` on every
-  `Packages` file and never says why.
-- `APT::Sandbox::User "root"` is set, so apt does not drop to a user that cannot read the pool the
-  build handed it.
+- The `.deb` pool must be **staged outside the checkout**, not merely made readable. apt's `copy:`
+  method drops privileges before reading, and in unshare mode that is a subuid the host has never
+  heard of — so every *ancestor* of the pool has to be traversable by a stranger, which a
+  repository under a home directory is not. Measured twice, the second time with the pool at 755
+  and its `Packages` at 644: `Failed to stat - stat (13: Permission denied)`.
+- `APT::Sandbox::User "root"` is set, and **is not sufficient on its own** — the first version of
+  `mkiso.sh` had it and failed anyway. `$TMPDIR` is no help either: on a GitHub runner it points
+  back inside the home directory.
 - **`copy://`, not `file://`.** A `file://` URI is resolved by apt running *inside* the chroot,
   where the host's pool path does not exist: `package file ... not accessible from chroot
   directory`. `copy://` reads on the host and copies in. mmdebstrap's alternative is a bind-mount
@@ -81,6 +88,39 @@ is about apt or mmdebstrap, and each was found by a build failing rather than by
 The last two are the reason a rootfs exists at all, and neither is documented anywhere this project
 would have thought to look. They were found by running the build locally with the full log visible,
 after several CI rounds spent reading a truncated tail.
+
+**And nothing else in the build needs privilege either, which took two changes of shape to arrive
+at.** Both are recorded because both looked like they would need root and neither does:
+
+- **Device nodes cannot be created.** `mknod` for a character device is denied inside a user
+  namespace — measured, on the first unprivileged run: `tar: ./dev/console: Cannot mknod: Operation
+  not permitted`. An initramfs with no `/dev/console` gives PID 1 no stdio at all, which on this
+  appliance means a failure message nobody can read. So `build/mkinitramfs.py` writes the `newc`
+  archive itself and **declares** the device nodes in the header, where the major and minor are
+  fields. That is why stage 4 is a Python script.
+- **Ownership does not have to be real.** Every member of that archive is written `root:root`
+  whoever built it, so the tree on disk can stay owned by the build user and `tar --no-same-owner`
+  is enough. Entries are emitted sorted, with `SOURCE_DATE_EPOCH` as every mtime, which is most of
+  what `docs/reproducible-build.md` will want at M4 arrived at for free.
+
+**One check needs more than that, and where it ended up is a finding.** `build/signcheck.py` makes
+the image produce a signature with its own interpreter and its own `libsecp256k1`, and it needs a
+chroot with a working `/dev` — see the `find_library` paragraph further down for why. This build
+cannot make one on `ubuntu-24.04`: `mknod` is denied unprivileged, and with
+`kernel.apparmor_restrict_unprivileged_userns=1` a namespace the build creates has **no
+capabilities in it**, so neither writing a uid map nor bind-mounting a device node is available.
+Measured in that order: `Operation not permitted` on `uid_map` from `unshare -Ur`, `Permission
+denied` on `setgroups` from a hand-rolled equivalent, `Permission denied` on binding `/dev/null`
+after `newuidmap` had successfully mapped the process.
+
+mmdebstrap already has all of it — it maps through setuid `newuidmap` and sets up the chroot for
+maintainer scripts. **So the signing check runs as one of its customize hooks in stage 1**, which
+is also why the Python layer and the app tree are staged before the rootfs rather than after it.
+That deleted a helper instead of adding one.
+
+The hook leaves a receipt at `/etc/aobs-ec-backend`, and `build/verify.py` refuses an image without
+it. A customize hook that silently did not run would leave every other assertion passing and the
+only one that can catch a pure-Python signer unchecked.
 
 ### Why the appliance closure is resolved against an empty root
 
@@ -175,14 +215,22 @@ Kernel cmdline, fixed in the bootloader config:
 PID 1 for the session. There is no init system, no `inittab`, no getty, no VT switching. The script
 does only what nothing else can, in this order:
 
-1. Mount `proc`, `sys`, `dev`, `devpts`, `shm` — tmpfs and pseudo-filesystems only.
+1. Mount `proc`, `sys`, `dev`, `devpts`, `shm`, `run`, `tmp` — tmpfs and pseudo-filesystems only.
 2. Put the console in UTF-8 and **load the default keymap**, so the picker is typeable before it
    draws.
-3. **Flip `authorized_default=0` on every root hub** — after our own devices enumerate, before the
+3. **`modprobe` the allowlist**, from `/etc/aobs-modules`, and settle.
+4. **Flip `authorized_default=0` on every root hub** — after our own devices enumerate, before the
    first secret is entered.
-4. **Set `kernel.modules_disabled=1`.** One-way for the life of the boot; see below.
-5. Check available RAM against the floor and refuse to start below it.
-6. `exec` the app.
+5. **Set `kernel.modules_disabled=1`.** One-way for the life of the boot; see below.
+6. Check available RAM against the floor and refuse to start below it.
+7. `exec` the app.
+
+**Step 3 was not in this list and had to be added.** There is no udev and no init system, so the
+only alternative to loading the drivers here is the kernel's own usermode helper firing on a device
+match — at an unpredictable moment, *including after step 5 has closed the door*. Loading them here
+is what makes "our own devices have enumerated" a point in time the script can name, which is what
+step 4 is placed relative to. A module the machine does not have is reported and skipped: a machine
+with no `i915` is a machine with an AMD card, and refusing to boot over it would be absurd.
 
 **There is no `set -e`.** Each step checks its own result and a failure is named on the console and
 held there. An init that dies is a kernel panic the user cannot read past, so a silent exit is the
@@ -219,6 +267,15 @@ So:
   kernel.
 - **USB binds nothing but HID and UVC.** Only those modules ship, plus `authorized_default=0`.
 
+**Measured: 20 modules ship and 4209 are deleted.** `build/modules.allow` is the whole list and
+`build/prune_modules.py` computes the dependency closure from the regenerated `modules.dep`.
+`build/verify.py` then checks the inverse — that every module still in the tree is reachable from
+the allowlist — which is what catches one that survived the prune by accident.
+
+`modules.dep` is **not shipped in the `.deb`**: Debian generates it from the maintainer script, and
+this build runs none. So the first `depmod` is not a tidying step, it is what creates the graph the
+prune runs against.
+
 **`kernel.modules_disabled=1` is a second line, and is never cited as the claim.** `CONFIG_MODULES=y`
 reopened a door the old kernel had welded shut: with a loadable-module kernel, a `.ko` that is not in
 the image is not the same as a `.ko` that cannot be loaded. The sysctl is irreversible once set and
@@ -233,12 +290,27 @@ packed. `build/verify.py` fails the build if any of them survives:
 
 | removed | why it was there | why it goes |
 |---|---|---|
-| `pip` (and `python3-wheel`, `python3-packaging` with it) | installs the wheel layer | removing pip alone leaves the other two, and a `python3-packaging` in the image is a harness package in the rootfs |
 | `dpkg` and its database | `Essential: yes`; a Debian rootfs built the normal way always has one | it is a package manager, and the published claim says none is in the image |
+| `apt` | in the appliance pool; whether it reaches the rootfs depends on what mmdebstrap installs | same claim, and "depends on" is not something a claim may rest on |
 | `agetty` | shipped by `util-linux`, which PID 1 needs for `mount` | the containment claim above |
+| `usr/share/locale`, `doc`, `man`, `info` | Debian ships them | not a claim, just the largest prunable thing in the tree. Nothing here reads a locale |
 
-`apt` is **not** in this table because it is not in the appliance closure at all — measured: absent
-from the built rootfs. It is a harness package and the group split already keeps it out.
+**`pip` is not in this table any more, and its absence is the interesting entry.** M2 specified
+installing it, using it and purging it with `--auto-remove`. That cannot be done: `python3-pip` is a
+**harness-group** package, the appliance pool does not contain it, and putting it into the rootfs
+even for one stage means installing a harness package into the image — the one thing the group
+split exists to forbid. So the wheels are unpacked from outside by the build host's pip, with the
+target platform named explicitly, and `pip`, `python3-wheel` and `python3-packaging` are absent by
+construction rather than by removal. `build/verify.py` still asserts all three are gone: the
+assertion is what makes the claim checkable, and it does not care how it came to be true.
+
+**`apt` was previously written up here as "not in the appliance closure at all". That was wrong.**
+`apt` is in the pool, and so are `libapt-pkg7.0`, `debian-archive-keyring` and `sqv` — the packages
+that are only there to support it. What is true is the weaker statement that was measured: apt did
+not end up in the *built rootfs*, because mmdebstrap installs the Essential set plus what is named
+and apt is `Priority: important` rather than essential. That is a fact about what mmdebstrap chose,
+and "what a tool chose" is not a thing a published claim may rest on. So the purge removes apt too,
+and `build/verify.py` asserts it is gone, exactly as for `dpkg`.
 
 The shape is the same in all three cases and it is the one M2 already specified for `pip`: install,
 use, remove, assert absence. The alternative each time was to narrow a published claim to fit a
@@ -253,9 +325,26 @@ and it costs nothing — a fresh boot holds no secrets, which is the point of th
 
 ## Console
 
-**`fbcon` over firmware framebuffers** — `simpledrm` on UEFI, `vesafb` on BIOS. The module allowlist
-carries `i915`, `amdgpu`, `nouveau` and `simpledrm`; it stays generic until a target machine is
-characterised, at which point it is narrowed or the reason it stays generic is recorded.
+**`fbcon` over firmware framebuffers** — `efifb` on UEFI, `vesafb` on BIOS. **Both are built into
+Debian's kernel** (`CONFIG_FB_EFI=y`, `CONFIG_FB_VESA=y`), so the console needs no module at all on
+either firmware path.
+
+**There is no graphics driver in the allowlist, and this document used to say there was.** It named
+`i915`, `amdgpu`, `nouveau` and `simpledrm`. Three facts, all read off the pinned kernel's own
+config, closed that:
+
+- `CONFIG_DRM_SIMPLEDRM is not set`. **The module does not exist in Debian's kernel**, so a quarter
+  of the old allowlist named a file that was never going to be found. `CONFIG_SYSFB_SIMPLEFB` is
+  unset too; what Debian actually provides on UEFI is `efifb`, and it is `y`.
+- The two firmware framebuffers above are built in, so the mechanism this section names is already
+  satisfied without loading anything.
+- The three DRM drivers need firmware blobs this image does not ship. Loading one takes the
+  framebuffer away from a driver that is working and hands it to one that may not come up — trading
+  a console that is guaranteed for a console that is faster, on an appliance that draws QR codes
+  and text.
+
+They also cost about 70 MiB of the 98 MiB module tree, which is the least interesting of the three
+reasons and the only one that would have been reversible.
 
 **Legacy BIOS needs `vga=791`, and this is not cosmetic.** `vgacon` gives 80×25 text, and the QR
 display is fixed at **85 columns × 43 rows** — so a BIOS boot in text mode could not display a QR
@@ -360,6 +449,20 @@ x-only pubkey pointer where C reads a length, and the library then dereferences 
 nothing calls it today; it is written down because the failure is a crash of the whole appliance
 rather than an error anyone can handle.
 
+**`ctypes.util.find_library` fails silently when `/dev/null` is missing, and this build found out
+the hard way.** The first run of the stage-3d signing check reported `py_secp256k1` from an image
+whose `libsecp256k1.so.2` was present and exported every symbol on the list. The chain: CPython's
+`find_library` shells out to `ldconfig -p` with `stdin=subprocess.DEVNULL`; with no `/dev/null` in
+the tree that raises `FileNotFoundError`; CPython catches it under `except OSError: pass` and
+returns `None`; embit's own bare `except:` turns the `None` into the fallback backend. Two swallowed
+exceptions, one absent character device, and a signer that reports as native.
+
+The image is fine — `/dev/null` is declared in the cpio header and devtmpfs is mounted by PID 1's
+first step. **The tree on disk was what lacked it**, because device nodes cannot be created
+unprivileged, so the check now runs in a mount namespace with five device nodes bound in. It is
+recorded at length because it is the clearest demonstration this project has of why the backend is
+asserted rather than assumed: nothing anywhere printed a warning.
+
 **This is not a constant-time claim.** `py_secp256k1` is not constant-time, but the appliance runs
 exactly one userspace process and has no network, so there is no local observer and no remote peer to
 measure. The realistic observer is physical, which is territory where this appliance already promises
@@ -383,35 +486,43 @@ Each term, and which are mechanism and which are headroom:
 - **Rounding to a power of two** is deliberate: the floor is a number a user checks against their
   machine, and a figure like 634 MiB would look measured to a precision nobody has.
 
+**PID 1 compares against the unrounded requirement, not against the published floor, and the two
+numbers are in the script separately.** `MemTotal` on a machine with 512 MiB installed is always
+somewhat under 512 — firmware reserves some and never gives it back — so a check against the
+rounded figure would refuse to boot on exactly the machine the figure describes. The requirement is
+what the machine has to satisfy; the floor is what the user is told to look for. `build/verify.py`
+re-derives both from the measured tree and fails the build if the script carries either wrongly.
+
 **The measured inputs are published against the run they came from** — unpacked rootfs, initramfs,
 kernel, ISO — because a floor derived from an unpublished number is an assertion wearing a formula.
 
-**Measured**, run [34173912095](https://github.com/allisson/aobs/actions/runs/34173912095) on
-`ubuntu-24.04`, `mmdebstrap --mode=unshare` against the 88-package pool, read off the tar listing:
+**Measured**, run [34228074569](https://github.com/allisson/aobs/actions/runs/34228074569) on
+`ubuntu-24.04`, unprivileged, from `build/mkiso.sh` end to end:
 
 | | |
 |---|---|
-| **unpacked rootfs** | **132.6 MiB** (6874 members) |
-| `usr/share/locale` | 27.3 MiB |
-| `usr/lib/python3` | 24.4 MiB |
-| `usr/share/doc` | 7.0 MiB |
-| `usr/share/keymaps` | 0.4 MiB, 216 maps |
+| **unpacked rootfs** | **155 MiB** (6264 paths) |
+| **`initramfs.zst`** | **38.2 MiB** |
+| **`vmlinuz`** | **11.6 MiB** |
+| **`bitcoin-signer-amd64.iso`** | **58.0 MiB** |
+| modules shipped | 20, of Debian's 4229 |
 | appliance closure on disk | 88 packages, 41 MiB of compressed `.deb` |
 | kernel package | 107.9 MiB compressed, unpacked separately |
 
-`floor = next_power_of_two(2 × 132.6 + 64 + 128) = next_power_of_two(457.2)` = **512 MiB**.
+`requirement = 2 × 155 + 64 + 128 = 502 MiB`, so `floor = next_power_of_two(502)` = **512 MiB**.
 
 The Alpine predecessor asserted 512 MiB from a prose estimate and happened to be right. This is the
 same number arrived at from a tree somebody built, which is the difference the roadmap asks for.
 
-**Three caveats on 132.6 MiB, and each moves it down, not up.** It is measured before the purge
-stage removes `dpkg`, `apt` and `agetty`; before `usr/share/doc` is dropped; and before
-`usr/share/locale` is dropped. The floor is therefore an upper bound, and it is stated from the
-upper bound deliberately — a floor that assumes pruning nobody has done yet is a floor that fails
-the first time a prune is skipped.
+**155 MiB is not the same 132.6 MiB this document published at the last milestone, and the
+difference is not drift.** That figure was a rootfs and nothing else, measured before anything was
+added to it or removed from it. This one is the tree that ships: `usr/share/locale`, `doc`, `man`
+and `info` are gone (27.3 MiB of locale alone), and the Python wheel layer, the app tree and the
+pruned module tree are in. The old paragraph of caveats saying the figure could only move down is
+therefore retired — it has moved, in both directions, and this is the number after both.
 
-> Still not measured: the packed initramfs and the ISO. Those need `cpio | zstd` and `xorriso`,
-> neither of which exists yet, and the compression ratio is not something to guess at.
+**What is not published here is a per-directory breakdown of the final tree.** The build does not
+emit one and this document is not going to estimate it.
 
 **No pruning of the Python stdlib.** Stripping it buys little against the risk of a missing-module
 traceback on an appliance with no recovery path.
@@ -480,7 +591,9 @@ The rootfs assertions, each one a published claim checked before an image exists
 | **one signature in each scheme, in the built rootfs** | a name check on the backend module is **not** sufficient. embit binds `schnorrsig`/`xonly`/`keypair` inside their own bare `except: pass`, so a library compiled without those modules imports cleanly, reports the native backend, and fails at taproot signing — mid-session, with a wallet loaded, on BIP86 only |
 | the RAM floor matches the measured size | the formula above is only worth stating if the build re-derives it |
 | `build/inputs/` matches `build/inputs.sha256` on hash **and on set equality** | an unexpected extra file is a failure, not an ignore |
-| `/etc/aobs-release` agrees with the tag and `HEAD` | checked in stage 4 *before* `cpio`, while it is still a file a human can open |
+| `/etc/aobs-release` agrees with the tag and `HEAD` | checked in stage 3d *before* the archive is written, while it is still a file a human can open |
+| no `@PLACEHOLDER@` survived into `build/init` | the floor and the default keymap are substituted by the build. An unsubstituted one is a shell error inside PID 1, on a machine with no scrollback |
+| the ISO carries two El Torito boot images | a hybrid ISO that lost one still builds, still mounts and still boots on whichever firmware the person who built it happens to have. That failure reaches a user, not a build log |
 
 **The BIP84 half compares bytes; the BIP86 half signs and verifies.** RFC6979 plus embit's low-R
 grinding makes ECDSA deterministic, so a pinned vector is meaningful. BIP340 does not promise a

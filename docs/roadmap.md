@@ -215,48 +215,71 @@ a pure-Python signer.
 
 ## M2 — The image builds
 
-- [ ] `mmdebstrap --mode=unshare` builds the rootfs from the pinned snapshot. **No `--privileged`.**
-      Verify unshare mode works in the CI runner early; if it does not, that is a finding, not a
-      licence to reach for `--privileged`.
+- [x] `mmdebstrap --mode=unshare` builds the rootfs from the pinned snapshot. **No `--privileged`.**
+      Verified on `ubuntu-24.04` before anything was built on top of it. Five constraints came out
+      of that verification, all of them about apt or mmdebstrap and none about namespaces;
+      `docs/boot-pipeline.md` lists them.
 - [x] `build/fetch-inputs.sh` — done at M1, see above. `mkiso.sh` consumes the same pool: the
       `deb/appliance` closure is downloaded separately from `deb/harness` precisely so the appliance
       group is complete on its own.
-- [ ] **Purge the transient `pip` with `--auto-remove`.** Installing it into the rootfs pulls
-      `python3-wheel` and `python3-packaging`; removing pip alone would leave both behind, and a
-      `python3-packaging` in the image is a harness package in the rootfs. `build/verify.py` must
-      assert all three are gone, not just pip.
-- [ ] Install Debian's `linux-image-amd64` (6.12 LTS, the same series the predecessor compiled by
-      hand). No kernel compile, no `kernel.config`, no toolchain.
-- [ ] Prune the modules tree to the generic allowlist — `i915`, `amdgpu`, `nouveau`, `simpledrm`,
-      `uvcvideo`, `usbhid`, plus dependencies — and delete everything else, including all of
-      `kernel/net` and `kernel/drivers/net` and every storage driver. Regenerate `modules.dep`.
-- [ ] A `modprobe` blacklist as a cheap second line. It is never cited as the claim.
-- [ ] Install the wheel layer into the rootfs with `pip --no-index` from `build/inputs/`, then remove
-      `pip` before the initramfs is packed. `build/verify.py` fails the build if any package manager
-      survives into the image.
-- [ ] Copy the app tree into the rootfs. Never `pip install` for the app itself.
+- [x] ~~**Purge the transient `pip` with `--auto-remove`.**~~ **Closed differently, and the reason
+      is the group split.** `python3-pip` is a harness-group package, so installing it into the
+      rootfs even for one stage is the one thing the split exists to forbid. The wheels are
+      unpacked from outside by the build host's pip instead, and `pip`, `python3-wheel` and
+      `python3-packaging` are absent by construction rather than by removal. `build/verify.py`
+      asserts all three are gone regardless of how it came to be true.
+- [x] Install Debian's `linux-image-amd64` (6.12 LTS, the same series the predecessor compiled by
+      hand). No kernel compile, no `kernel.config`, no toolchain. **Extracted with `dpkg-deb -x`
+      and never installed** — resolving it drags `initramfs-tools` -> `udev` -> `systemd` into the
+      pool of an appliance whose first published claim is that it has none.
+- [x] Prune the modules tree to the allowlist and regenerate `modules.dep`. **Measured: 20 modules
+      ship, 4209 are deleted.** The allowlist this box named is not the allowlist that shipped:
+      `simpledrm` does not exist in Debian's kernel, `efifb` and `vesafb` are both built in, and the
+      three DRM drivers need firmware this image does not ship — so there is no graphics driver in
+      it at all. `build/modules.allow` says why. `modules.dep` is not in the `.deb`, so the first
+      `depmod` is what creates the graph the prune runs against.
+- [x] A `modprobe` blacklist as a cheap second line. It is never cited as the claim, and
+      `build/modprobe-blacklist.conf` says what it is actually for: the window between PID 1
+      loading the allowlist and PID 1 setting `kernel.modules_disabled=1`.
+- [x] Install the wheel layer with `pip --no-index` from `build/inputs/` — from **outside** the
+      image, per the box above. `build/verify.py` fails the build if any package manager is in it.
+- [x] Copy the app tree into the rootfs at `/opt/aobs`. Never `pip install` for the app itself.
 - [x] Ship the full `console-data` keymap set. **Measured: 0.4 MiB, 216 maps** — they are gzipped,
       and the concern this box existed to test was unfounded. `docs/boot-pipeline.md` has the table.
-- [ ] `build/init` as PID 1: five mounts, UTF-8 console, default keymap, `authorized_default=0` after
-      our devices enumerate and before the first secret, the RAM floor, `exec python3 -m aobs`. No
-      `set -e`; each step checks its own result and a failure is named on the console and held there.
-- [ ] `cpio | zstd` the whole rootfs into the initramfs.
-- [ ] `xorriso` into a hybrid ISO: `isolinux` for BIOS, `grub-efi` for UEFI. Secure Boot is **not**
-      supported in v0.1.
-- [ ] Write `docs/test-harness.md` and remove the skip guard in
+- [x] `build/init` as PID 1. **Seven steps, not six**: the list this box wrote had nothing that
+      loads a module, and with no udev the kernel's usermode helper would have fired at an
+      unpredictable moment — including after `kernel.modules_disabled=1`. Loading the allowlist
+      explicitly is also what makes "after our devices enumerate" a point in time the script can
+      name. No `set -e`; every failure is named on the console and held there forever.
+- [x] ~~`cpio | zstd`~~ **`build/mkinitramfs.py | zstd`.** `find | cpio` reads a tree that already
+      exists, and a tree that already exists cannot contain `/dev/console`: `mknod` is denied in a
+      user namespace, and an initramfs without it gives PID 1 no stdio. The `newc` header carries
+      the device numbers as fields, so the writer declares them. Every member is `root:root` with
+      `SOURCE_DATE_EPOCH` as its mtime, which is most of what M4 will want, for free.
+- [x] `xorriso` into a hybrid ISO: `isolinux` for BIOS, `grub-efi` for UEFI, and the build asserts
+      both El Torito records are there. Secure Boot is **not** supported in v0.1.
+- [x] Write `docs/test-harness.md` and remove the skip guard in
       `tests/test_structure.py::test_there_is_no_screen_port`.
-- [ ] `build/verify.py`: every build-time assertion as a pure function, each fed a deliberately broken
+- [x] `build/verify.py`: every build-time assertion as a pure function, each fed a deliberately broken
       input by the suite to prove it still bites — this is where `tests/test_build_verifier.py` comes
       back, written against the Debian build rather than ported from the Alpine one. Minimum set — no harness package in the rootfs, no
       package manager, `/bin/sh` and `python3` present (the predecessor's first ISO had neither, and
       `build/init` could not have run a line), no `kernel/net`, no module outside the allowlist, no
       getty, the `libsecp256k1` symbols, the RAM floor matching the measured size.
-- [ ] Derive the RAM floor from the measured unpacked size by a stated formula, re-derived by the
-      build so the floor and the image cannot drift apart. **Publish the measured numbers** — unpacked
-      rootfs, initramfs, kernel, ISO — against the run they came from.
+- [x] Derive the RAM floor from the measured unpacked size by a stated formula, re-derived by the
+      build so the floor and the image cannot drift apart. **Published against run 34228074569**:
+      155 MiB unpacked, 38.2 MiB initramfs, 11.6 MiB kernel, 58.0 MiB ISO, floor **512 MiB**. PID 1
+      compares against the unrounded 502, not the rounded 512, because `MemTotal` on a 512 MiB
+      machine is under 512 — `docs/boot-pipeline.md` says why both numbers are in the script.
 
-**Exit**: `out/bitcoin-signer-amd64.iso` exists, every assertion passes, and the size and RAM figures
-are recorded as measurements rather than estimates.
+**Exit**: ~~`out/bitcoin-signer-amd64.iso` exists, every assertion passes, and the size and RAM
+figures are recorded as measurements rather than estimates.~~ **Met**, run
+[34228074569](https://github.com/allisson/aobs/actions/runs/34228074569): the ISO builds on
+`ubuntu-24.04` with no `--privileged`, every assertion passes, both El Torito records are present,
+and the image produced a signature in each scheme with `ctypes_secp256k1`.
+
+**Nothing in M2 proves it boots.** That is M3, and it is a gate for exactly this reason: an ISO that
+builds and asserts cleanly is what the predecessor also had.
 
 ---
 
@@ -280,6 +303,14 @@ finds a framebuffer and enumerates a camera on a real machine.
 - [ ] Record the answers as a **boot-checklist run record** — the checklist is the procedure, the run
       record is the evidence, and only the second is something a stranger can check. Verdicts are
       *pass*, *fail* and *deviated*; the third is load-bearing.
+- [ ] Write `docs/threat-model.md`. **Deferred here from M2 and scheduled nowhere until now**, which
+      in this repository means it was not going to happen. M3 is where it belongs: it is the first
+      milestone with a real machine to be specific about, and the claims it has to state at their
+      true strength are the ones a boot either supports or does not.
+- [ ] Check the two claims a build cannot: that the modules tree really does leave the machine with
+      no network interface, and that the graphics decision holds. `build/modules.allow` ships no
+      DRM driver on the argument that `efifb` and `vesafb` are built in and sufficient. That
+      argument has never met a screen.
 
 **Exit**: one PSBT signed on real hardware and broadcast, and a run record with every row answered.
 

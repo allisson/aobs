@@ -12,6 +12,8 @@ build rather than ported from the Alpine `tests/test_build_verifier.py` this fil
 from __future__ import annotations
 
 import importlib.util
+import io
+import os
 from pathlib import Path
 
 import pytest
@@ -264,3 +266,297 @@ def test_debians_decomposition_of_cpython_is_not_a_shadowed_wheel() -> None:
     # ...and the line is drawn at the right place: a library is still caught.
     with pytest.raises(verify.PinFileError, match="python3-cryptography"):
         verify.no_python_package_in_closure({"python3-minimal", "python3-cryptography"}, wheels)
+
+
+# =================================================================================================
+# The rootfs assertions. `docs/roadmap.md` M2: each one fed an image broken in the exact way it
+# exists to catch. A listing rather than a directory, because building a broken Debian rootfs on
+# disk is not something a unit test should be doing — and because a function that takes a listing
+# is a function the build can call before the image is packed.
+# =================================================================================================
+
+_prune_spec = importlib.util.spec_from_file_location(
+    "aobs_build_prune", ROOT / "build" / "prune_modules.py"
+)
+assert _prune_spec is not None and _prune_spec.loader is not None
+prune = importlib.util.module_from_spec(_prune_spec)
+_prune_spec.loader.exec_module(prune)
+
+_initramfs_spec = importlib.util.spec_from_file_location(
+    "aobs_build_mkinitramfs", ROOT / "build" / "mkinitramfs.py"
+)
+assert _initramfs_spec is not None and _initramfs_spec.loader is not None
+initramfs = importlib.util.module_from_spec(_initramfs_spec)
+_initramfs_spec.loader.exec_module(initramfs)
+
+
+#: A listing shaped like the real one — merged-`/usr`, so `bin` is a symlink and the shell is at
+#: `usr/bin/sh`. Getting that wrong is how an assertion fails on a good image and gets relaxed.
+GOOD_ROOTFS = {
+    "init",
+    "bin",
+    "usr/bin/sh",
+    "usr/bin/python3",
+    "etc/aobs-release",
+    "etc/aobs-modules",
+    "etc/aobs-ec-backend",
+    "opt/aobs/aobs/__main__.py",
+    "opt/aobs-python/textual/__init__.py",
+    "usr/lib/modules/6.12.0/kernel/drivers/hid/usbhid/usbhid.ko.xz",
+}
+
+
+def test_find_output_becomes_paths_without_the_dot_slash() -> None:
+    assert verify.rootfs_paths("./usr/bin/sh\n.\n./etc/\n\n") == {"usr/bin/sh", "etc"}
+
+
+def test_a_clean_rootfs_passes_every_file_level_assertion() -> None:
+    verify.no_forbidden_file_in_rootfs(GOOD_ROOTFS)
+    verify.no_packaging_tool_in_the_python_layer(GOOD_ROOTFS)
+    verify.required_files_present(GOOD_ROOTFS)
+    verify.no_network_module_in_tree(GOOD_ROOTFS)
+
+
+@pytest.mark.parametrize(
+    ("path", "claim"),
+    [
+        ("usr/bin/dpkg", "package manager"),
+        ("var/lib/dpkg", "package manager"),
+        ("usr/bin/apt-get", "package manager"),
+        ("usr/sbin/agetty", "getty"),
+        ("usr/bin/login", "login"),
+        ("usr/lib/systemd/systemd", "init system"),
+        ("etc/inittab", "init system"),
+    ],
+)
+def test_each_thing_the_purge_removes_fails_the_build_if_it_survives(path: str, claim: str) -> None:
+    with pytest.raises(verify.PinFileError) as raised:
+        verify.no_forbidden_file_in_rootfs(GOOD_ROOTFS | {path})
+    assert path in str(raised.value)
+    assert claim in str(raised.value)
+
+
+def test_removing_pip_alone_is_not_enough() -> None:
+    """`python3-packaging` in the image is a harness package in the rootfs.
+
+    The wheel layer is unpacked from outside so none of these ever arrives, which is a stronger
+    position than the purge M2 originally specified — and exactly the reason to keep checking.
+    """
+    for name in ("pip", "wheel", "packaging", "setuptools"):
+        with pytest.raises(verify.PinFileError):
+            verify.no_packaging_tool_in_the_python_layer(
+                GOOD_ROOTFS | {f"opt/aobs-python/{name}/__init__.py"}
+            )
+
+
+def test_a_wheel_whose_name_merely_starts_with_a_forbidden_one_is_not_a_false_positive() -> None:
+    verify.no_packaging_tool_in_the_python_layer(
+        GOOD_ROOTFS | {"opt/aobs-python/packaging_of_nothing/__init__.py"}
+    )
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["init", "usr/bin/sh", "usr/bin/python3", "etc/aobs-release", "etc/aobs-ec-backend"],
+)
+def test_an_image_that_could_not_start_fails_the_build(missing: str) -> None:
+    with pytest.raises(verify.PinFileError) as raised:
+        verify.required_files_present(GOOD_ROOTFS - {missing})
+    assert missing in str(raised.value)
+
+
+def test_a_network_module_left_in_the_tree_fails_the_build() -> None:
+    with pytest.raises(verify.PinFileError):
+        verify.no_network_module_in_tree(
+            GOOD_ROOTFS | {"usr/lib/modules/6.12.0/kernel/drivers/net/ethernet/intel/e1000e.ko.xz"}
+        )
+    with pytest.raises(verify.PinFileError):
+        verify.no_network_module_in_tree(
+            GOOD_ROOTFS | {"usr/lib/modules/6.12.0/kernel/net/ipv6/ipv6.ko.xz"}
+        )
+
+
+def test_a_harness_package_in_the_rootfs_fails_the_build() -> None:
+    apt = verify.parse_pin_file(APT_TEXT)
+    verify.no_harness_package_in_rootfs({"dash", "busybox", "python3"}, apt)
+    with pytest.raises(verify.PinFileError) as raised:
+        verify.no_harness_package_in_rootfs({"dash", "git"}, apt)
+    assert "git" in str(raised.value)
+
+
+def test_a_stray_module_the_allowlist_does_not_reach_fails_the_build() -> None:
+    graph = {"usbhid": ["usbcore"], "usbcore": [], "e1000e": []}
+    verify.modules_are_reachable_from_the_allowlist(graph, ["usbhid"], {"usbhid", "usbcore"})
+    with pytest.raises(verify.PinFileError) as raised:
+        verify.modules_are_reachable_from_the_allowlist(
+            graph, ["usbhid"], {"usbhid", "usbcore", "e1000e"}
+        )
+    assert "e1000e" in str(raised.value)
+
+
+def test_the_symbol_assertion_catches_the_0_8_0_alias_removal() -> None:
+    """upstream removed `secp256k1_schnorrsig_sign` in 0.8.0, and embit binds the old name.
+
+    Against such a library embit's `except: pass` binds nothing, the backend still reports as
+    native, and BIP86 signing fails when a user tries to sign a taproot input.
+    """
+    verify.libsecp256k1_exports_what_embit_binds(set(verify.REQUIRED_SECP256K1_SYMBOLS))
+    with pytest.raises(verify.PinFileError) as raised:
+        verify.libsecp256k1_exports_what_embit_binds(
+            set(verify.REQUIRED_SECP256K1_SYMBOLS) - {"secp256k1_schnorrsig_sign32"}
+        )
+    assert "schnorrsig_sign32" in str(raised.value)
+
+
+def test_the_floor_is_a_power_of_two_above_the_unrounded_requirement() -> None:
+    need, floor = verify.ram_floor(152)
+    assert need == 2 * 152 + 64 + 128
+    assert floor == 512
+    assert need <= floor
+    # Two numbers on purpose: `MemTotal` on a 512 MiB machine is under 512, so a check against the
+    # rounded figure would refuse to boot on exactly the machine the figure names.
+    assert need != floor
+
+
+def test_a_rootfs_that_measured_as_nothing_is_not_a_rootfs() -> None:
+    with pytest.raises(verify.PinFileError):
+        verify.ram_floor(0)
+
+
+def test_an_unsubstituted_placeholder_in_pid_1_fails_the_build() -> None:
+    verify.init_is_fully_substituted("RAM_REQUIRED_MIB=496\nloadkeys us\n")
+    with pytest.raises(verify.PinFileError) as raised:
+        verify.init_is_fully_substituted("RAM_REQUIRED_MIB=@RAM_REQUIRED_MIB@\n")
+    assert "@RAM_REQUIRED_MIB@" in str(raised.value)
+
+
+RELEASE = "release: v0.1.0\nreleased: 2026-09-14\ngit-commit: {commit}\ndirty: no\n"
+
+
+def test_the_release_file_has_to_agree_with_the_tree_it_was_built_from() -> None:
+    commit = "a" * 40
+    verify.release_agrees_with_git(
+        RELEASE.format(commit=commit), tag="v0.1.0", commit=commit, dirty=False
+    )
+    with pytest.raises(verify.PinFileError):
+        verify.release_agrees_with_git(
+            RELEASE.format(commit=commit), tag="v0.2.0", commit=commit, dirty=False
+        )
+    with pytest.raises(verify.PinFileError):
+        verify.release_agrees_with_git(
+            RELEASE.format(commit=commit), tag="v0.1.0", commit="b" * 40, dirty=False
+        )
+
+
+def test_a_development_build_may_not_carry_a_version_shaped_string() -> None:
+    """The failure this prevents is somebody signing with a snapshot months later.
+
+    A build that is not at a clean tag is skipped, not faked — but "skipped" means there is no tag
+    to agree with, never that any string is acceptable.
+    """
+    commit = "c" * 40
+    verify.release_agrees_with_git(
+        f"release: development\ngit-commit: {commit}\ndirty: yes\n",
+        tag="",
+        commit=commit,
+        dirty=True,
+    )
+    with pytest.raises(verify.PinFileError) as raised:
+        verify.release_agrees_with_git(
+            RELEASE.format(commit=commit), tag="", commit=commit, dirty=False
+        )
+    assert "version-shaped" in str(raised.value)
+
+
+# --- The pruner ------------------------------------------------------------------------------------
+
+
+def test_a_module_filename_becomes_its_module_name() -> None:
+    """Hyphens and the compression suffix, and both bite.
+
+    `hid-generic.ko.xz` is the module `hid_generic`. An allowlist written against filenames would
+    match nothing for exactly the driver that binds the keyboard.
+    """
+    assert prune.module_name("kernel/drivers/hid/hid-generic.ko.xz") == "hid_generic"
+    assert prune.module_name("kernel/drivers/usb/core/usbcore.ko") == "usbcore"
+    assert prune.module_name("kernel/x.ko.zst") == "x"
+
+
+def test_the_dependency_closure_includes_what_it_was_not_asked_for() -> None:
+    graph = prune.parse_modules_dep(
+        "kernel/a.ko: kernel/b.ko kernel/c.ko\nkernel/b.ko: kernel/c.ko\nkernel/c.ko:\n"
+        "kernel/unrelated.ko:\n"
+    )
+    assert prune.closure(graph, ["a"]) == {"a", "b", "c"}
+
+
+def test_a_cycle_in_the_dependency_graph_terminates() -> None:
+    graph = {"a": ["b"], "b": ["a"]}
+    assert prune.closure(graph, ["a"]) == {"a", "b"}
+
+
+def test_a_module_the_kernel_builds_in_is_not_an_error_here() -> None:
+    """`build/modules.allow` names host controllers a given kernel may have as `=y`.
+
+    A machine whose `xhci_pci` is built in has nothing to load and nothing missing. The error case
+    is an allowlist that resolves to NOTHING, and that is checked where the message can say so.
+    """
+    assert prune.closure({"usbhid": []}, ["usbhid", "xhci_pci"]) == {"usbhid", "xhci_pci"}
+
+
+def test_an_empty_allowlist_would_delete_every_module_and_is_refused() -> None:
+    with pytest.raises(prune.PruneError):
+        prune.parse_allowlist("# nothing but comments\n\n")
+
+
+def test_a_modules_dep_line_with_no_colon_is_an_error_not_a_guess() -> None:
+    with pytest.raises(prune.PruneError):
+        prune.parse_modules_dep("kernel/a.ko kernel/b.ko\n")
+
+
+# --- The initramfs writer --------------------------------------------------------------------------
+
+
+def test_the_device_nodes_are_declared_rather_than_created(tmp_path: Path) -> None:
+    """`mknod` is denied in a user namespace, so `/dev/console` cannot exist in the tree on disk.
+
+    An initramfs without it gives PID 1 no stdio, which on this appliance means a failure message
+    nobody can read. The header carries the major and minor as fields, so the entry is written
+    without the build ever having privilege.
+    """
+    (tmp_path / "init").write_text("#!/bin/sh\n")
+    stream = io.BytesIO()
+    initramfs.pack(tmp_path, stream, mtime=0)
+    archive = stream.getvalue()
+    assert b"dev/console\0" in archive
+    # 070701, then 13 hex fields; rdevmajor is the tenth and rdevminor the eleventh.
+    header = archive[archive.index(b"dev/console\0") - 110 :][:110]
+    assert header[6 + 9 * 8 : 6 + 10 * 8] == b"00000005"
+    assert header[6 + 10 * 8 : 6 + 11 * 8] == b"00000001"
+
+
+def test_every_member_is_written_as_root_whoever_built_it(tmp_path: Path) -> None:
+    (tmp_path / "init").write_text("#!/bin/sh\n")
+    stream = io.BytesIO()
+    initramfs.pack(tmp_path, stream, mtime=0)
+    archive = stream.getvalue()
+    header = archive[archive.index(b"init\0") - 110 :][:110]
+    assert header[6 + 2 * 8 : 6 + 3 * 8] == b"00000000"  # uid
+    assert header[6 + 3 * 8 : 6 + 4 * 8] == b"00000000"  # gid
+
+
+def test_a_fifo_left_in_the_tree_is_refused_rather_than_quietly_dropped(tmp_path: Path) -> None:
+    """A fifo or a socket in a tree that starts from nothing every boot is somebody's leftover.
+
+    Packing one silently is the wrong kind of quiet: `newc` has no way to say what it is, so the
+    entry would arrive as a zero-length regular file with a plausible name.
+    """
+    (tmp_path / "init").write_text("#!/bin/sh\n")
+    os.mkfifo(tmp_path / "stray.fifo")
+    with pytest.raises(initramfs.InitramfsError):
+        initramfs.pack(tmp_path, io.BytesIO(), mtime=0)
+
+
+def test_an_archive_with_no_init_would_panic_the_kernel_and_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(initramfs.InitramfsError):
+        initramfs.main(["--rootfs", str(tmp_path), "--output", str(tmp_path / "out.cpio")])
