@@ -139,10 +139,11 @@ jobs:
           n=$(ls $pool/*.deb | wc -l)
           echo "pool: $n debs, $(du -sh $pool | cut -f1)"
           # The last run silently used a STALE CACHE: 37 debs, the pre-#6 pool, and stage 3 failed
-          # rc=25 on the closure defect #6 had already fixed. The cache key now carries
+          # rc=25 on the closure defect #6 had already fixed. #7 then took the closure to 88 with
+          # `?essential`. The cache key now carries
           # build/inputs.sha256, but a count is the cheap check that the key did its job — a probe
           # that measures the wrong inputs is worse than one that does not run.
-          test "$n" -eq 57 || { echo "RESULT stage3: ABORTED — pool has $n debs, expected the 57-package closure (stale cache?)"; exit 1; }
+          test "$n" -eq 88 || { echo "RESULT stage3: ABORTED — pool has $n debs, expected the 88-package closure (stale cache?)"; exit 1; }
 
           . ./build/snapshot.env
           # The kernel is EXCLUDED, exactly as build/fetch-inputs.sh excludes it. #6: resolving
