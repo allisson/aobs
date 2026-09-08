@@ -235,7 +235,8 @@ a pure-Python signer.
       `pip` before the initramfs is packed. `build/verify.py` fails the build if any package manager
       survives into the image.
 - [ ] Copy the app tree into the rootfs. Never `pip install` for the app itself.
-- [ ] Ship the full `console-data` keymap set. Measure what it costs.
+- [x] Ship the full `console-data` keymap set. **Measured: 0.4 MiB, 216 maps** — they are gzipped,
+      and the concern this box existed to test was unfounded. `docs/boot-pipeline.md` has the table.
 - [ ] `build/init` as PID 1: five mounts, UTF-8 console, default keymap, `authorized_default=0` after
       our devices enumerate and before the first secret, the RAM floor, `exec python3 -m aobs`. No
       `set -e`; each step checks its own result and a failure is named on the console and held there.
@@ -352,8 +353,10 @@ Not in scope for the release, recorded so nobody has to rediscover that they wer
   never ran in the predecessor and cannot run before a tag exists. Worth doing once there is a tag to
   test it against, with the limit stated: a key in GitHub's secret store corroborates the build, not
   the platform.
-- **Revisit the keymap set** if the measured RAM cost of full `console-data` turns out to be absurd —
-  with a number in hand, not a guess.
+- ~~**Revisit the keymap set** if the measured RAM cost of full `console-data` turns out to be
+  absurd~~ — **closed, with the number in hand: 0.4 MiB, 216 maps, gzipped**, against a 512 MiB
+  floor. Measured in the built rootfs at M2, run 34173912095. There is nothing to revisit and the
+  picker keeps every map.
 - **Narrow the module allowlist** per additional machines as boot-checklist run records accumulate.
 - Multisig is **out of scope** and is not a deferral. A multisig keychain is not a Wallet in this
   project's vocabulary.
