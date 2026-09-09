@@ -62,6 +62,29 @@ the mode is named after, so this was not a safe assumption.
 on, so `--privileged` is not an escape hatch available to this build. If unshare mode ever stops
 working, that is a finding to be written down here, not a licence.
 
+### Building it on a machine that is not that runner
+
+`build/mkiso.sh` needs an amd64 Linux host with unprivileged user namespaces, and most developer
+machines are neither. `build/mkiso-docker.sh` supplies one: `build/Dockerfile.isohost` is the
+`ubuntu-24.04` the runner is, with the same tool list CI installs, and the script mounts the working
+tree into it and runs `build/mkiso.sh` there as uid 1001. The build, the inputs and the assertions
+are unchanged — what the container replaces is the host, not the build.
+
+**`--security-opt seccomp=unconfined` is required, and it is not a privilege.** Docker's default
+seccomp profile denies `unshare(CLONE_NEWUSER)` — the syscall unshare mode is named after — so
+without it stage 1 dies with `unshare syscall failed: Operation not permitted`. The flag widens the
+*host's* syscall filter for that one container; the build inside still runs unprivileged, with no
+`--privileged` and no added capability. That is the distinction the rule above is about: root was
+not reached for, and is still not available to this build.
+
+Two things this cost, recorded because both cost a full build to find:
+
+- **Never pipe the build's output.** A `sh build/mkiso.sh | tail` reported success for a build whose
+  stage 1 had failed, because a pipeline exits with its last command's status. `build/mkiso-docker.sh`
+  pipes nothing.
+- **The recipe was in a local image and nowhere else** until this section. The ISO can be rebuilt by
+  a stranger only if the host it needs is written down, and CI's runner is not one a reader has.
+
 **Five constraints on stage 1 came out of that verification.** None is about namespaces; every one
 is about apt or mmdebstrap, and each was found by a build failing rather than by reading:
 
