@@ -357,6 +357,10 @@ the same shape — read what the repository already says, and check the artefact
 - [ ] Run it. Boot the stick, walk the keymap picker, generate a wallet, export the xpub by QR, build
       an unsigned PSBT in a watch-only wallet, scan it, review it, sign it, scan the signature back,
       broadcast on signet.
+- [ ] With the wallet loaded, confirm the three ways in read as unavailable — *one wallet per
+      session* beside each row and the note under the list — and that `F10` on one does nothing.
+      Photographed with the console check below, which is the boot that can answer whether the
+      right-aligned reason and the dimmed row survive on the panel.
 - [ ] Pull the boot medium out mid-session and keep signing. That is the cheapest check of the
       amnesia claim, and it is only a claim until someone has done it.
 - [ ] **Check what the console can actually draw**, on one screen showing all of it. Both halves
