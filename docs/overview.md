@@ -174,11 +174,11 @@ cannot be.
 | `docs/adr/0001-debian-base-and-stock-kernel.md` | The base OS and the kernel, and what the switch cost |
 | `docs/adr/0002-python-dependencies-from-pinned-wheels.md` | Where the Python layer comes from, and where a prebuilt blob may live |
 | `docs/boot-pipeline.md` | The build's stages, PID 1, the module allowlist, the RAM floor |
-| `docs/threat-model.md` | Adversary tiers, and every claim above at its stated strength |
-| `docs/reproducible-build.md` | The reproducibility contract and the divergence sources it fixes |
+| `docs/threat-model.md` — **not yet written**, due in M3 | Adversary tiers, and every claim above at its stated strength |
+| `docs/reproducible-build.md` — **not yet written**, due in M4 | The reproducibility contract and the divergence sources it fixes |
 | `docs/test-harness.md` | The four tiers and what each one is authoritative for |
-| `docs/release.md` | The release ritual, the manifest, the release-mode refusals |
-| `docs/boot-checklist.md` | The checks only a booted appliance can answer |
+| `docs/release.md` — **not yet written**, due in M5 | The release ritual, the manifest, the release-mode refusals |
+| `docs/boot-checklist.md` — **not yet written**, due in M3 | The checks only a booted appliance can answer |
 | `docs/psbt-review-model.md`, `docs/review-screen.md` | The proof rule, the three output categories, the screen |
 | `docs/seed-entry.md`, `docs/secret-hygiene.md` | Mnemonic and passphrase entry, and how secrets are handled |
 | `docs/address-verification.md` | Address display and the proof behind it |
