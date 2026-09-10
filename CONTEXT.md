@@ -41,6 +41,27 @@ firmware before Linux starts and never read again, so it can be physically remov
 the Session. Do not call it storage — nothing is ever written to it, which is what makes pulling it
 out the cheapest check of the amnesia guarantee.
 
+## Session boot
+
+A boot that runs the appliance as shipped: `build/init` is PID 1 and the application is the only
+userspace process. It is what a *Session* is, named as a boot so that it can be contrasted with the
+one below. Every claim about what the appliance *does* — a Wallet loaded, a PSBT reviewed and
+signed, the boot medium pulled and signing continuing — can only be answered here, because there is
+no prompt and nothing to inspect from.
+
+## Inspection boot
+
+A boot where the person at the machine types `rdinit=/bin/sh` at the bootloader, replacing the
+application with a shell in order to look at the image. It is what makes the *absence* claims
+checkable by a stranger with `ls`, and it is not defended against: a person holding the boot medium
+already owns the machine, and a fresh boot holds no secrets.
+
+Two claims **do not survive the substitution** and must never be written up as if they do: the
+process count, because the stranger's own shell is PID 1; and `authorized_default=0`, because
+`build/init` is what writes it and `build/init` did not run. Both are source-level checks instead.
+Every row of a boot checklist names which of the two boots answers it — a row that does not name
+one is not runnable.
+
 ## Offline
 
 The appliance's network property: **no network module and no network configuration tool is present in
@@ -73,10 +94,18 @@ device is authorized once the appliance is up.**
 The mounting half is structural; the driver half is a Module allowlist, which is absence. Both halves
 are stated at their own strength in `docs/threat-model.md`.
 
-The blanket phrasing "no USB" is wrong and must not be used — the keyboard is a USB device and so
-is the camera, and the kernel enumerates and binds a driver to both. Two classes, not one: HID
-carries mnemonic and passphrase entry, UVC is the QR channel's only inbound route. Storage,
+The blanket phrasing "no USB" is wrong and must not be used — the camera is a USB device, and so is
+an external keyboard, and the kernel enumerates and binds a driver to both. Two classes, not one:
+HID carries mnemonic and passphrase entry, UVC is the QR channel's only inbound route. Storage,
 networking, audio, printer, and serial classes are refused.
+
+The USB half of the claim is about **what USB binds**, never about where keystrokes come from. On a
+laptop the keyboard is typically not a USB device at all: it sits behind a built-in i8042 controller
+that the kernel image itself carries, outside the Module allowlist's reach and outside
+`authorized_default=0`. That is how the machine in the boot-checklist run record was driven. The
+claim does not weaken — an i8042 controller has two fixed ports on an embedded controller and no
+arbitrary-class hotplug — but a sentence that says "the keyboard is a USB device" is false on the
+only machine this appliance has run on, and saying it is a defect.
 
 "USB is restricted to the HID class" was the earlier wording and it was **false** — a webcam is
 USB *Video* Class. Do not reintroduce it. The mechanism, the tests, and the stated limits live in
@@ -96,10 +125,18 @@ restating an absence claim as structural is a defect rather than a wording prefe
 
 ## Module allowlist
 
-The explicit list of kernel modules the image keeps — framebuffer/DRM, `uvcvideo`, `usbhid` and their
-dependencies — with everything else deleted from the modules tree at build time, `kernel/net`,
-`drivers/net` and every storage driver included. It is the mechanism behind the current *Offline*
-claim and behind half of *No data path*, at **absence** strength.
+The explicit list of kernel modules the image keeps — the USB host controllers, `usbhid`,
+`hid_generic`, `uvcvideo` and their dependencies — with everything else deleted from the modules
+tree at build time, `kernel/net`, `drivers/net` and every storage driver included. It ships **no
+graphics driver**: the console rests on a firmware framebuffer that is built into the kernel, and
+naming DRM drivers here was an earlier wording that `build/modules.allow` corrected. It is the
+mechanism behind the current *Offline* claim and behind half of *No data path*, at **absence**
+strength.
+
+It says nothing about drivers the kernel image carries built in, and a claim must not be attributed
+to it that it cannot make. `efifb`, `vesafb`, the vt keyboard handler and the i8042 controller are
+`=y` in the pinned kernel: they are in the image whatever this file says, they cannot be removed by
+editing it, and the reasons they are wanted are recorded where the allowlist's are.
 
 The `modprobe` blacklist beside it is a second line and is **never** the claim: a blacklist is a
 policy, and the allowlist is a fact about what is in the image. Say "the module is not present",
@@ -301,9 +338,17 @@ claim carries the conditions that retract it, or it becomes permanent by acciden
 
 ## Boot-checklist run record
 
-The record that the boot checklist was run, on which machine, and what each item answered — one per
-release, published beside the ISO. The checklist is the *procedure*; the run record is the
-*evidence*, and only the second one is a thing a stranger can check. It is an attestation: signed,
-naming an identified operator and an identified machine. Its verdicts are *pass*, *fail* and
-*deviated*, and the third is the load-bearing one — it marks where a release's evidence stops
-matching the checklist's claim, which a missing row or a generous *pass* would hide.
+The record that the boot checklist was run, on which machine, and what each item answered. The
+checklist is the *procedure*; the run record is the *evidence*, and only the second one is a thing a
+stranger can check. It names an identified operator and an identified machine — identified by class,
+which is what someone reproducing the run has to match, never by serial number. Its verdicts are
+*pass*, *fail* and *deviated*, and the third is the load-bearing one: it marks where the evidence
+stops matching the checklist's claim, which a missing row or a generous *pass* would hide. A
+*deviated* verdict without a written reason is not a verdict.
+
+There are two kinds and conflating them costs the distinction. An **in-repo run record** lives in
+`docs/boot-runs/`, is unsigned, and exists so that the evidence is reviewable in the same diff as
+the change it authorises — it is what closes the M3 gate, which happens before any release exists to
+publish beside. A **release run record** is one per release, published beside the ISO, and is an
+attestation: signed, under the same key as the manifest. The second does not replace the first; a
+release cites the runs it rests on.

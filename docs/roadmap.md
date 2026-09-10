@@ -344,9 +344,73 @@ Signet was the network written into the script below; testnet4 is a peer of it i
 `docs/network-selection.md` and the substitution changes nothing the run was checking.
 
 **The gate stays open.** The exit is two things joined by an *and*, and only the first is met: there
-is no run record, because `docs/boot-checklist.md` has not been written, and none of the boxes below
-has been answered as evidence a stranger can read. One machine that boots is also not a
-hardware-compatibility claim, and the README does not make one.
+is no run record, and none of the boxes below has been answered as evidence a stranger can read. One
+machine that boots is also not a hardware-compatibility claim, and the README does not make one.
+
+**The machine was then characterised, and characterising it found a fourth fault — this one in the
+vocabulary.** The target is an **Acer Chromebook 514 `CB514-1H-C0FF`** (Intel Apollo Lake,
+manufactured 2020-10), booted through **coreboot's `RW_LEGACY` SeaBIOS payload with the machine in
+developer mode**: a BIOS path, so `vga=791` and `vesafb` drew every screen this project has ever
+seen and `efifb` remains unobserved. Keystrokes came from the **laptop's own keyboard** — and that is
+the fault. `build/modules.allow` said *"`hid_generic` is the driver that actually binds a keyboard"*,
+`CONTEXT.md` said *"the keyboard is a USB device and so is the camera"*, and on the only machine this
+appliance has ever run on neither module carried a keystroke: `CONFIG_SERIO_I8042=y` and
+`CONFIG_KEYBOARD_ATKBD=y` put the whole path in the kernel image, outside the allowlist's reach and
+outside `authorized_default=0`. `CONFIG_KEYBOARD_CROS_EC=m` is *deleted* by the prune, so a
+Chromebook that routed input through its embedded controller instead would have booted to a screen
+with no keys.
+
+**And then the inspection boot was attempted for the first time, and it had never worked.** Two
+faults, one on top of the other, in the boot that every *absence* claim's checkability rests on.
+
+**The prompt could not be reached.** `build/isolinux.cfg` said *"a person standing at the bootloader
+can type `rdinit=/bin/sh`"*, the README said the same, and neither said how: with `PROMPT 0` and
+`TIMEOUT 0` there is no prompt, no menu and no countdown, and SYSLINUX shows `boot:` only while
+**Shift** or **Alt** is held, or with Caps Lock or Scroll Lock set — two keys a Chromebook does not
+have. And the entry's label has to be typed first, because the prompt reads its first word as a
+kernel image name.
+
+**It took two keyboards.** Shift and Alt on the target machine's built-in keyboard produced nothing
+— SYSLINUX reads the BIOS keyboard-flags byte and this firmware does not populate it from the
+embedded controller — while an external USB keyboard with Caps Lock set opened the prompt at once.
+That keyboard then died at kernel handover, correctly: in an inspection boot `build/init` never
+runs, so `xhci_pci`, `usbhid` and `hid_generic` are never loaded and a USB keyboard has no driver,
+while the built-in one survives on the compiled-in i8042 path. **External keyboard for the
+bootloader, built-in keyboard for the shell** — an operational fact no document could have deduced
+and none of them had.
+
+**Then the command line itself was wrong, in six documents.** `init=` is not the parameter for this
+image and never was. The whole rootfs is the initramfs, so the kernel never mounts a root
+and never consults `init=`: `init/main.c` runs `ramdisk_execute_command` — `/init` by default,
+overridden by **`rdinit=`** — and only falls through to `init=` if that *fails*. `/init` is
+`build/init` and it succeeds. So the documented command line is accepted by the bootloader, ignored
+by the kernel, and boots the appliance: **no error, no hint, a session where an inspection shell was
+asked for.** It is now `rdinit=/bin/sh` everywhere, and
+`tests/test_structure.py::test_no_document_tells_a_stranger_to_type_init_instead_of_rdinit` fails
+the build if the wrong one returns to any of the eight published places.
+
+This is the worst of the faults so far, and worth being exact about why. The others cost a boot
+each. This one meant that **the mechanism the project offers a stranger for checking its absence
+claims had never been performed by anyone** — not in this milestone's three failed boots, not in the
+run that signed on testnet4, not by the author. The second hardware fault was diagnosed by unpacking
+the initramfs and chrooting into it *on a dev machine*, which is precisely what one does when the
+inspection boot does not work and one has not noticed that it does not work.
+
+**So the bootloader changed.** `build/isolinux.cfg` now sets `PROMPT 1` and `TIMEOUT 30` — three
+seconds, cancelled by the first keystroke — and carries a second entry, `inspect`, identical to
+`aobs` but for `rdinit=/bin/sh`. `build/grub.cfg` gets the same two entries and `timeout=3`. The
+no-menu principle survives intact: there is still nothing to configure and still no menu, and what
+was traded is three seconds against a door that previously opened only on firmware that populates
+one BIOS byte. Typing the parameter by hand still works and is still documented, because a stranger
+auditing absence claims has every reason to distrust an entry someone else named `inspect`.
+
+Same shape as the other four, one layer up: **a claim the repository stated correctly in prose,
+about the wrong mechanism, and never checked.** So `build/verify.py` now reads the pinned kernel's
+own `/boot/config-*` before the prune and fails the build if the six symbols the console and the
+keyboard rest on stop being `=y` — `FB_EFI`, `FB_VESA`, `FRAMEBUFFER_CONSOLE`, `SERIO_I8042`,
+`KEYBOARD_ATKBD`, `VT`. None of them can be in `build/modules.allow`, and that is the point: a
+Debian that ships one as `m` deletes the console or the keyboard from the image, and every other
+assertion in the file still passes.
 
 Worth recording as a pattern, because all three findings share it: **each fault was a claim the
 repository stated correctly in prose and never checked.** `mount` was documented as coming from
@@ -362,19 +426,34 @@ the same shape — read what the repository already says, and check the artefact
       signer. Deliberately **not** done alongside the boot fixes: it changes a working decode path,
       and M3 is a gate precisely to stop that.
 
-- [ ] **Choose and characterise the target machine**: make, age, BIOS or UEFI, whether Secure Boot can
+- [x] **Choose and characterise the target machine**: make, age, BIOS or UEFI, whether Secure Boot can
       be disabled in its firmware, built-in webcam or USB. Nothing below can be judged without this.
-      *Partly answered by the signing run above: a Chromebook, booted from a live USB stick. Make,
-      age, firmware path, Secure Boot and whether the camera is built-in are still unrecorded, so
-      the row stays open.*
-- [ ] Narrow the generic module allowlist to what that machine actually needs, or record why it stays
-      generic.
-- [ ] `docs/boot-checklist.md`: the checks only a booted appliance can answer, published with the ISO.
+      *Answered above and in `docs/threat-model.md`'s* The firmware is not the appliance *section. The
+      Secure Boot question does not have its usual answer on this machine: stock coreboot will not
+      boot a foreign USB at all, so the firmware was not configured but bypassed, and v0.1 does not
+      support Secure Boot on any host. The camera is the machine's **built-in lid webcam**, and
+      unlike the keyboard it is genuinely a USB device — it bound through `uvcvideo`, the one UVC
+      driver the image ships, which is what the earlier signing run's enumeration recorded.*
+- [x] Narrow the generic module allowlist to what that machine actually needs, or record why it stays
+      generic. *Recorded in `build/modules.allow`: all four USB host controllers stay. The target is
+      xHCI-only, so narrowing would trade "boots on a machine with USB" for "boots on a machine with
+      xHCI" and retire every laptop older than about 2010 — the hardware most likely to be free for
+      this job — to save a few hundred KiB of a tree already cut from 98 MiB.*
+- [x] `docs/boot-checklist.md`: the checks only a booted appliance can answer, published with the ISO.
+      *Written. Three row families, because two claims cannot be answered by a boot at all: `I-n`
+      inspection boot, `S-n` session boot, `R-n` read the repository. The run-record template is its
+      last section rather than a separate file — a template that lives away from its procedure
+      drifts from it, which is this milestone's recurring fault in miniature.*
 - [ ] Run it. Boot the stick, walk the keymap picker, generate a wallet, export the xpub by QR, build
       an unsigned PSBT in a watch-only wallet, scan it, review it, sign it, scan the signature back,
-      broadcast on signet. *Done on testnet4 — see the signing run above. The row stays open because
-      it is the run **record** that closes it, not the run: no verdict per step has been written
-      down, and the checklist it would be written against does not exist yet.*
+      broadcast on a non-mainnet network. *Done on testnet4 — see the signing run above. The row
+      stays open because it is the run **record** that closes it, not the run: no verdict per step
+      has been written down. The checklist now exists — `S-1` through `S-11` — so the row is
+      runnable, and the inspection boot comes first because `I-9` is where a rebuild is discovered.*
+      **The network is deliberately not pinned in the procedure**: `docs/network-selection.md`
+      treats testnet4 and signet as peers, faucets and explorers come and go, and naming one would
+      manufacture a `deviated` verdict for something the check never cared about. The run record
+      names the network and the txid.
 - [ ] With the wallet loaded, confirm the three ways in read as unavailable — *one wallet per
       session* beside each row and the note under the list — and that `F10` on one does nothing.
       Photographed with the console check below, which is the boot that can answer whether the
@@ -392,10 +471,30 @@ the same shape — read what the repository already says, and check the artefact
       stated correctly in prose and never checked.* Replacing the glyphs is deliberately **not**
       done in advance — two of them sit inside row templates that `docs/review-screen.md` and
       `docs/scan-feedback.md` fix character by character, and the check is cheaper than the guess.
+      **Answered, and the answer was all five.** It did not need hardware in the end, which is the
+      better outcome: `build/init` never calls `setfont` and `loadkeys` does not touch the console
+      map, so the vt uses the kernel's default map, generated from `drivers/tty/vt/cp437.uni` —
+      **303 codepoints, and none of the five among them.** That is a fact a reader can check, where
+      a photograph would have been a fact they had to take on trust. Confirmed against real
+      rendered output too: the README's four blocks are renders the suite asserts character for
+      character, and `▮ ▯ —` appear in them.
+
+      The substitutions: `█`/`░` for the slot map (solid versus dither keeps holes looking like
+      holes, both one column, `MAX_SLOTS` unaffected), `!` for the NOT PROVEN marker (two columns,
+      as `⚠ ` was, so `docs/review-screen.md`'s row widths do not move), and `-` for both dashes
+      across 25 rendered strings in nine modules. One narrow escape worth recording: `•` U+2022,
+      the passphrase masking character, **is** in the repertoire — that one would have masked
+      nothing.
+
+      And the budget stopped being prose. `tests/test_structure.py` now renders every screen and
+      reads every UI string constant against the repertoire as a frozenset citing the kernel file,
+      because the four README blocks are not every screen: the NOT PROVEN warning is deliberately
+      not among them, which is exactly how `⚠` sat unchecked. `I-9` on hardware is now
+      *confirmation of a derivation* rather than the only way to know.
 - [ ] Check each claim in the image, **and say which boot each check belongs to** — the row as
       written was not runnable, because a session has no prompt and the checks were listed as if it
       did. `docs/overview.md` now carries the split; the checklist has to repeat it per row.
-      - In an `init=/bin/sh` boot: `cat /proc/mounts`, `ls /sys/block`, `command -v ip`,
+      - In an `rdinit=/bin/sh` boot: `cat /proc/mounts`, `ls /sys/block`, `command -v ip`,
         `ls /lib/modules/*/kernel/net`, `ls /lib/modules/*/kernel/drivers/usb`.
       - **Not** `ls -d /proc/[0-9]*` and **not** `cat /sys/bus/usb/devices/usb*/authorized_default`:
         that boot replaces PID 1, so the count is the stranger's own shell and `build/init` never
@@ -405,15 +504,47 @@ the same shape — read what the repository already says, and check the artefact
       - In an ordinary session: pull the boot medium out and keep signing.
 - [ ] Record the answers as a **boot-checklist run record** — the checklist is the procedure, the run
       record is the evidence, and only the second is something a stranger can check. Verdicts are
-      *pass*, *fail* and *deviated*; the third is load-bearing.
-- [ ] Write `docs/threat-model.md`. **Deferred here from M2 and scheduled nowhere until now**, which
+      *pass*, *fail* and *deviated*; the third is load-bearing, and a *deviated* with no written
+      reason is not a verdict. *This one goes in `docs/boot-runs/`, unsigned: the gate's exit is a
+      complete record, and the evidence has to be reviewable in the same diff as the change it
+      authorises — which is this repository's whole stance on where decisions live. Signing an
+      attestation for an ISO with no release identity is ceremony without a referent, so M5 signs
+      the release's record. `CONTEXT.md`'s* Boot-checklist run record *entry now distinguishes the
+      two, and the machine is identified by class and never by serial number.*
+- [x] Write `docs/threat-model.md`. **Deferred here from M2 and scheduled nowhere until now**, which
       in this repository means it was not going to happen. M3 is where it belongs: it is the first
       milestone with a real machine to be specific about, and the claims it has to state at their
       true strength are the ones a boot either supports or does not.
+      *Written, spined on adversary tier because `CONTEXT.md` calls that "the unit in which this
+      project promises anything". Its claim numbering was not free: `aobs/ui/app.py`,
+      `aobs/adapters/real/power.py`, `tests/test_app_shell.py` and `docs/secret-hygiene.md` already
+      cite claims (ii) and (iii) by number, so (i)–(iii) are the three amnesia guarantees in
+      `CONTEXT.md`'s order and the list may be appended to but not reordered. Two things the machine
+      forced into it: claim (x), that nothing verifies the boot medium before the kernel runs —
+      stated as the deliberate absence of a claim rather than a weak one — and developer mode as a
+      Tier 2 item, because unlocking a Chromebook lowers that host's boot integrity permanently and
+      that is a cost of the hardware path rather than a property of the image.*
 - [ ] Check the two claims a build cannot: that the modules tree really does leave the machine with
-      no network interface, and that the graphics decision holds. `build/modules.allow` ships no
-      DRM driver on the argument that `efifb` and `vesafb` are built in and sufficient. That
-      argument has never met a screen.
+      no network interface (`I-4`), and that the graphics decision holds. `build/modules.allow` ships
+      no DRM driver on the argument that `efifb` and `vesafb` are built in and sufficient.
+      **This is now two rows, because the target machine can only answer one of them.** The BIOS
+      half has met a screen — `vga=791`, `vesafb`, and the console large enough for an 85×43 QR
+      display, recorded by `I-7`. The UEFI half has not and cannot on this machine: `RW_LEGACY`
+      SeaBIOS is a BIOS path, and reaching `efifb` would mean flashing a full ROM. It is a
+      **`deviated`** verdict with a written reason, never a `pass` inferred from its sibling, and
+      the README says so in plain words.
+
+- [ ] **Post-gate: add `cros_ec_keyb` and `cros_ec_lpc`, or record that Chromebooks with an EC
+      keyboard are unsupported.** Deliberately not done alongside the finding above: no machine of
+      that kind has been booted, and adding a driver for an untested machine class is the exact
+      pattern of all four faults this milestone found. The honest position until then is the one
+      `build/modules.allow` now states — such a machine boots to a screen with no keys.
+
+- [ ] **Post-gate: Secure Boot, and with it the first UEFI boot.** `build/grub.cfg` already argues
+      it is achievable — Debian's signed shim, grub and kernel survive a module-tree prune, since
+      pruning does not touch the kernel image's signature — and names it the best candidate for the
+      first post-v0.1 milestone. It now has a second reason: it is what would close the `efifb` half
+      of the row above.
 
 **Exit**: one PSBT signed on real hardware and broadcast, and a run record with every row answered.
 

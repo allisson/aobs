@@ -228,8 +228,8 @@ async def test_the_lock_holds_until_the_last_row_renders() -> None:
         assert not screen.unlocked, "nine outputs do not fit in this console"
 
         lock = str(screen.query_one("#lock", Static).content)
-        assert lock.startswith("Outputs 1–")
-        assert lock.endswith("of 9 — scroll to the end to unlock signing.")
+        assert lock.startswith("Outputs 1-")
+        assert lock.endswith("of 9 - scroll to the end to unlock signing.")
         shown = displayed(screen)
         assert "F10" not in shown, "a key that does nothing is not printed"
         assert reviewtext.LOCKED_KEYS in shown

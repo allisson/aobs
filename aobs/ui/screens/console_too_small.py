@@ -28,7 +28,7 @@ def console_too_small(columns: int, rows: int) -> Failure:
             f"The appliance needs at least {MIN_COLUMNS} by {MIN_ROWS}."
         ),
         next_steps=(
-            "Boot with a larger console mode — on legacy BIOS, the `vga=791` boot parameter.",
+            "Boot with a larger console mode - on legacy BIOS, the `vga=791` boot parameter.",
             "Use a display the firmware can drive at 1024x768 or better.",
         ),
     )

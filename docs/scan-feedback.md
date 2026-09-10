@@ -48,7 +48,16 @@ console needs, and `FB_DEVICE` is independent of both.
 
 ## Progress is a slot map, because the parts do not arrive in order
 
-**One cell per part index — `▮` received, `▯` missing — above the line *17 of 27 parts*.**
+**One cell per part index — `█` received, `░` missing — above the line *17 of 27 parts*.**
+
+**Those two characters are fixed by the console, not chosen for looks.** The first draft used `▮`
+U+25AE and `▯` U+25AF, which are not in the console's repertoire: the appliance draws on the
+kernel's built-in 8×16 font with the default unicode map, generated from `drivers/tty/vt/cp437.uni`,
+and neither codepoint is among its 303. The slot map — the whole of this screen's feedback — would
+have drawn as nothing on the appliance, and the repository said so in prose for a year without
+checking. Solid-versus-dither keeps what the map is *for*, both cells are one column wide, and
+`tests/test_structure.py` now fails the build for the next character outside the repertoire.
+`docs/console-appearance.md` carries the budget.
 
 A progress bar was rejected as **actively misleading**. #6's reading of BC-UR/MUR: the first `seqLen`
 parts are the pure fragments in order, and mixed XOR parts follow to repair losses. A bar that fills,

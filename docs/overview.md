@@ -37,29 +37,32 @@ Say which kind you mean. A sentence that does not is not yet a claim.
 | The boot medium is never read after boot | **Structural** — firmware reads it before Linux starts; pull the stick out and keep signing | pull the stick out |
 | No network interface, and no tool to configure one | **Absence** — no `kernel/net`, no `drivers/net`, no `iproute2` | `ls /lib/modules/*/kernel/net`, `command -v ip` |
 | No block device, so nothing can be written to a persistent medium | **Absence** — storage drivers are not in the image; the block layer itself is in Debian's kernel | `ls /sys/block`, `ls /lib/modules/*/kernel/drivers/{ata,nvme,scsi}` |
-| USB binds nothing but HID and UVC | **Absence + policy** — only those modules ship, and `authorized_default=0` after our own devices enumerate | `ls /lib/modules/*/kernel/drivers/usb`, `cat /sys/bus/usb/devices/usb*/authorized_default` |
+| USB binds nothing but HID and UVC | **Absence + policy** — only those modules ship, and `authorized_default=0` after our own devices enumerate. About what USB binds, **not** about where keystrokes come from: a laptop's own keyboard is behind a built-in i8042 controller the kernel image carries | `ls /lib/modules/*/kernel/drivers/usb`; the write in `build/init`, **not** `cat /sys/bus/usb/devices/usb*/authorized_default`, see below |
+| Nothing verifies the boot medium before the kernel runs | **Not a claim — a stated absence of one.** Secure Boot is unsupported in v0.1; integrity is established off the machine, before the stick is written | verify the ISO against the signed manifest yourself |
 | Nothing recoverable from RAM after power-off | **Best-effort, not promised** — no byte-zeroing | not checkable; stated as a limit |
 | The published ISO is byte-identical to an independent rebuild | **Checkable by rebuilding** | `sha256sum`, against the signed manifest |
 
 **Where those commands are run, because a session offers no prompt.** There is no getty, no VT with
 a login and no path from the running app to a shell (`docs/boot-pipeline.md`), so every command in
 the third column that is not "pull the stick out" is run in a *different* boot — one where the
-stranger types `init=/bin/sh` at the bootloader. That is stated rather than defended: a person at
+stranger types `rdinit=/bin/sh` at the bootloader. That is stated rather than defended: a person at
 the machine with the stick in their hand already owns it.
 
 Two rows do not survive that substitution, and neither may be written up as if it does:
 
-- **The process count.** In an `init=/bin/sh` boot the stranger *is* PID 1, so `ls -d /proc/[0-9]*`
+- **The process count.** In an `rdinit=/bin/sh` boot the stranger *is* PID 1, so `ls -d /proc/[0-9]*`
   describes their own shell and says nothing about a session. The claim is checked by reading
   `build/init` and the `build/verify.py` assertions that every command in it resolves on PID 1's own
   `PATH` — a source-level check, and the reason the row above names one.
 - **`authorized_default=0`.** PID 1 writes it (`build/init`, step 4, after our own devices
-  enumerate), and an `init=/bin/sh` boot replaces PID 1, so `build/init` never runs and the value
+  enumerate), and an `rdinit=/bin/sh` boot replaces PID 1, so `build/init` never runs and the value
   is whatever the kernel left. Reading it there proves nothing; the check is the write in
   `build/init` and the module list in `build/modules.allow`.
 
 A **boot-checklist run record** answers the rest, and the checklist has to say which boot each row
-belongs to. It does not exist yet; `docs/roadmap.md` M3 carries it.
+belongs to. `docs/boot-checklist.md` now does, in three row families — `I-n` in an inspection boot,
+`S-n` in a session boot, `R-n` by reading the repository, which is where the two rows above live. The
+records themselves go in `docs/boot-runs/`; the first one is what closes the M3 gate.
 
 Three of these are weaker than they were in this project's Alpine ancestry, where a hand-written
 kernel config compiled out networking, modules and the block layer entirely. `docs/adr/0001-debian-base-and-stock-kernel.md`
@@ -194,11 +197,11 @@ cannot be.
 | `docs/adr/0001-debian-base-and-stock-kernel.md` | The base OS and the kernel, and what the switch cost |
 | `docs/adr/0002-python-dependencies-from-pinned-wheels.md` | Where the Python layer comes from, and where a prebuilt blob may live |
 | `docs/boot-pipeline.md` | The build's stages, PID 1, the module allowlist, the RAM floor |
-| `docs/threat-model.md` — **not yet written**, due in M3 | Adversary tiers, and every claim above at its stated strength |
+| `docs/threat-model.md` | Adversary tiers, and every claim above at its stated strength |
 | `docs/reproducible-build.md` — **not yet written**, due in M4 | The reproducibility contract and the divergence sources it fixes |
 | `docs/test-harness.md` | The four tiers and what each one is authoritative for |
 | `docs/release.md` — **not yet written**, due in M5 | The release ritual, the manifest, the release-mode refusals |
-| `docs/boot-checklist.md` — **not yet written**, due in M3 | The checks only a booted appliance can answer |
+| `docs/boot-checklist.md` | The checks only a booted appliance can answer, and which boot answers each |
 | `docs/psbt-review-model.md`, `docs/review-screen.md` | The proof rule, the three output categories, the screen |
 | `docs/seed-entry.md`, `docs/secret-hygiene.md` | Mnemonic and passphrase entry, and how secrets are handled |
 | `docs/address-verification.md` | Address display and the proof behind it |

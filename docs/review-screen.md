@@ -57,7 +57,7 @@ being compared.
 
   3  PAYMENT                                0.00250000 BTC  ·    250 000 sats
      bc1p mfr3 p9j0 0pfx jh0z myp3 fndz c6qx cuvr fzcz e5da q0q4 pxdu wsev tep6
-     ⚠ Your wallet says this output is your own change. This appliance could
+     ! Your wallet says this output is your own change. This appliance could
        not derive it from its own keys, so it is shown as a payment and
        counted as leaving. Verify this address as you would any recipient.
 
@@ -124,7 +124,7 @@ Warning styling is reserved for NOT PROVEN.
      …outputs…
 
   ───────────────────────────────────────────────────────────────────────
-  ⚠ This transaction spends your entire balance.                          ← footer, pinned
+  ! This transaction spends your entire balance.                          ← footer, pinned
   Leaving:   0.01650000 payments  +  0.00003100 fee  =  0.01653100 BTC
                                                         1 653 100 sats
   Fee:  3 100 sats  ·  14.2 sat/vB  ·  0.19% of the amount sent

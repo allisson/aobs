@@ -34,9 +34,17 @@
 
 # --- USB host controllers -----------------------------------------------------------------------
 #
-# Without one of these there is no USB bus at all: no keyboard, no camera, and nothing for
+# Without one of these there is no USB bus at all: no camera, no external keyboard, and nothing for
 # `authorized_default=0` to close. They are not dependencies of `usbhid` — a host controller and a
 # device driver are unrelated in the module graph — so they have to be named.
+#
+# ALL FOUR STAY, and that is a decision rather than an oversight. The one machine this image has
+# booted on is xHCI-only, so three of these four resolve to nothing there and `docs/roadmap.md` M3
+# asked whether to narrow the list to what that machine needs. Narrowing it would turn "the image
+# boots on a machine with USB" into "the image boots on a machine with xHCI", retiring every laptop
+# older than about 2010 — which is precisely the hardware most likely to be sitting unused in a
+# drawer, and an offline signer's most natural host. The saving is a few hundred KiB against a tree
+# already cut from 98 MiB, and that is the least interesting reason to keep them.
 xhci_pci
 ehci_pci
 ohci_pci
@@ -44,8 +52,27 @@ uhci_hcd
 
 # --- Human interface devices ----------------------------------------------------------------------
 #
-# `usbhid` is the transport and `hid_generic` is the driver that actually binds a keyboard. Naming
-# only the first is the mistake that produces a machine with an enumerated keyboard and no keys.
+# `usbhid` is the transport and `hid_generic` is the driver that actually binds a *USB* keyboard.
+# Naming only the first is the mistake that produces a machine with an enumerated keyboard and no
+# keys.
+#
+# THIS FILE IS NOT WHERE A LAPTOP'S OWN KEYBOARD COMES FROM, and reading it as if it were is how the
+# repository came to describe input as a USB story when the only machine it has ever booted on used
+# neither module for keystrokes. On that machine the keyboard sits behind a built-in i8042
+# controller: `CONFIG_SERIO_I8042=y`, `CONFIG_SERIO_LIBPS2=y` and `CONFIG_KEYBOARD_ATKBD=y` are all
+# `=y` in the pinned kernel, so they are in the image whatever this file says and cannot be removed
+# by editing it. `build/verify.py` asserts they stay `=y`, because a future Debian flipping
+# `KEYBOARD_ATKBD` to `m` would delete the keyboard from the image and every other assertion here
+# would still pass.
+#
+# Input reaches the application through the **vt keyboard handler**, not `/dev/input/event*`:
+# `CONFIG_INPUT_EVDEV=m` and evdev is not named here, so it is deleted. Nothing needs it.
+#
+# `cros_ec_keyb` is DELIBERATELY ABSENT. A Chromebook that routes its keyboard through the embedded
+# controller rather than i8042 would boot this image and have no keys at all. Adding the driver for
+# a machine class nobody has booted is the pattern behind all three faults `docs/roadmap.md` M3
+# records — a claim the repository stated and never checked — so it is a post-gate row there, not a
+# line here.
 usbhid
 hid_generic
 

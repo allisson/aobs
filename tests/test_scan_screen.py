@@ -183,7 +183,7 @@ async def test_a_transaction_scanned_through_the_app_arrives_byte_identically(
         assert app.scanned == psbt_bytes
         assert screen.payload == psbt_bytes
         assert str(screen.query_one("#slot-map", Static).content) == RECEIVED * count
-        assert f"Scan complete — {count} of {count} parts." in texts(screen)
+        assert f"Scan complete - {count} of {count} parts." in texts(screen)
 
 
 async def test_a_scan_never_times_out(tmp_path: Path, mainnet_wallet: Wallet) -> None:

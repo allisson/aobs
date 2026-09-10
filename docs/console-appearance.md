@@ -177,24 +177,35 @@ The font is the kernel's built-in one, so the safe repertoire is **ASCII, Latin-
 block characters the QR renderer already proves** (`▀ ▄ █`, and `─ ·`). That rules out Textual's
 `round` and `heavy` borders — `╭`, `┏` — and leaves `solid` and `double`.
 
-Thirteen non-ASCII characters currently reach the screen. Eight are inside the budget. **Five are
-outside it and are not fixed in this pass:**
+**Somebody looked, and five of them had no glyph.** This section used to list five characters as
+*at risk* and leave them alone until a hardware check. The check turned out not to need hardware:
+`build/init` never calls `setfont` and `loadkeys` does not touch the console map, so the vt uses the
+kernel's default map, which is generated from `drivers/tty/vt/cp437.uni` — **303 codepoints, and
+none of the five is among them.** That is checkable by a reader, which a photograph is not.
 
-| glyph | where | what breaks if the console has no glyph for it |
-|---|---|---|
-| `⚠` U+26A0 | `aobs/ui/reviewtext.py:48` | the NOT PROVEN warning — the strongest marker on the review screen — loses its marker |
-| `▮` U+25AE, `▯` U+25AF | `aobs/ui/scanning.py:45`, `:46` | the slot map, which is the whole of the scan screen's feedback |
-| `—` U+2014, `–` U+2013 | 24 places, mostly `aobs/ui/addresstext.py` and `aobs/ui/reviewtext.py` | a hole in the middle of a sentence |
-| `•` U+2022 | `aobs/ui/widgets/secretinput.py:31` | the passphrase field's masking character |
+| glyph | where | verdict | now |
+|---|---|---|---|
+| `⚠` U+26A0 | `aobs/ui/reviewtext.py`, the NOT PROVEN marker | **no glyph** | `!` — two columns, as `⚠ ` was, so `docs/review-screen.md`'s row widths are unchanged |
+| `▮` U+25AE, `▯` U+25AF | `aobs/ui/scanning.py`, the slot map | **no glyph** | `█` and `░` — solid versus dither keeps holes looking like holes; `docs/scan-feedback.md` |
+| `—` U+2014, `–` U+2013 | 25 rendered strings across nine modules | **no glyph** | `-`, width-preserving. Not `--`, which reads as a typo in a rendered sentence |
+| `•` U+2022 | `aobs/ui/widgets/secretinput.py:31`, the passphrase mask | **renders** | unchanged, and the narrowest escape here |
+| `↑` `↓` `►` `─` `·` `§` `×` `≈` `→` `▀` `▄` `█` | rules, markers, the QR renderer | **render** | unchanged |
 
-`•`, `↑` and `↓` are in the IBM repertoire but at positions the console reaches through its unicode
-map, so they sit on the line between the two lists until somebody looks.
+The two that would have hurt most are the slot map and the passphrase mask, and they fell on
+opposite sides: the map would have drawn as nothing, taking the whole of the scan screen's feedback
+with it, while `•` was in the repertoire all along.
 
-They are **left alone deliberately.** Replacing them is a change to rendered copy, and two of them
-are inside row templates that `docs/review-screen.md` and `docs/scan-feedback.md` fix character by
-character. Changing those inside an appearance diff is precisely the move `CLAUDE.md` forbids: the
-decision would live nowhere. The check comes first, on real hardware, and it is cheap — one screen
-showing all thirteen.
+**The budget is now a build-time rule, not a prose one.** `tests/test_structure.py` renders every
+screen through `tests/screentext.py` and fails if any character is outside the repertoire, with
+CP437 as a frozenset citing the kernel file above. The rule covers the review screen with a NOT
+PROVEN case specifically, because that screen is deliberately not one of the README blocks and is
+exactly where `⚠` lived unchecked. Textual's `round` and `heavy` borders — `╭`, `┏` — are still out;
+`solid` and `double` are still in.
+
+**The hardware check still happens** and is `I-9` in `docs/boot-checklist.md`. What it can add is
+*observation* to a derivation: this section's claim is now derived from the kernel's own map, which
+is stronger than the "derived, not observed" it used to carry, and weaker than a run record saying
+somebody saw it.
 
 ## The blocks in the README
 

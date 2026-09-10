@@ -247,6 +247,11 @@ KVER=$(ls "$KERNEL_STAGE/usr/lib/modules")
 [ -n "$KVER" ] || { echo "mkiso: no module tree in the kernel package" >&2; exit 1; }
 say "stage 3: kernel $KVER"
 
+# BEFORE the prune, and on the kernel's own config: what the console and the keyboard rest on is
+# compiled in, so it never reaches the modules tree and no check against the built image can see
+# it. `build/modules.allow` cannot name these and the appliance cannot load them.
+python3 "$ROOT/build/verify.py" --kernel-config "$KERNEL_STAGE/boot/config-$KVER"
+
 # `modules.dep` is NOT shipped in the .deb — Debian generates it from the maintainer script, and
 # this build runs no maintainer scripts. So the first depmod is not a nicety; without it there is
 # no dependency graph to prune against.

@@ -21,9 +21,9 @@ one Python program running as **PID 1**, in an image the dangerous parts were re
 | ✅ **Demonstrated** | The image boots on real hardware and signs. One transaction was built in Sparrow, scanned in, reviewed, signed, scanned back out and broadcast on **testnet4** from an appliance booted off a live USB stick on a Chromebook: [`dcdfc90e…6b3a07`](https://mempool.space/testnet4/tx/dcdfc90e38d7299caa00c5c7fb4c01ab73e9d093adee823745d9dbc6466b3a07) |
 | ✅ **Demonstrated** | The ISO builds unprivileged in CI, from packages pinned to a `snapshot.debian.org` timestamp, with every build-time assertion passing |
 | 🚧 **Not yet** | **No release.** No tag, no signed ISO, no manifest. There is nothing to download — you build it yourself or you don't run it |
-| 🚧 **Not yet** | **No threat model published.** `docs/threat-model.md` is written in M3 and does not exist yet |
+| ✅ **Published** | **A threat model**, with every claim at its stated strength and every adversary in a numbered tier: [`docs/threat-model.md`](docs/threat-model.md) |
 | 🚧 **Not yet** | **No reproducibility guard.** Byte-identical rebuild is the design intent; two builds on two hosts have never been compared |
-| 🚧 **Not yet** | **No boot-checklist run record.** The structural claims below have not been checked *on a booted appliance* and written down where a stranger can read them |
+| 🚧 **Not yet** | **No boot-checklist run record.** The procedure is published — [`docs/boot-checklist.md`](docs/boot-checklist.md) — but the claims below have not been checked *on a booted appliance* and written down where a stranger can read them. The checklist is not the evidence |
 
 **Do not put mainnet funds behind this yet.** Mainnet is the appliance's default network and it
 will happily sign for it — that is deliberate, because the code is written to the bar it must
@@ -151,7 +151,7 @@ parameter, flag or alternate path proceeds past a refusal
 output's script from its own key, at a path it recognises. A `PSBT_IN_BIP32_DERIVATION` field in the
 input is *evidence for* that check, never the answer — so a PSBT that lies about which outputs are
 yours cannot talk the appliance into hiding a payment. Everything not proven is money leaving, and
-is displayed as such, marked `⚠ NOT PROVEN`.
+is displayed as such, marked `! NOT PROVEN`.
 See [`docs/psbt-review-model.md`](docs/psbt-review-model.md).
 
 **Scope, deliberately narrow:** single-sig **P2WPKH** (BIP84) and **P2TR** key-path (BIP86), account
@@ -295,9 +295,9 @@ are already arriving and aiming is solved.
 Sign a transaction
 ────────────────────────────────────────────────────────────────────────────────────────────
 
-▮▮▮▮▮▯▯▯▯▯▯
+█████░░░░░░
 
-Scanning — 5 of 11 parts.
+Scanning - 5 of 11 parts.
 ```
 
 **Reviewing it.** Every output is money leaving unless the appliance can prove it is your
@@ -451,17 +451,48 @@ to compare against. That is M4 and M5.
 **On a booted appliance.** A normal session gives you no prompt — there is no getty, no VT with a
 login, and no path from the running app to a shell; if the app exits, the kernel panics on init
 death rather than dropping you anywhere. To inspect the image you boot it *differently*, by typing
-`init=/bin/sh` at the bootloader. That is not a backdoor and it is not defended against: a person
+`rdinit=/bin/sh` at the bootloader. That is not a backdoor and it is not defended against: a person
 standing at the machine with the stick already owns it, and
 [`docs/boot-pipeline.md`](docs/boot-pipeline.md) says so rather than papering over it.
+
+**Type `inspect` at the prompt.** The bootloader offers two entries — `aobs` and `inspect` — for
+three seconds, cancelled the moment you type. On UEFI it is the same two in GRUB's menu.
+
+If you would rather spell it out than trust an entry someone else named, the label comes first, or
+the prompt reads your options as a kernel image:
+
+```
+boot: aobs rdinit=/bin/sh
+```
+
+`rdinit=`, not `init=`. The whole root filesystem is the initramfs, so the kernel never mounts a
+root and never consults `init=` — it runs `/init`, which is this appliance's PID 1, and boots
+normally. An `init=` on the command line produces no error and no hint; it just starts the app.
+
+One warning that no bootloader entry can fix: on a laptop the keyboard you use at the prompt may
+not be the one you use at the shell. An inspection boot loads no modules — `build/init` is exactly
+what you skipped — so a USB keyboard has no driver once the kernel starts, while a built-in one
+keeps working on the compiled-in i8042 path.
 
 ```sh
 cat /proc/mounts                                  # tmpfs and pseudo-filesystems only
 ls /sys/block                                     # no block devices
 command -v ip                                     # nothing
 ls /lib/modules/*/kernel/net                      # no networking modules
-ls /lib/modules/*/kernel/drivers/usb              # HID and UVC hosts only
+ls /lib/modules/*/kernel/drivers/usb              # common, core, host — no storage, no serial
 ```
+
+[`docs/boot-checklist.md`](docs/boot-checklist.md) is the full procedure, with what a pass looks
+like for each one and which of the two boots answers it.
+
+**On hardware.** This appliance has been booted and has signed on exactly one machine — an Acer
+Chromebook 514, on a BIOS firmware path, with the run written up in `docs/boot-runs/`. **One machine
+that boots is not a hardware-compatibility claim, and this is not one:** nothing here says the image
+will boot on yours, and the module allowlist is deliberately generic rather than narrowed to that
+machine. In particular the **UEFI boot path has never drawn a screen** — `build/grub.cfg` ships it,
+`efifb` is built into the pinned kernel and the argument that it needs no DRM driver is sound, but
+it is an argument and not an observation, so if you boot this on a UEFI machine you are the first
+person testing it.
 
 Two claims are **not** checkable that way, and it is worth being exact about why — in that boot
 *you* replaced PID 1, so anything PID 1 does never happened:
@@ -504,8 +535,9 @@ as the change it authorises.
 - [`docs/roadmap.md`](docs/roadmap.md) — what is settled, what is open, in what order
 - [`docs/entropy-mixing.md`](docs/entropy-mixing.md), [`docs/psbt-review-model.md`](docs/psbt-review-model.md), [`docs/seed-entry.md`](docs/seed-entry.md), [`docs/secret-hygiene.md`](docs/secret-hygiene.md), [`docs/address-verification.md`](docs/address-verification.md)
 - [`docs/boot-pipeline.md`](docs/boot-pipeline.md), [`docs/test-harness.md`](docs/test-harness.md), [`docs/adr/`](docs/adr/)
-- Not yet written, and named here rather than quietly omitted: `docs/threat-model.md`,
-  `docs/boot-checklist.md` (both M3), `docs/reproducible-build.md` (M4), `docs/release.md` (M5)
+- [`docs/threat-model.md`](docs/threat-model.md), [`docs/boot-checklist.md`](docs/boot-checklist.md)
+- Not yet written, and named here rather than quietly omitted: `docs/reproducible-build.md` (M4),
+  `docs/release.md` (M5)
 
 ---
 
