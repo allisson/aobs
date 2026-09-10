@@ -362,14 +362,24 @@ the same shape — read what the repository already says, and check the artefact
       signer. Deliberately **not** done alongside the boot fixes: it changes a working decode path,
       and M3 is a gate precisely to stop that.
 
-- [ ] **Choose and characterise the target machine**: make, age, BIOS or UEFI, whether Secure Boot can
+- [x] **Choose and characterise the target machine**: make, age, BIOS or UEFI, whether Secure Boot can
       be disabled in its firmware, built-in webcam or USB. Nothing below can be judged without this.
-      *Partly answered by the signing run above: a Chromebook, booted from a live USB stick. Make,
-      age, firmware path, Secure Boot and whether the camera is built-in are still unrecorded, so
-      the row stays open.*
-- [ ] Narrow the generic module allowlist to what that machine actually needs, or record why it stays
-      generic.
-- [ ] `docs/boot-checklist.md`: the checks only a booted appliance can answer, published with the ISO.
+      *Answered above and in `docs/threat-model.md`'s* The firmware is not the appliance *section. The
+      Secure Boot question does not have its usual answer on this machine: stock coreboot will not
+      boot a foreign USB at all, so the firmware was not configured but bypassed, and v0.1 does not
+      support Secure Boot on any host. The camera is the machine's **built-in lid webcam**, and
+      unlike the keyboard it is genuinely a USB device — it bound through `uvcvideo`, the one UVC
+      driver the image ships, which is what the earlier signing run's enumeration recorded.*
+- [x] Narrow the generic module allowlist to what that machine actually needs, or record why it stays
+      generic. *Recorded in `build/modules.allow`: all four USB host controllers stay. The target is
+      xHCI-only, so narrowing would trade "boots on a machine with USB" for "boots on a machine with
+      xHCI" and retire every laptop older than about 2010 — the hardware most likely to be free for
+      this job — to save a few hundred KiB of a tree already cut from 98 MiB.*
+- [x] `docs/boot-checklist.md`: the checks only a booted appliance can answer, published with the ISO.
+      *Written. Three row families, because two claims cannot be answered by a boot at all: `I-n`
+      inspection boot, `S-n` session boot, `R-n` read the repository. The run-record template is its
+      last section rather than a separate file — a template that lives away from its procedure
+      drifts from it, which is this milestone's recurring fault in miniature.*
 - [ ] Run it. Boot the stick, walk the keymap picker, generate a wallet, export the xpub by QR, build
       an unsigned PSBT in a watch-only wallet, scan it, review it, sign it, scan the signature back,
       broadcast on signet. *Done on testnet4 — see the signing run above. The row stays open because

@@ -73,10 +73,18 @@ device is authorized once the appliance is up.**
 The mounting half is structural; the driver half is a Module allowlist, which is absence. Both halves
 are stated at their own strength in `docs/threat-model.md`.
 
-The blanket phrasing "no USB" is wrong and must not be used — the keyboard is a USB device and so
-is the camera, and the kernel enumerates and binds a driver to both. Two classes, not one: HID
-carries mnemonic and passphrase entry, UVC is the QR channel's only inbound route. Storage,
+The blanket phrasing "no USB" is wrong and must not be used — the camera is a USB device, and so is
+an external keyboard, and the kernel enumerates and binds a driver to both. Two classes, not one:
+HID carries mnemonic and passphrase entry, UVC is the QR channel's only inbound route. Storage,
 networking, audio, printer, and serial classes are refused.
+
+The USB half of the claim is about **what USB binds**, never about where keystrokes come from. On a
+laptop the keyboard is typically not a USB device at all: it sits behind a built-in i8042 controller
+that the kernel image itself carries, outside the Module allowlist's reach and outside
+`authorized_default=0`. That is how the machine in the boot-checklist run record was driven. The
+claim does not weaken — an i8042 controller has two fixed ports on an embedded controller and no
+arbitrary-class hotplug — but a sentence that says "the keyboard is a USB device" is false on the
+only machine this appliance has run on, and saying it is a defect.
 
 "USB is restricted to the HID class" was the earlier wording and it was **false** — a webcam is
 USB *Video* Class. Do not reintroduce it. The mechanism, the tests, and the stated limits live in
@@ -96,10 +104,18 @@ restating an absence claim as structural is a defect rather than a wording prefe
 
 ## Module allowlist
 
-The explicit list of kernel modules the image keeps — framebuffer/DRM, `uvcvideo`, `usbhid` and their
-dependencies — with everything else deleted from the modules tree at build time, `kernel/net`,
-`drivers/net` and every storage driver included. It is the mechanism behind the current *Offline*
-claim and behind half of *No data path*, at **absence** strength.
+The explicit list of kernel modules the image keeps — the USB host controllers, `usbhid`,
+`hid_generic`, `uvcvideo` and their dependencies — with everything else deleted from the modules
+tree at build time, `kernel/net`, `drivers/net` and every storage driver included. It ships **no
+graphics driver**: the console rests on a firmware framebuffer that is built into the kernel, and
+naming DRM drivers here was an earlier wording that `build/modules.allow` corrected. It is the
+mechanism behind the current *Offline* claim and behind half of *No data path*, at **absence**
+strength.
+
+It says nothing about drivers the kernel image carries built in, and a claim must not be attributed
+to it that it cannot make. `efifb`, `vesafb`, the vt keyboard handler and the i8042 controller are
+`=y` in the pinned kernel: they are in the image whatever this file says, they cannot be removed by
+editing it, and the reasons they are wanted are recorded where the allowlist's are.
 
 The `modprobe` blacklist beside it is a second line and is **never** the claim: a blacklist is a
 policy, and the allowlist is a fact about what is in the image. Say "the module is not present",

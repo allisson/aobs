@@ -764,3 +764,90 @@ def test_a_fifo_left_in_the_tree_is_refused_rather_than_quietly_dropped(tmp_path
 def test_an_archive_with_no_init_would_panic_the_kernel_and_is_refused(tmp_path: Path) -> None:
     with pytest.raises(initramfs.InitramfsError):
         initramfs.main(["--rootfs", str(tmp_path), "--output", str(tmp_path / "out.cpio")])
+
+
+# --- The kernel's own config -----------------------------------------------------------------
+#
+# The console and the keyboard are compiled in, so they never reach the modules tree and no
+# assertion against the built image can see them. `docs/boot-pipeline.md` states what each symbol
+# carries; these tests are what stop that statement drifting from the pinned kernel.
+
+#: A `/boot/config-*` in miniature: every required symbol built in, plus the two shapes the parser
+#: has to tell apart — an explicitly unset symbol and a symbol that is a module.
+GOOD_KERNEL_CONFIG = """\
+#
+# Automatically generated file; DO NOT EDIT.
+#
+CONFIG_FB_EFI=y
+CONFIG_FB_VESA=y
+CONFIG_FRAMEBUFFER_CONSOLE=y
+CONFIG_SERIO_I8042=y
+CONFIG_KEYBOARD_ATKBD=y
+CONFIG_VT=y
+CONFIG_KEYBOARD_CROS_EC=m
+# CONFIG_DRM_SIMPLEDRM is not set
+CONFIG_LOCALVERSION=""
+"""
+
+
+#: **The pinned kernel is checked by `build/mkiso.sh`, not here.** It runs
+#: `verify.py --kernel-config` against the real `/boot/config-*` from the kernel `.deb`, inside the
+#: authoritative tier, where the package is present by construction. A second copy of that check
+#: in this file would either skip on a dev host — the loudest possible pass — or duplicate a `.deb`
+#: extractor to reach a conclusion the build already reaches. What belongs here is what belongs
+#: here for every other assertion: the broken inputs, proving the function still bites.
+
+
+def test_a_good_config_parses_and_passes() -> None:
+    symbols = verify.kernel_config_symbols(GOOD_KERNEL_CONFIG)
+    verify.kernel_provides_console_and_input(symbols)
+    assert symbols["FB_VESA"] == "y"
+    #: `# CONFIG_X is not set` is a statement, not a comment. A parser that dropped it could not
+    #: tell "this kernel does not have it" from "this file does not mention it".
+    assert symbols["DRM_SIMPLEDRM"] == "n"
+    assert symbols["KEYBOARD_CROS_EC"] == "m"
+
+
+@pytest.mark.parametrize("symbol", sorted(verify.REQUIRED_BUILT_IN))
+def test_a_symbol_demoted_to_a_module_fails_the_build(symbol: str) -> None:
+    """The real failure: a future Debian shipping one of these as `m`.
+
+    A module the allowlist does not name is deleted by `build/prune_modules.py`, so the image
+    would lose its console or its keyboard while every other assertion in the file still passed.
+    """
+    broken = GOOD_KERNEL_CONFIG.replace(f"CONFIG_{symbol}=y", f"CONFIG_{symbol}=m")
+    with pytest.raises(verify.PinFileError) as raised:
+        verify.kernel_provides_console_and_input(verify.kernel_config_symbols(broken))
+    assert f"CONFIG_{symbol} is m" in str(raised.value)
+    assert verify.REQUIRED_BUILT_IN[symbol] in str(raised.value)
+
+
+@pytest.mark.parametrize("symbol", sorted(verify.REQUIRED_BUILT_IN))
+def test_a_symbol_missing_from_the_config_fails_the_build(symbol: str) -> None:
+    """Absent is not the same as `m`, and neither one may pass.
+
+    A config that does not mention the symbol at all is the shape a different architecture's or a
+    hand-rolled kernel's config has, and it must not read as satisfied.
+    """
+    broken = GOOD_KERNEL_CONFIG.replace(f"CONFIG_{symbol}=y\n", "")
+    with pytest.raises(verify.PinFileError) as raised:
+        verify.kernel_provides_console_and_input(verify.kernel_config_symbols(broken))
+    assert "absent from the config" in str(raised.value)
+
+
+def test_an_explicitly_unset_symbol_fails_the_build() -> None:
+    broken = GOOD_KERNEL_CONFIG.replace(
+        "CONFIG_FB_VESA=y", "# CONFIG_FB_VESA is not set"
+    )
+    with pytest.raises(verify.PinFileError) as raised:
+        verify.kernel_provides_console_and_input(verify.kernel_config_symbols(broken))
+    assert "CONFIG_FB_VESA is n" in str(raised.value)
+
+
+def test_a_file_that_is_not_a_kernel_config_is_refused_rather_than_passed(tmp_path: Path) -> None:
+    """Zero symbols must not read as zero problems — the mode is explicit for the same reason."""
+    empty = tmp_path / "config-none"
+    empty.write_text("# nothing here\n")
+    with pytest.raises(verify.PinFileError) as raised:
+        verify.main(["--kernel-config", str(empty)])
+    assert "not a kernel config" in str(raised.value)

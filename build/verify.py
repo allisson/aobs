@@ -595,6 +595,70 @@ def no_network_module_in_tree(paths: set[str]) -> None:
         )
 
 
+def kernel_config_symbols(text: str) -> dict[str, str]:
+    """`{symbol: value}` from a Debian `/boot/config-*`, symbols named without the prefix.
+
+    `# CONFIG_X is not set` is a *statement*, not a comment, and it is parsed as one: the
+    difference between a symbol that is absent from the file and one that is explicitly unset is
+    the difference between a kernel that might have it and a kernel that does not.
+    """
+    symbols: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if unset := re.fullmatch(r"#\s*CONFIG_(?P<name>\w+) is not set", line):
+            symbols[unset.group("name")] = "n"
+        elif setting := re.fullmatch(r"CONFIG_(?P<name>\w+)=(?P<value>.*)", line):
+            symbols[setting.group("name")] = setting.group("value")
+    return symbols
+
+
+#: Symbols the appliance needs COMPILED IN, with what each one carries. Not one of these is in
+#: `build/modules.allow` and not one of them can be: a module the prune deletes is a module, and
+#: these are the kernel image itself. The allowlist governs the modules tree and says nothing
+#: about them, which is exactly why they need an assertion of their own.
+REQUIRED_BUILT_IN = {
+    "FB_EFI": "the UEFI firmware framebuffer, which is the console on a UEFI boot",
+    "FB_VESA": "the BIOS firmware framebuffer, which is the console on a `vga=791` boot",
+    "FRAMEBUFFER_CONSOLE": "fbcon, without which neither framebuffer is a console",
+    "SERIO_I8042": "the controller a laptop's built-in keyboard is behind",
+    "KEYBOARD_ATKBD": "the driver that binds a keyboard on it",
+    "VT": "the terminal the application draws on, and the keyboard handler input arrives through",
+}
+
+
+def kernel_provides_console_and_input(symbols: dict[str, str]) -> None:
+    """The console and the keyboard are in the kernel image, not in the allowlist's reach.
+
+    **This is the assertion the third hardware boot should have had.** `build/modules.allow` names
+    `usbhid` and `hid_generic`, every description of input in this repository was written around
+    them, and then the appliance was driven end to end on a laptop whose keyboard used neither:
+    it sits behind a built-in i8042 controller that Debian compiles in. The same is true of both
+    framebuffers, which is the argument `build/modules.allow` rests on when it ships no DRM driver.
+
+    So the image's console and its keyboard both depend on Debian's config staying as it is, and
+    nothing was watching it. A Debian that flips `KEYBOARD_ATKBD` or `FB_VESA` to `m` deletes the
+    keyboard or the console from the image — the module is not in the allowlist, so the prune
+    removes it — and every other assertion in this file still passes. That is the shape of the
+    `mount` fault and the `libstdc++6` fault both: a claim the repository stated correctly in
+    prose and never checked.
+    """
+    wrong = {
+        name: symbols.get(name, "absent from the config")
+        for name in REQUIRED_BUILT_IN
+        if symbols.get(name) != "y"
+    }
+    if wrong:
+        detail = "; ".join(
+            f"CONFIG_{name} is {state}, needed for {REQUIRED_BUILT_IN[name]}"
+            for name, state in sorted(wrong.items())
+        )
+        raise PinFileError(
+            f"the pinned kernel does not compile in what the appliance cannot load: {detail}. "
+            "A module here would be deleted by build/prune_modules.py, because "
+            "build/modules.allow does not name it and cannot: these are the kernel image"
+        )
+
+
 def modules_are_reachable_from_the_allowlist(
     dependencies: dict[str, list[str]], allowed: Iterable[str], present: set[str]
 ) -> None:
@@ -713,6 +777,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--symbols", type=Path, help="the image's libsecp256k1 dynamic symbols")
     parser.add_argument("--dynamic", type=Path, help="the readelf -d sweep of every shared object")
     parser.add_argument("--allow", type=Path, help="build/modules.allow")
+    parser.add_argument(
+        "--kernel-config", type=Path, help="the pinned kernel's own /boot/config-*, before the prune"
+    )
     parser.add_argument("--kver", help="the kernel version directory under usr/lib/modules")
     parser.add_argument("--measured-mib", type=int, help="the measured unpacked rootfs, in MiB")
     return parser
@@ -747,6 +814,19 @@ def main(argv: list[str] | None = None) -> int:
         closure_is_free_of_init_system(names)
         no_python_package_in_closure(names, wheels)
         print(f"appliance closure: {len(names)} packages, no init system, no Debian Python library")
+
+    # Its own mode, and it runs BEFORE the prune rather than against the built rootfs: the whole
+    # point is the symbols that never reach the modules tree at all, so there is nothing in the
+    # image for a later check to look at.
+    if args.kernel_config is not None:
+        config = args.kernel_config
+        if not config.is_file():
+            raise PinFileError(f"{config} is not a file; --kernel-config needs the kernel's own config")
+        symbols = kernel_config_symbols(config.read_text(encoding="utf-8"))
+        if not symbols:
+            raise PinFileError(f"{config} parsed to no symbols at all; that is not a kernel config")
+        kernel_provides_console_and_input(symbols)
+        print(f"kernel config: {len(symbols)} symbols, console and input compiled in")
 
     if args.rootfs is not None:
         _check_rootfs(args, apt)

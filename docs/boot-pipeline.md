@@ -390,7 +390,9 @@ So:
   into Debian's kernel and is not removable. This is absence, not structure.
 - **No block device.** Storage drivers are not in the image; the block layer itself is in Debian's
   kernel.
-- **USB binds nothing but HID and UVC.** Only those modules ship, plus `authorized_default=0`.
+- **USB binds nothing but HID and UVC.** Only those modules ship, plus `authorized_default=0`. The
+  claim is about what USB binds and **not** about where keystrokes come from — see *Where input comes
+  from* below, because on a laptop they usually do not come from USB at all.
 
 **Measured: 20 modules ship and 4209 are deleted.** `build/modules.allow` is the whole list and
 `build/prune_modules.py` computes the dependency closure from the regenerated `modules.dep`.
@@ -447,7 +449,7 @@ build detail, and that is the trade this project does not make.
 appliance" would be a claim that protects nobody — Python is in the image and can `os.execv`
 anything. The claim above is the true one.
 
-**Not defended: a person at the bootloader typing `init=/bin/sh`.** Stated rather than papered over,
+**Not defended: a person at the bootloader typing `rdinit=/bin/sh`.** Stated rather than papered over,
 and it costs nothing — a fresh boot holds no secrets, which is the point of the amnesia claim.
 
 ## Console
@@ -504,6 +506,36 @@ version, commit and `SOURCE_DATE_EPOCH` are the complete embeddable set.
 A build that is not at a clean tag shows `DEVELOPMENT BUILD` in place of the version, never a
 version-shaped string, plus a `-dirty` suffix on the commit when the tree was not clean. The
 stage-4 assertion is **skipped for those, not faked.**
+
+### Where input comes from
+
+**The module allowlist is not where a laptop's own keyboard comes from, and this document used to
+imply that it was.**
+
+`build/modules.allow` names `usbhid` and `hid_generic`, and every description of input in this
+repository was written around them. Then the appliance was driven end to end on a Chromebook using
+the machine's own keyboard, and neither module carried a single keystroke. The keyboard sits behind a
+built-in i8042 controller, and the pinned kernel has that path compiled in:
+
+| Symbol | State in `linux-image-amd64=6.12.107-1` | Consequence |
+|---|---|---|
+| `CONFIG_SERIO_I8042`, `CONFIG_SERIO_LIBPS2` | `=y` | The controller is in the kernel image, not the modules tree |
+| `CONFIG_KEYBOARD_ATKBD` | `=y` | So is the driver that binds the keyboard on it |
+| `CONFIG_INPUT_EVDEV` | `=m`, and not in the allowlist | Deleted. Input reaches the app through the **vt keyboard handler**, never `/dev/input/event*` |
+| `CONFIG_KEYBOARD_CROS_EC` | `=m`, and not in the allowlist | Deleted. A Chromebook routing its keyboard through the embedded controller would boot and have **no keys** |
+| `CONFIG_MOUSE_PS2`, `CONFIG_I2C_HID` | `=m`, and not in the allowlist | Deleted. The touchpad binds nothing, which is wanted — the appliance has no pointer |
+
+Two things follow. **The allowlist cannot be read as the complete list of what binds hardware**: it
+governs the modules tree and says nothing about drivers the kernel image carries, which is where the
+console framebuffers (`CONFIG_FB_EFI=y`, `CONFIG_FB_VESA=y`) also live. And **`authorized_default=0`
+does not cover the keyboard on such a machine** — an i8042 controller has two fixed ports on an
+embedded controller and no arbitrary-class hotplug, so nothing is lost, but the claim must not be
+stated as though USB authorization were what protects input.
+
+`build/verify.py` asserts the four `=y` symbols above stay `=y` in whatever kernel is pinned. Without
+that assertion, a future Debian flipping `KEYBOARD_ATKBD` or `FB_VESA` to `m` would delete the
+keyboard or the console from the image and every other build-time check would still pass — the same
+shape as the `mount` and `libstdc++6` faults below.
 
 ### Keyboard layout
 
