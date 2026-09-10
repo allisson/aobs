@@ -451,17 +451,48 @@ to compare against. That is M4 and M5.
 **On a booted appliance.** A normal session gives you no prompt — there is no getty, no VT with a
 login, and no path from the running app to a shell; if the app exits, the kernel panics on init
 death rather than dropping you anywhere. To inspect the image you boot it *differently*, by typing
-`init=/bin/sh` at the bootloader. That is not a backdoor and it is not defended against: a person
+`rdinit=/bin/sh` at the bootloader. That is not a backdoor and it is not defended against: a person
 standing at the machine with the stick already owns it, and
 [`docs/boot-pipeline.md`](docs/boot-pipeline.md) says so rather than papering over it.
+
+**Type `inspect` at the prompt.** The bootloader offers two entries — `aobs` and `inspect` — for
+three seconds, cancelled the moment you type. On UEFI it is the same two in GRUB's menu.
+
+If you would rather spell it out than trust an entry someone else named, the label comes first, or
+the prompt reads your options as a kernel image:
+
+```
+boot: aobs rdinit=/bin/sh
+```
+
+`rdinit=`, not `init=`. The whole root filesystem is the initramfs, so the kernel never mounts a
+root and never consults `init=` — it runs `/init`, which is this appliance's PID 1, and boots
+normally. An `init=` on the command line produces no error and no hint; it just starts the app.
+
+One warning that no bootloader entry can fix: on a laptop the keyboard you use at the prompt may
+not be the one you use at the shell. An inspection boot loads no modules — `build/init` is exactly
+what you skipped — so a USB keyboard has no driver once the kernel starts, while a built-in one
+keeps working on the compiled-in i8042 path.
 
 ```sh
 cat /proc/mounts                                  # tmpfs and pseudo-filesystems only
 ls /sys/block                                     # no block devices
 command -v ip                                     # nothing
 ls /lib/modules/*/kernel/net                      # no networking modules
-ls /lib/modules/*/kernel/drivers/usb              # HID and UVC hosts only
+ls /lib/modules/*/kernel/drivers/usb              # common, core, host — no storage, no serial
 ```
+
+[`docs/boot-checklist.md`](docs/boot-checklist.md) is the full procedure, with what a pass looks
+like for each one and which of the two boots answers it.
+
+**On hardware.** This appliance has been booted and has signed on exactly one machine — an Acer
+Chromebook 514, on a BIOS firmware path, with the run written up in `docs/boot-runs/`. **One machine
+that boots is not a hardware-compatibility claim, and this is not one:** nothing here says the image
+will boot on yours, and the module allowlist is deliberately generic rather than narrowed to that
+machine. In particular the **UEFI boot path has never drawn a screen** — `build/grub.cfg` ships it,
+`efifb` is built into the pinned kernel and the argument that it needs no DRM driver is sound, but
+it is an argument and not an observation, so if you boot this on a UEFI machine you are the first
+person testing it.
 
 Two claims are **not** checkable that way, and it is worth being exact about why — in that boot
 *you* replaced PID 1, so anything PID 1 does never happened:

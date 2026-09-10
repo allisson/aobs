@@ -258,6 +258,50 @@ def test_the_printed_key_rule_bites() -> None:
     assert _function_keys_bound_but_not_printed(printed) == []
 
 
+# --- The inspection boot's command line ------------------------------------------------------
+
+#: Everything published that could tell a reader how to reach the inspection boot. A wrong
+#: parameter here is not a typo: the inspection boot is what makes every ABSENCE claim checkable
+#: by a stranger, so an instruction that silently boots the appliance instead costs them the only
+#: means of checking anything.
+_DOCUMENTS_THAT_NAME_THE_INSPECTION_BOOT = (
+    "README.md",
+    "CONTEXT.md",
+    "docs/overview.md",
+    "docs/boot-checklist.md",
+    "docs/boot-pipeline.md",
+    "docs/roadmap.md",
+    "build/isolinux.cfg",
+    "build/grub.cfg",
+)
+
+
+def test_no_document_tells_a_stranger_to_type_init_instead_of_rdinit() -> None:
+    """`init=` is accepted by the bootloader, ignored by the kernel, and boots the appliance.
+
+    The rootfs is the initramfs, so the kernel never mounts a root: `init/main.c` runs
+    `ramdisk_execute_command` — `/init` by default, `rdinit=` to override — and only falls through
+    to `init=` if that fails. `/init` is `build/init` and it succeeds.
+
+    So the wrong parameter produces no error and no hint. It was in six documents, nobody had run
+    the boot they described, and the fault was found by a person at a machine typing what the
+    README told them to. This test is what stops it coming back, in the same shape as every other
+    assertion this milestone added: read what the repository says, and check it.
+    """
+    wrong = []
+    for name in _DOCUMENTS_THAT_NAME_THE_INSPECTION_BOOT:
+        text = (ROOT / name).read_text(encoding="utf-8")
+        for number, line in enumerate(text.splitlines(), start=1):
+            #: `rdinit=/bin/sh` contains `init=/bin/sh`, so the match has to be anchored to what
+            #: precedes it — a bare `init=`, not the tail of the correct one.
+            if re.search(r"(?<![a-z])init=/bin/sh", line):
+                wrong.append(f"{name}:{number}")
+    assert not wrong, (
+        f"{wrong} tell a reader to type `init=/bin/sh`. The kernel ignores it on an "
+        "initramfs-only image and boots the appliance; the parameter is `rdinit=/bin/sh`"
+    )
+
+
 # --- The import closure ---------------------------------------------------------------------------
 
 _CLOSURE_PROBE = """

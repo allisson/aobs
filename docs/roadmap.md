@@ -344,9 +344,73 @@ Signet was the network written into the script below; testnet4 is a peer of it i
 `docs/network-selection.md` and the substitution changes nothing the run was checking.
 
 **The gate stays open.** The exit is two things joined by an *and*, and only the first is met: there
-is no run record, because `docs/boot-checklist.md` has not been written, and none of the boxes below
-has been answered as evidence a stranger can read. One machine that boots is also not a
-hardware-compatibility claim, and the README does not make one.
+is no run record, and none of the boxes below has been answered as evidence a stranger can read. One
+machine that boots is also not a hardware-compatibility claim, and the README does not make one.
+
+**The machine was then characterised, and characterising it found a fourth fault — this one in the
+vocabulary.** The target is an **Acer Chromebook 514 `CB514-1H-C0FF`** (Intel Apollo Lake,
+manufactured 2020-10), booted through **coreboot's `RW_LEGACY` SeaBIOS payload with the machine in
+developer mode**: a BIOS path, so `vga=791` and `vesafb` drew every screen this project has ever
+seen and `efifb` remains unobserved. Keystrokes came from the **laptop's own keyboard** — and that is
+the fault. `build/modules.allow` said *"`hid_generic` is the driver that actually binds a keyboard"*,
+`CONTEXT.md` said *"the keyboard is a USB device and so is the camera"*, and on the only machine this
+appliance has ever run on neither module carried a keystroke: `CONFIG_SERIO_I8042=y` and
+`CONFIG_KEYBOARD_ATKBD=y` put the whole path in the kernel image, outside the allowlist's reach and
+outside `authorized_default=0`. `CONFIG_KEYBOARD_CROS_EC=m` is *deleted* by the prune, so a
+Chromebook that routed input through its embedded controller instead would have booted to a screen
+with no keys.
+
+**And then the inspection boot was attempted for the first time, and it had never worked.** Two
+faults, one on top of the other, in the boot that every *absence* claim's checkability rests on.
+
+**The prompt could not be reached.** `build/isolinux.cfg` said *"a person standing at the bootloader
+can type `rdinit=/bin/sh`"*, the README said the same, and neither said how: with `PROMPT 0` and
+`TIMEOUT 0` there is no prompt, no menu and no countdown, and SYSLINUX shows `boot:` only while
+**Shift** or **Alt** is held, or with Caps Lock or Scroll Lock set — two keys a Chromebook does not
+have. And the entry's label has to be typed first, because the prompt reads its first word as a
+kernel image name.
+
+**It took two keyboards.** Shift and Alt on the target machine's built-in keyboard produced nothing
+— SYSLINUX reads the BIOS keyboard-flags byte and this firmware does not populate it from the
+embedded controller — while an external USB keyboard with Caps Lock set opened the prompt at once.
+That keyboard then died at kernel handover, correctly: in an inspection boot `build/init` never
+runs, so `xhci_pci`, `usbhid` and `hid_generic` are never loaded and a USB keyboard has no driver,
+while the built-in one survives on the compiled-in i8042 path. **External keyboard for the
+bootloader, built-in keyboard for the shell** — an operational fact no document could have deduced
+and none of them had.
+
+**Then the command line itself was wrong, in six documents.** `init=` is not the parameter for this
+image and never was. The whole rootfs is the initramfs, so the kernel never mounts a root
+and never consults `init=`: `init/main.c` runs `ramdisk_execute_command` — `/init` by default,
+overridden by **`rdinit=`** — and only falls through to `init=` if that *fails*. `/init` is
+`build/init` and it succeeds. So the documented command line is accepted by the bootloader, ignored
+by the kernel, and boots the appliance: **no error, no hint, a session where an inspection shell was
+asked for.** It is now `rdinit=/bin/sh` everywhere, and
+`tests/test_structure.py::test_no_document_tells_a_stranger_to_type_init_instead_of_rdinit` fails
+the build if the wrong one returns to any of the eight published places.
+
+This is the worst of the faults so far, and worth being exact about why. The others cost a boot
+each. This one meant that **the mechanism the project offers a stranger for checking its absence
+claims had never been performed by anyone** — not in this milestone's three failed boots, not in the
+run that signed on testnet4, not by the author. The second hardware fault was diagnosed by unpacking
+the initramfs and chrooting into it *on a dev machine*, which is precisely what one does when the
+inspection boot does not work and one has not noticed that it does not work.
+
+**So the bootloader changed.** `build/isolinux.cfg` now sets `PROMPT 1` and `TIMEOUT 30` — three
+seconds, cancelled by the first keystroke — and carries a second entry, `inspect`, identical to
+`aobs` but for `rdinit=/bin/sh`. `build/grub.cfg` gets the same two entries and `timeout=3`. The
+no-menu principle survives intact: there is still nothing to configure and still no menu, and what
+was traded is three seconds against a door that previously opened only on firmware that populates
+one BIOS byte. Typing the parameter by hand still works and is still documented, because a stranger
+auditing absence claims has every reason to distrust an entry someone else named `inspect`.
+
+Same shape as the other four, one layer up: **a claim the repository stated correctly in prose,
+about the wrong mechanism, and never checked.** So `build/verify.py` now reads the pinned kernel's
+own `/boot/config-*` before the prune and fails the build if the six symbols the console and the
+keyboard rest on stop being `=y` — `FB_EFI`, `FB_VESA`, `FRAMEBUFFER_CONSOLE`, `SERIO_I8042`,
+`KEYBOARD_ATKBD`, `VT`. None of them can be in `build/modules.allow`, and that is the point: a
+Debian that ships one as `m` deletes the console or the keyboard from the image, and every other
+assertion in the file still passes.
 
 Worth recording as a pattern, because all three findings share it: **each fault was a claim the
 repository stated correctly in prose and never checked.** `mount` was documented as coming from
