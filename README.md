@@ -1,16 +1,15 @@
 # aobs — Amnesic Offline Bitcoin Signer
 
 A bootable Debian image you run on an offline machine to review and sign a PSBT, then power off.
-**QR codes are the only data path in or out.** No network stack, no storage, no persistence, no
-second process.
+**QR codes are the only data path in or out.** No network driver and no network tool, no storage
+driver, nothing writable to persist to, and exactly one userspace process.
 
 If you have been doing air-gapped signing with a Tails stick and Electrum, this is the same idea
 taken further: instead of a general-purpose OS with the dangerous parts turned off, the appliance is
-one Python program running as **PID 1**, in an image where most of the dangerous parts were never
-installed.
+one Python program running as **PID 1**, in an image the dangerous parts were removed from.
 
 > This document's job is to help you **distrust this correctly**. Every claim below is labelled with
-> the strength it actually has, and with the command a stranger runs to check it. A claim without a
+> the strength it actually has, and with what a stranger does to check it. A claim without a
 > strength is not yet a claim.
 
 ---
@@ -43,7 +42,7 @@ already has code execution on the appliance.
 
 | Claim | Strength | How you check it |
 |---|---|---|
-| Exactly one userspace process exists for the whole session | 🧱 **Structural** — the app is PID 1, there is no init system to start a second | `ls -d /proc/[0-9]*` |
+| Exactly one userspace process exists for the whole session | 🧱 **Structural** — the app is PID 1, there is no init system to start a second | read `build/init`: it ends in `exec python3 -m aobs`, and there is no init binary in the image |
 | No filesystem is mounted beyond tmpfs and pseudo-filesystems | 🧱 **Structural** — the whole rootfs *is* the initramfs; there is nothing to mount from | `cat /proc/mounts` |
 | The boot medium is never read after boot | 🧱 **Structural** — firmware reads it before Linux starts | pull the stick out and keep signing |
 | No network interface, and no tool to configure one | 🚫 **Absence** — no `kernel/net`, no `drivers/net`, no `iproute2` | `ls /lib/modules/*/kernel/net`, `command -v ip` |
@@ -52,14 +51,23 @@ already has code execution on the appliance.
 | Nothing recoverable from RAM after power-off | ⚠️ **Best-effort, not promised** — there is no byte-zeroing | not checkable; stated as a limit |
 | The published ISO is byte-identical to an independent rebuild | 🚧 **Intended, not yet demonstrated** | `sha256sum`, once M4 and a signed manifest exist |
 
-Three of these are weaker than they were in this project's Alpine ancestry, where a hand-written
-kernel config compiled out networking, modules and the block layer entirely.
+**Why two of those are absence and not structural: the kernel is Debian's, unmodified.** The image
+ships stock `linux-image-amd64` — no custom config, no rebuilt kernel — with the modules tree pruned
+to an explicit allowlist of seven ([`build/modules.allow`](build/modules.allow): the four USB host
+controllers, `usbhid`, `hid_generic`, `uvcvideo`). All of `kernel/net`, `drivers/net` and every
+storage driver are deleted from the image, but `CONFIG_NET`, `CONFIG_BLOCK` and `CONFIG_MODULES` are
+all `y` in that kernel. So *offline* means "no network module and no network tool is in the image",
+not "no network stack exists"; and *nothing is written to a persistent medium* rests on no storage
+driver being present, not on there being no block layer. An adversary who already has code execution
+on the appliance is inside both. A `modprobe` blacklist ships as a cheap second line and is **never**
+cited as the claim — the claim is that the module is not in the image.
 [`docs/adr/0001-debian-base-and-stock-kernel.md`](docs/adr/0001-debian-base-and-stock-kernel.md)
-records why that was traded away and what it bought. Do not restate either as structural.
+records what that traded away and what it bought. Neither may be restated as structural.
 
 **Two things this appliance is honest about:**
 
-- 🐚 **There is a shell in the image** (`/bin/sh`), and Python, which can `os.execv` anything.
+- 🐚 **There is a shell in the image** — `/bin/sh` is `dash`, because PID 1 is a shell script — and
+  Python, which can `os.execv` anything.
   "No shell" would protect nobody. The claim that is actually enforced is narrower and checked by
   the build: **no getty, no VT with a login, no path from the running app to a prompt.**
 - 🙈 **The appliance cannot verify itself.** A compromised image would report itself healthy. Every
@@ -77,7 +85,7 @@ matter of configuration.
 |---|---|---|
 | **Persistence** | An encrypted persistent volume is an offered feature | The rootfs *is* the initramfs. There is no writable medium to persist to, and no storage driver to reach one |
 | **Processes** | A full desktop session: display manager, dbus, dozens of processes | One. The signer is PID 1; there is no init to start a second |
-| **Data path** | You move files — a USB stick shuttling PSBTs between machines | QR codes only, in both directions. No mass storage driver exists to mount a stick |
+| **Data path** | QR *or* a USB stick — Electrum reads and shows QR codes, and both paths stay available | QR only, because there is no other. No mass storage driver is in the image, so a stick cannot be mounted even if you wanted to |
 | **Network** | Tor-by-default, i.e. networking present and constrained | Networking is *removed from the image*: no net modules, no `ip` |
 | **Wallet lifetime** | A wallet file that outlives the session | One wallet per session. Making another means powering off and booting again |
 
@@ -236,19 +244,32 @@ to compare against. That is M4 and M5.
 
 ## 🔍 Verify the claims yourself
 
-**On a booted appliance** — there is a shell in the image, and this is what it is honestly for:
+**On a booted appliance.** A normal session gives you no prompt — there is no getty, no VT with a
+login, and no path from the running app to a shell; if the app exits, the kernel panics on init
+death rather than dropping you anywhere. To inspect the image you boot it *differently*, by typing
+`init=/bin/sh` at the bootloader. That is not a backdoor and it is not defended against: a person
+standing at the machine with the stick already owns it, and
+[`docs/boot-pipeline.md`](docs/boot-pipeline.md) says so rather than papering over it.
 
 ```sh
-ls -d /proc/[0-9]*                              # one userspace process
-cat /proc/mounts                                # tmpfs and pseudo-filesystems only
-ls /sys/block                                   # no block devices
-command -v ip                                   # nothing
-ls /lib/modules/*/kernel/net                    # no networking modules
+cat /proc/mounts                                  # tmpfs and pseudo-filesystems only
+ls /sys/block                                     # no block devices
+command -v ip                                     # nothing
+ls /lib/modules/*/kernel/net                      # no networking modules
+ls /lib/modules/*/kernel/drivers/usb              # HID and UVC hosts only
 cat /sys/bus/usb/devices/usb*/authorized_default  # 0
 ```
 
-Then pull the boot medium out and keep signing. That is the cheapest check of the amnesia claim, and
-it is the one that makes "the boot medium is not storage" concrete.
+Two of the claims are **not** checkable that way, and it is worth being exact about why. In that
+boot *you* replaced PID 1, so a process count there says nothing about a real session — "exactly one
+userspace process" follows from PID 1 being the app itself, which you check by reading
+[`build/init`](build/init) and the assertions in [`build/verify.py`](build/verify.py) that PID 1's
+every command resolves. And `authorized_default=0` is set *after* our own devices enumerate, so in a
+shell boot the app never ran to set it.
+
+The amnesia claim has a cheaper check that needs no shell at all: **in an ordinary session, pull the
+boot medium out and keep signing.** That is the one that makes "the boot medium is not storage"
+concrete.
 
 **In the repository**, the build refuses rather than warns at the first stage where a published
 claim stops being true. Every build-time assertion is a pure function in
