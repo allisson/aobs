@@ -44,7 +44,7 @@ RECORD_IT = (
 
 COMPARE_IT = (
     "Check this fingerprint against the one you recorded. If it differs, a word or the passphrase "
-    "is not what you used before — and the addresses will not be yours."
+    "is not what you used before - and the addresses will not be yours."
 )
 
 #: A fact and a rule, not an offer — the choice is already made by the time this screen exists.

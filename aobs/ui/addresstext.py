@@ -79,13 +79,13 @@ def _not_found(check: AddressCheck, *, block: int) -> Failure:
     return Failure(
         condition="address-not-found",
         happened=(
-            f"This address was not found. The appliance searched addresses {first}–{last} on "
+            f"This address was not found. The appliance searched addresses {first}-{last} on "
             "both the receive and the change chain of this wallet, and none of them is this "
             "address. That is all this appliance can tell you: an address further along the "
             "chain and an address from somewhere else look the same from here."
         ),
         next_steps=(
-            f"Search the next {block} addresses on each chain — F9.",
+            f"Search the next {block} addresses on each chain - F9.",
             "Stop here, and check with whoever gave you this address before sending anything "
             "to it.",
         ),
@@ -140,7 +140,7 @@ LIST_TITLE = "Your addresses"
 #: that the descriptor export landed intact, and it is run once, at setup, before funds move.
 LIST_PURPOSE = (
     "Compare these against the addresses your watch-only wallet shows. If they differ, the "
-    "descriptor it holds is not the one this appliance exported — stop and export it again "
+    "descriptor it holds is not the one this appliance exported - stop and export it again "
     "before receiving anything."
 )
 
@@ -163,7 +163,7 @@ def list_row(listed: ListedAddress) -> str:
 
 
 def list_position(start: int, count: int) -> str:
-    return f"Showing {start}–{start + count - 1}."
+    return f"Showing {start}-{start + count - 1}."
 
 
 def jump_prompt(digits: str) -> str:
@@ -176,7 +176,7 @@ DESCRIPTOR_TITLE = "Export the descriptor"
 
 DESCRIPTOR_INSTRUCTION = (
     "Show this to your watch-only wallet. It carries this wallet's public key, its derivation "
-    "path and its fingerprint — and nothing that can spend."
+    "path and its fingerprint - and nothing that can spend."
 )
 
 #: Named on screen because the two are separate URs on purpose: Green's ur-c rejects a taproot
@@ -197,7 +197,7 @@ EXPORT_QR_TITLE = "Encrypted wallet QR"
 #: and believes they have a backup.
 PASSWORD_NOT_HERE = (
     "The eight-word password is not on this screen. Without it this QR is nothing, and with it "
-    "this QR is everything — which is why they are never shown together."
+    "this QR is everything - which is why they are never shown together."
 )
 
 #: The network this backup is for, on the screen the user is about to commit to paper. On mainnet
@@ -206,7 +206,7 @@ PASSWORD_NOT_HERE = (
 #: moment it is being written down.
 EXPORT_QR_NETWORK = (
     "This backup is for {network}. It carries that network, and a session on another one will "
-    "refuse it — write it on the paper beside the eight words."
+    "refuse it - write it on the paper beside the eight words."
 )
 
 EXPORT_QR_INSTRUCTION = (
@@ -239,7 +239,7 @@ READ_BACK_WHY = (
 
 #: Retries the same password. A fresh one would silently invalidate what the user already wrote.
 READ_BACK_WRONG = (
-    "That is not the password. Nothing has changed — the same eight words are still the ones to "
+    "That is not the password. Nothing has changed - the same eight words are still the ones to "
     "write down. Press F9 to see them again."
 )
 
@@ -252,7 +252,7 @@ DONE_TITLE = "Export complete"
 #: differs, and the appliance knows which case it is in — `Wallet.has_passphrase`. Printing the
 #: first to a user in the second situation is a lie that gets people robbed.
 WITH_PASSPHRASE = (
-    "This QR and these eight words together reconstruct your BIP39 recovery words — not your "
+    "This QR and these eight words together reconstruct your BIP39 recovery words - not your "
     "wallet. Your passphrase is in neither of them, and nothing here is spendable without it. "
     "You must remember it: nothing on this appliance can recover it."
 )

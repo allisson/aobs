@@ -26,7 +26,7 @@ CAMERA_LOST = Failure(
     ),
     next_steps=(
         "Power off with F12, reconnect the camera, and boot again.",
-        "The paths that do not scan — generating a wallet, exporting a descriptor — still work.",
+        "The paths that do not scan - generating a wallet, exporting a descriptor - still work.",
     ),
 )
 

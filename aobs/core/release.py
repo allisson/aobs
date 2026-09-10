@@ -46,7 +46,7 @@ COMMIT_PREFIX = 12
 ADVISORIES_URL = "github.com/allisson/aobs/blob/main/ADVISORIES.txt"
 #: 92 columns, which is what fixes the wording: the 96-column cap (`aobs/ui/geometry.py`) is a hard
 #: budget, and a line that wraps on the first screen reads as a layout defect rather than a pointer.
-ADVISORIES_LINE = f"Advisories: {ADVISORIES_URL} — this appliance cannot check."
+ADVISORIES_LINE = f"Advisories: {ADVISORIES_URL} - this appliance cannot check."
 
 #: The separator. A middle dot rather than a pipe or a dash: the row sits under a keymap picker
 #: whose whole purpose is that the user may be on any Latin layout, and a character they cannot

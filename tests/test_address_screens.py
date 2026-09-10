@@ -158,7 +158,7 @@ async def test_the_not_found_screen_states_the_window_it_searched() -> None:
         )
         assert screen.check.searched == (0, ADDRESS_SEARCH_BLOCK)
         text = blob(screen)
-        assert f"0–{ADDRESS_SEARCH_BLOCK}" in text
+        assert f"0-{ADDRESS_SEARCH_BLOCK}" in text
         assert "receive" in text and "change" in text
 
 
@@ -208,7 +208,7 @@ async def test_searching_further_widens_the_window_by_one_block() -> None:
         await pilot.pause()
         assert app.screen.blocks == 2
         assert app.screen.check.searched == (0, 2 * ADDRESS_SEARCH_BLOCK)
-        assert f"0–{2 * ADDRESS_SEARCH_BLOCK}" in blob(app.screen)
+        assert f"0-{2 * ADDRESS_SEARCH_BLOCK}" in blob(app.screen)
 
 
 async def test_an_address_past_the_first_window_proves_once_the_user_searches_further() -> None:

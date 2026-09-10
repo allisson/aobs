@@ -191,7 +191,7 @@ def test_parts_arriving_says_the_count_and_nothing_about_density() -> None:
     controller.frame(seen(parts[0]), 0.2)
     progress = controller.progress
     assert progress.state is ScanState.SCANNING
-    assert progress.status == f"Scanning — 1 of {len(parts)} parts."
+    assert progress.status == f"Scanning - 1 of {len(parts)} parts."
     assert progress.framing_aid is False, "aiming is solved the moment bytes arrive"
 
 
@@ -228,13 +228,13 @@ def test_out_of_order_arrival_looks_like_holes_filling_in() -> None:
     controller = ScanController(ScanTarget.TRANSACTION, network=Network.MAINNET)
 
     controller.frame(seen(parts[2]), 0.2)
-    assert controller.progress.slot_map == "▯▯▮" + "▯" * (len(parts) - 3)
+    assert controller.progress.slot_map == "░░█" + "░" * (len(parts) - 3)
 
     controller.frame(seen(parts[0]), 0.4)
-    assert controller.progress.slot_map == "▮▯▮" + "▯" * (len(parts) - 3)
+    assert controller.progress.slot_map == "█░█" + "░" * (len(parts) - 3)
 
     controller.frame(seen(parts[1]), 0.6)
-    assert controller.progress.slot_map.startswith("▮▮▮")
+    assert controller.progress.slot_map.startswith("███")
     assert controller.progress.received == 3
 
 
@@ -256,7 +256,7 @@ def test_above_ninety_six_parts_the_fraction_stands_alone() -> None:
     controller.frame(seen(parts[0]), 0.2)
     progress = controller.progress
     assert progress.slot_map is None
-    assert progress.status == f"Scanning — 1 of {len(parts)} parts."
+    assert progress.status == f"Scanning - 1 of {len(parts)} parts."
 
 
 def test_a_completed_stream_hands_back_exactly_what_was_sent() -> None:
@@ -272,7 +272,7 @@ def test_a_completed_stream_hands_back_exactly_what_was_sent() -> None:
     assert event.payload == psbt_bytes
     assert controller.progress.complete is True
     seq_len = stream.seq_len
-    assert controller.progress.status == f"Scan complete — {seq_len} of {seq_len} parts."
+    assert controller.progress.status == f"Scan complete - {seq_len} of {seq_len} parts."
 
 
 # --- The controller: a different message, and giving up -------------------------------------------

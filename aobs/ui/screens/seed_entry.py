@@ -23,11 +23,11 @@ from aobs.ui.wordentry import WordEntryScreen
 from aobs.ui.widgets.wordgrid import BIP39
 
 #: Verbatim. `docs/seed-entry.md` fixes both what it says and what it refuses to say.
-CHECKSUM_FAILED = "Checksum failed — one or more words are wrong. Every slot is still editable."
+CHECKSUM_FAILED = "Checksum failed - one or more words are wrong. Every slot is still editable."
 
 #: The read-back's failure, which is a statement about the paper rather than about the words.
 READ_BACK_FAILED = (
-    "That is not what is written above. Check your paper against the words and try again — "
+    "That is not what is written above. Check your paper against the words and try again - "
     "these are the same words, not new ones."
 )
 

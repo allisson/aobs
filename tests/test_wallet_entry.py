@@ -316,7 +316,7 @@ async def test_skipping_the_dice_shows_no_warning_and_no_degraded_state() -> Non
         rendered = texts(app).lower()
         for word in ("warning", "weak", "insecure", "recommended", "at least", "degraded"):
             assert word not in rendered
-        assert "%" not in rendered and "▮" not in rendered, "a bar is a quota with a picture"
+        assert "%" not in rendered and "█" not in rendered, "a bar is a quota with a picture"
 
 
 async def test_the_dice_screen_counts_rolls_and_bits_and_sets_no_quota() -> None:

@@ -9,7 +9,7 @@ It owns three decisions from `docs/scan-feedback.md` and `docs/failure-states.md
 * **Which of the three states the stream is in**, and therefore which status line is on screen.
   Three states rather than one spinner, because they have three different fixes and the appliance
   knows which one it has.
-* **The slot map**, one cell per part index — `▮` received, `▯` missing. Never a bar: the first
+* **The slot map**, one cell per part index - `█` received, `░` missing. Never a bar: the first
   `seq_len` parts are the pure fragments in order and mixed XOR parts follow to repair losses, so a
   bar that fills, stalls and jumps reads as broken at exactly the moment the fountain is working.
 * **What a decoded-but-foreign QR is called.** Not *unrecognised QR* — that discards information
@@ -42,8 +42,16 @@ HINT_AFTER_SECONDS = 4.0
 #: that comes to once the block is drawn.
 MAX_SLOTS = MAX_COLUMNS - 4
 
-RECEIVED = "▮"
-MISSING = "▯"
+#: The two slot-map cells. **CP437, and that is a hard constraint, not a preference.** The console
+#: is the kernel's built-in 8x16 font with the default unicode map, which is generated from
+#: `drivers/tty/vt/cp437.uni` and holds 303 codepoints. `▮` U+25AE and `▯` U+25AF are not among
+#: them: they were here from the first draft and would have drawn as nothing on the appliance,
+#: taking the whole of the scan screen's feedback with them. Solid-versus-dither keeps what
+#: `docs/scan-feedback.md` asks of the map — holes that look like holes — and both are one column
+#: wide, which `MAX_SLOTS` depends on. `tests/test_structure.py` fails the build for the next
+#: character outside the repertoire.
+RECEIVED = "█"
+MISSING = "░"
 
 #: UR types that carry a wallet rather than a transaction. A user who scanned one on the
 #: transaction screen learns exactly that.
@@ -81,10 +89,10 @@ class ScanState(Enum):
 #: The wording is `docs/scan-feedback.md`'s, and each line names where the fix is.
 AIMING_LINE = "Point the camera at the QR code."
 STILL_FRAME_LINE = (
-    "Frames are decoding but no new parts are arriving — your wallet may be showing a still frame."
+    "Frames are decoding but no new parts are arriving - your wallet may be showing a still frame."
 )
 NOT_DECODING_LINE = (
-    "Nothing is decoding — move closer, or ask your wallet for a lower QR density."
+    "Nothing is decoding - move closer, or ask your wallet for a lower QR density."
 )
 
 DIFFERENT_TRANSACTION = "These frames are from a different transaction. Starting again."
@@ -346,7 +354,7 @@ class ScanController:
     def _status(self, state: ScanState, received: int, expected: int | None) -> str:
         if self._complete:
             if expected is not None and expected > 1:
-                return f"Scan complete — {expected} of {expected} parts."
+                return f"Scan complete - {expected} of {expected} parts."
             return "Scan complete."
         if state is ScanState.AIMING:
             return AIMING_LINE
@@ -355,7 +363,7 @@ class ScanController:
         if state is ScanState.STILL_FRAME:
             return STILL_FRAME_LINE
         if expected is not None and expected > 1:
-            return f"Scanning — {received} of {expected} parts."
+            return f"Scanning - {received} of {expected} parts."
         return "Scanning."
 
     def _slot_map(self, expected: int | None) -> str | None:

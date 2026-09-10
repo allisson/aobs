@@ -471,10 +471,30 @@ the same shape — read what the repository already says, and check the artefact
       stated correctly in prose and never checked.* Replacing the glyphs is deliberately **not**
       done in advance — two of them sit inside row templates that `docs/review-screen.md` and
       `docs/scan-feedback.md` fix character by character, and the check is cheaper than the guess.
+      **Answered, and the answer was all five.** It did not need hardware in the end, which is the
+      better outcome: `build/init` never calls `setfont` and `loadkeys` does not touch the console
+      map, so the vt uses the kernel's default map, generated from `drivers/tty/vt/cp437.uni` —
+      **303 codepoints, and none of the five among them.** That is a fact a reader can check, where
+      a photograph would have been a fact they had to take on trust. Confirmed against real
+      rendered output too: the README's four blocks are renders the suite asserts character for
+      character, and `▮ ▯ —` appear in them.
+
+      The substitutions: `█`/`░` for the slot map (solid versus dither keeps holes looking like
+      holes, both one column, `MAX_SLOTS` unaffected), `!` for the NOT PROVEN marker (two columns,
+      as `⚠ ` was, so `docs/review-screen.md`'s row widths do not move), and `-` for both dashes
+      across 25 rendered strings in nine modules. One narrow escape worth recording: `•` U+2022,
+      the passphrase masking character, **is** in the repertoire — that one would have masked
+      nothing.
+
+      And the budget stopped being prose. `tests/test_structure.py` now renders every screen and
+      reads every UI string constant against the repertoire as a frozenset citing the kernel file,
+      because the four README blocks are not every screen: the NOT PROVEN warning is deliberately
+      not among them, which is exactly how `⚠` sat unchecked. `I-9` on hardware is now
+      *confirmation of a derivation* rather than the only way to know.
 - [ ] Check each claim in the image, **and say which boot each check belongs to** — the row as
       written was not runnable, because a session has no prompt and the checks were listed as if it
       did. `docs/overview.md` now carries the split; the checklist has to repeat it per row.
-      - In an `init=/bin/sh` boot: `cat /proc/mounts`, `ls /sys/block`, `command -v ip`,
+      - In an `rdinit=/bin/sh` boot: `cat /proc/mounts`, `ls /sys/block`, `command -v ip`,
         `ls /lib/modules/*/kernel/net`, `ls /lib/modules/*/kernel/drivers/usb`.
       - **Not** `ls -d /proc/[0-9]*` and **not** `cat /sys/bus/usb/devices/usb*/authorized_default`:
         that boot replaces PID 1, so the count is the stranger's own shell and `build/init` never

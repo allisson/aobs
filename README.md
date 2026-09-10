@@ -151,7 +151,7 @@ parameter, flag or alternate path proceeds past a refusal
 output's script from its own key, at a path it recognises. A `PSBT_IN_BIP32_DERIVATION` field in the
 input is *evidence for* that check, never the answer — so a PSBT that lies about which outputs are
 yours cannot talk the appliance into hiding a payment. Everything not proven is money leaving, and
-is displayed as such, marked `⚠ NOT PROVEN`.
+is displayed as such, marked `! NOT PROVEN`.
 See [`docs/psbt-review-model.md`](docs/psbt-review-model.md).
 
 **Scope, deliberately narrow:** single-sig **P2WPKH** (BIP84) and **P2TR** key-path (BIP86), account
@@ -295,9 +295,9 @@ are already arriving and aiming is solved.
 Sign a transaction
 ────────────────────────────────────────────────────────────────────────────────────────────
 
-▮▮▮▮▮▯▯▯▯▯▯
+█████░░░░░░
 
-Scanning — 5 of 11 parts.
+Scanning - 5 of 11 parts.
 ```
 
 **Reviewing it.** Every output is money leaving unless the appliance can prove it is your

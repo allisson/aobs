@@ -39,7 +39,7 @@ TYPE_THEM = (
 #: does not know that meets a wallet deriving different addresses and no explanation.
 NOT_IN_THE_QR = (
     "The passphrase is not in this QR. If your wallet has one, you will be asked for it next and "
-    "you must remember it — nothing here can recover it."
+    "you must remember it - nothing here can recover it."
 )
 
 #: Verbatim, and it claims nothing about which. `AuthenticationFailed` is one condition with two
@@ -65,7 +65,7 @@ def wrong_network(backup: Network) -> str:
     user opens with `F10` and never as a side effect of a scan (`docs/network-selection.md`).
     """
     return (
-        f"The words are right, and this backup was exported on {backup.value} — not this "
+        f"The words are right, and this backup was exported on {backup.value} - not this "
         f"session's network. Nothing was restored. Choose {backup.value} from the home screen "
         "and scan the code again. Every slot is still editable."
     )

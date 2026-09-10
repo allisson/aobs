@@ -45,7 +45,12 @@ LABELS = {
     OutputCategory.CHANGE_PROVEN: "CHANGE, PROVEN",
 }
 
-WARNING_MARK = "⚠ "
+#: Two columns, and it has to stay two: `docs/review-screen.md` fixes the row templates character
+#: by character. `⚠` U+26A0 was the first draft and is not in the console's repertoire — the
+#: built-in 8x16 font's default map is CP437 — so the strongest marker on the review screen would
+#: have drawn as nothing. The marker is not carrying the warning alone: `NOT_PROVEN_WARNING` is a
+#: full sentence beneath it and the category label already reads `PAYMENT`.
+WARNING_MARK = "! "
 
 #: Names the wallet's claim, says where the fix is — this is not a scan to retry — and does not
 #: accuse the wallet: a gap-limit miss and an attack are indistinguishable from here.
@@ -244,7 +249,7 @@ def fee_line(review: Review) -> str | None:
 
 def lock_line(first: int, last: int, total: int) -> str:
     """What is missing, in place of a key that would do nothing."""
-    return f"Outputs {first}–{last} of {total} — scroll to the end to unlock signing."
+    return f"Outputs {first}-{last} of {total} - scroll to the end to unlock signing."
 
 
 def footer_rule() -> str:
@@ -344,8 +349,8 @@ NO_RETRY_STEP = (
 #: — the session is on the wrong network, or the transaction is — and `NO_RETRY_STEP` silently
 #: picks the second, sending someone off to rebuild a transaction that was already correct.
 EITHER_SIDE_STEP = (
-    "Retrying will not change this: either this session is on the wrong network — power off and "
-    "start it again on the one you meant — or your wallet must build the transaction differently."
+    "Retrying will not change this: either this session is on the wrong network - power off and "
+    "start it again on the one you meant - or your wallet must build the transaction differently."
 )
 
 #: Every reason declares its kind here, in one place. A new `RefusalReason` fails the test that
