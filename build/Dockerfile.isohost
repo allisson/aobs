@@ -14,8 +14,12 @@
 # ARRANGEMENT of those bytes, which is `docs/reproducible-build.md`'s question at M4 and not this
 # file's.
 #
-# NOTHING HERE RUNS AS ROOT, which is the whole point of copying the runner rather than reaching for
-# `--privileged`. The `subuid`/`subgid` ranges are what `mmdebstrap --mode=unshare` maps into.
+# The image's own user is `builder`, uid 1001, with the `subuid`/`subgid` ranges
+# `mmdebstrap --mode=unshare` maps into — the runner's shape, kept deliberately. It is **not** what
+# makes the local build unprivileged, and nothing here should be read as saying it is:
+# `build/mkiso-docker.sh` runs this image `--privileged`, for the reason it records. The uid stays
+# 1001 so that the day a host appears where the unprivileged path works, the only thing that has to
+# change is the `docker run` line.
 FROM ubuntu:24.04
 
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \

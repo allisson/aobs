@@ -4,11 +4,15 @@
 #     sh build/mkiso-docker.sh
 #
 # This is a *host*, not a build: it builds `build/Dockerfile.isohost`, mounts the working tree at
-# `/work`, and runs `build/mkiso.sh` inside it unprivileged. The build is still the one in
-# `build/mkiso.sh` and the inputs are still the ones in `build/inputs/` — nothing here touches the
-# ISO's contents. `docs/boot-pipeline.md` holds why this file exists at all.
+# `/work`, and runs `build/mkiso.sh` inside it. The build is still the one in `build/mkiso.sh` and
+# the inputs are still the ones in `build/inputs/` — nothing here touches the ISO's contents.
 #
-# Two things about it are load-bearing rather than convenient.
+# **THIS PATH IS PRIVILEGED, AND `build/mkiso.sh` IS NOT.** The script it runs says "unprivileged,
+# start to finish" and means it; this file hands the container `--privileged` anyway, because on a
+# Docker whose kernel refuses an unprivileged range mapping there is no other way to reach stage 1.
+# The claim that the build needs no privilege is CI's, measured on `ubuntu-24.04` and nowhere else.
+# A build produced by this script is NOT evidence for it. `docs/boot-pipeline.md` states the
+# deviation in full, including how to get a local host where it is not needed.
 
 set -eu
 
@@ -35,18 +39,28 @@ say "the host image"
 # daemon the 250 MiB of pinned inputs for no reason.
 docker build --platform linux/amd64 -t "$IMAGE" - < "$ROOT/build/Dockerfile.isohost"
 
-say "the build, unprivileged, inside it"
-# `--security-opt seccomp=unconfined` IS NEEDED AND IS NOT A PRIVILEGE. Docker's default seccomp
-# profile denies `unshare(CLONE_NEWUSER)` — the exact syscall `mmdebstrap --mode=unshare` is named
-# after — so without it stage 1 dies with `unshare syscall failed: Operation not permitted`. It
-# widens the *host's* syscall filter for this container; it grants the build nothing. There is no
-# `--privileged` here, no `--cap-add`, and the process inside is uid 1001. If that ever stops being
-# true, `docs/boot-pipeline.md` says what to do: write it down, do not reach for root.
+say "the build, privileged (see the header), inside it"
+# The escalation this line is the end of, so it is not walked a fourth time. Measured here, and
+# each step is what the one above it failed with:
+#
+#   plain                            stage 1: `unshare syscall failed: Operation not permitted`
+#                                    — Docker's default seccomp profile denies `unshare(CLONE_NEWUSER)`
+#   --security-opt seccomp=unconfined stage 1: `newuidmap: write to uid_map failed: Operation not
+#                                    permitted` — the unshare succeeds, the range mapping does not
+#   --privileged                     builds
+#
+# The middle failure is not a missing capability and not the setuid bit: `newuidmap` is setuid-root
+# and does elevate here (verified: euid 0, ruid 1001), the bounding set carries `CAP_SETUID`, the
+# container is in no user namespace of its own, and the same mapping written by container root
+# succeeds. The same test fails identically on a native `linux/arm64` container, so it is not the
+# amd64 emulation either. It is this Docker's kernel, and it is the finding
+# `docs/boot-pipeline.md` asks for rather than a reason to stop looking.
 #
 # And the output is NOT piped anywhere. A `| tail` here once reported success for a build whose
-# stage 1 had failed, because the exit status of a pipeline is the last command's.
+# stage 1 had failed, because the exit status of a pipeline is the last command's — the same
+# truncated-tail reading that document already warns about, and it cost this script a full run.
 docker run --rm --platform linux/amd64 \
-    --security-opt seccomp=unconfined \
+    --privileged \
     -v "$ROOT:/work" \
     "$IMAGE" sh build/mkiso.sh
 

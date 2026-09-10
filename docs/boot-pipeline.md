@@ -62,29 +62,6 @@ the mode is named after, so this was not a safe assumption.
 on, so `--privileged` is not an escape hatch available to this build. If unshare mode ever stops
 working, that is a finding to be written down here, not a licence.
 
-### Building it on a machine that is not that runner
-
-`build/mkiso.sh` needs an amd64 Linux host with unprivileged user namespaces, and most developer
-machines are neither. `build/mkiso-docker.sh` supplies one: `build/Dockerfile.isohost` is the
-`ubuntu-24.04` the runner is, with the same tool list CI installs, and the script mounts the working
-tree into it and runs `build/mkiso.sh` there as uid 1001. The build, the inputs and the assertions
-are unchanged — what the container replaces is the host, not the build.
-
-**`--security-opt seccomp=unconfined` is required, and it is not a privilege.** Docker's default
-seccomp profile denies `unshare(CLONE_NEWUSER)` — the syscall unshare mode is named after — so
-without it stage 1 dies with `unshare syscall failed: Operation not permitted`. The flag widens the
-*host's* syscall filter for that one container; the build inside still runs unprivileged, with no
-`--privileged` and no added capability. That is the distinction the rule above is about: root was
-not reached for, and is still not available to this build.
-
-Two things this cost, recorded because both cost a full build to find:
-
-- **Never pipe the build's output.** A `sh build/mkiso.sh | tail` reported success for a build whose
-  stage 1 had failed, because a pipeline exits with its last command's status. `build/mkiso-docker.sh`
-  pipes nothing.
-- **The recipe was in a local image and nowhere else** until this section. The ISO can be rebuilt by
-  a stranger only if the host it needs is written down, and CI's runner is not one a reader has.
-
 **Five constraints on stage 1 came out of that verification.** None is about namespaces; every one
 is about apt or mmdebstrap, and each was found by a build failing rather than by reading:
 
@@ -144,6 +121,51 @@ That deleted a helper instead of adding one.
 The hook leaves a receipt at `/etc/aobs-ec-backend`, and `build/verify.py` refuses an image without
 it. A customize hook that silently did not run would leave every other assertion passing and the
 only one that can catch a pure-Python signer unchecked.
+
+### The local build is privileged, and the claim above is CI's alone
+
+**Every ISO ever built on a developer machine in this project was built in a `--privileged`
+container.** That is the finding the rule above asks for, and it went unwritten for a year:
+the recipe lived in a local Docker image and a shell history, never in the repository, so the
+escalation to `--privileged` was rediscovered from scratch each time rather than known.
+
+`build/mkiso.sh` needs an amd64 Linux host with unprivileged user namespaces, and a developer
+machine is generally neither. `build/mkiso-docker.sh` supplies the host — `build/Dockerfile.isohost`
+is the `ubuntu-24.04` the runner is, with CI's tool list and a uid-1001 `builder` — and then hands
+the container `--privileged`, because on the Docker measured here there is no other way to reach
+stage 1. The build, the inputs and the assertions inside are unchanged; what the script replaces is
+the host, and what it gives up is the property the section above measures.
+
+**So an ISO built locally is not evidence that the build needs no privilege.** The claim is measured
+on `ubuntu-24.04` in CI's `image` job and nowhere else. Anything published about it cites that job,
+never a local build.
+
+The escalation, measured 2026-09-09 on OrbStack's Docker, each step failing with what the next one
+answers:
+
+| `docker run` | stage 1 |
+|---|---|
+| plain | `unshare syscall failed: Operation not permitted` — the default seccomp profile denies `unshare(CLONE_NEWUSER)` |
+| `--security-opt seccomp=unconfined` | `newuidmap: write to uid_map failed: Operation not permitted` — the namespace opens, the range mapping does not |
+| `--privileged` | builds |
+
+**The middle failure is not the obvious causes, and each was excluded rather than assumed.**
+`newuidmap` is setuid-root and does elevate in that container (measured: euid 0, ruid 1001);
+`CAP_SETUID` and `CAP_SETGID` are in the bounding set; the container is in no user namespace of its
+own (`uid_map` is `0 0 4294967295`); the rootfs is not `nosuid`; `NoNewPrivs` is 0; and container
+root writes the same mapping successfully. A native `linux/arm64` container fails identically, so
+the amd64 emulation is not it either. What is left is the host kernel's own policy, which is a
+property of this Docker and not of the build.
+
+**A local host where the unprivileged path can actually run** is a full Linux VM rather than a
+container — an OrbStack machine, `orb create -a amd64 ubuntu:24.04`, or any amd64 Linux box. That is
+the thing to reach for if the property itself is what needs testing; `--privileged` is for getting an
+ISO, not for measuring anything.
+
+One more thing this cost, recorded because it cost a whole build: **never pipe the build's output.**
+`sh build/mkiso.sh | tail` reported success for a build whose stage 1 had already failed, because a
+pipeline exits with its last command's status. `build/mkiso-docker.sh` pipes nothing — and the same
+truncated-tail reading is what the constraints below were found in spite of.
 
 ### Why the appliance closure is resolved against an empty root
 
