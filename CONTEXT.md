@@ -41,6 +41,27 @@ firmware before Linux starts and never read again, so it can be physically remov
 the Session. Do not call it storage — nothing is ever written to it, which is what makes pulling it
 out the cheapest check of the amnesia guarantee.
 
+## Session boot
+
+A boot that runs the appliance as shipped: `build/init` is PID 1 and the application is the only
+userspace process. It is what a *Session* is, named as a boot so that it can be contrasted with the
+one below. Every claim about what the appliance *does* — a Wallet loaded, a PSBT reviewed and
+signed, the boot medium pulled and signing continuing — can only be answered here, because there is
+no prompt and nothing to inspect from.
+
+## Inspection boot
+
+A boot where the person at the machine types `rdinit=/bin/sh` at the bootloader, replacing the
+application with a shell in order to look at the image. It is what makes the *absence* claims
+checkable by a stranger with `ls`, and it is not defended against: a person holding the boot medium
+already owns the machine, and a fresh boot holds no secrets.
+
+Two claims **do not survive the substitution** and must never be written up as if they do: the
+process count, because the stranger's own shell is PID 1; and `authorized_default=0`, because
+`build/init` is what writes it and `build/init` did not run. Both are source-level checks instead.
+Every row of a boot checklist names which of the two boots answers it — a row that does not name
+one is not runnable.
+
 ## Offline
 
 The appliance's network property: **no network module and no network configuration tool is present in
@@ -317,9 +338,17 @@ claim carries the conditions that retract it, or it becomes permanent by acciden
 
 ## Boot-checklist run record
 
-The record that the boot checklist was run, on which machine, and what each item answered — one per
-release, published beside the ISO. The checklist is the *procedure*; the run record is the
-*evidence*, and only the second one is a thing a stranger can check. It is an attestation: signed,
-naming an identified operator and an identified machine. Its verdicts are *pass*, *fail* and
-*deviated*, and the third is the load-bearing one — it marks where a release's evidence stops
-matching the checklist's claim, which a missing row or a generous *pass* would hide.
+The record that the boot checklist was run, on which machine, and what each item answered. The
+checklist is the *procedure*; the run record is the *evidence*, and only the second one is a thing a
+stranger can check. It names an identified operator and an identified machine — identified by class,
+which is what someone reproducing the run has to match, never by serial number. Its verdicts are
+*pass*, *fail* and *deviated*, and the third is the load-bearing one: it marks where the evidence
+stops matching the checklist's claim, which a missing row or a generous *pass* would hide. A
+*deviated* verdict without a written reason is not a verdict.
+
+There are two kinds and conflating them costs the distinction. An **in-repo run record** lives in
+`docs/boot-runs/`, is unsigned, and exists so that the evidence is reviewable in the same diff as
+the change it authorises — it is what closes the M3 gate, which happens before any release exists to
+publish beside. A **release run record** is one per release, published beside the ISO, and is an
+attestation: signed, under the same key as the manifest. The second does not replace the first; a
+release cites the runs it rests on.

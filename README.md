@@ -21,9 +21,9 @@ one Python program running as **PID 1**, in an image the dangerous parts were re
 | ✅ **Demonstrated** | The image boots on real hardware and signs. One transaction was built in Sparrow, scanned in, reviewed, signed, scanned back out and broadcast on **testnet4** from an appliance booted off a live USB stick on a Chromebook: [`dcdfc90e…6b3a07`](https://mempool.space/testnet4/tx/dcdfc90e38d7299caa00c5c7fb4c01ab73e9d093adee823745d9dbc6466b3a07) |
 | ✅ **Demonstrated** | The ISO builds unprivileged in CI, from packages pinned to a `snapshot.debian.org` timestamp, with every build-time assertion passing |
 | 🚧 **Not yet** | **No release.** No tag, no signed ISO, no manifest. There is nothing to download — you build it yourself or you don't run it |
-| 🚧 **Not yet** | **No threat model published.** `docs/threat-model.md` is written in M3 and does not exist yet |
+| ✅ **Published** | **A threat model**, with every claim at its stated strength and every adversary in a numbered tier: [`docs/threat-model.md`](docs/threat-model.md) |
 | 🚧 **Not yet** | **No reproducibility guard.** Byte-identical rebuild is the design intent; two builds on two hosts have never been compared |
-| 🚧 **Not yet** | **No boot-checklist run record.** The structural claims below have not been checked *on a booted appliance* and written down where a stranger can read them |
+| 🚧 **Not yet** | **No boot-checklist run record.** The procedure is published — [`docs/boot-checklist.md`](docs/boot-checklist.md) — but the claims below have not been checked *on a booted appliance* and written down where a stranger can read them. The checklist is not the evidence |
 
 **Do not put mainnet funds behind this yet.** Mainnet is the appliance's default network and it
 will happily sign for it — that is deliberate, because the code is written to the bar it must
@@ -504,8 +504,9 @@ as the change it authorises.
 - [`docs/roadmap.md`](docs/roadmap.md) — what is settled, what is open, in what order
 - [`docs/entropy-mixing.md`](docs/entropy-mixing.md), [`docs/psbt-review-model.md`](docs/psbt-review-model.md), [`docs/seed-entry.md`](docs/seed-entry.md), [`docs/secret-hygiene.md`](docs/secret-hygiene.md), [`docs/address-verification.md`](docs/address-verification.md)
 - [`docs/boot-pipeline.md`](docs/boot-pipeline.md), [`docs/test-harness.md`](docs/test-harness.md), [`docs/adr/`](docs/adr/)
-- Not yet written, and named here rather than quietly omitted: `docs/threat-model.md`,
-  `docs/boot-checklist.md` (both M3), `docs/reproducible-build.md` (M4), `docs/release.md` (M5)
+- [`docs/threat-model.md`](docs/threat-model.md), [`docs/boot-checklist.md`](docs/boot-checklist.md)
+- Not yet written, and named here rather than quietly omitted: `docs/reproducible-build.md` (M4),
+  `docs/release.md` (M5)
 
 ---
 

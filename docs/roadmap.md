@@ -382,9 +382,14 @@ the same shape — read what the repository already says, and check the artefact
       drifts from it, which is this milestone's recurring fault in miniature.*
 - [ ] Run it. Boot the stick, walk the keymap picker, generate a wallet, export the xpub by QR, build
       an unsigned PSBT in a watch-only wallet, scan it, review it, sign it, scan the signature back,
-      broadcast on signet. *Done on testnet4 — see the signing run above. The row stays open because
-      it is the run **record** that closes it, not the run: no verdict per step has been written
-      down, and the checklist it would be written against does not exist yet.*
+      broadcast on a non-mainnet network. *Done on testnet4 — see the signing run above. The row
+      stays open because it is the run **record** that closes it, not the run: no verdict per step
+      has been written down. The checklist now exists — `S-1` through `S-11` — so the row is
+      runnable, and the inspection boot comes first because `I-9` is where a rebuild is discovered.*
+      **The network is deliberately not pinned in the procedure**: `docs/network-selection.md`
+      treats testnet4 and signet as peers, faucets and explorers come and go, and naming one would
+      manufacture a `deviated` verdict for something the check never cared about. The run record
+      names the network and the txid.
 - [ ] With the wallet loaded, confirm the three ways in read as unavailable — *one wallet per
       session* beside each row and the note under the list — and that `F10` on one does nothing.
       Photographed with the console check below, which is the boot that can answer whether the
@@ -415,15 +420,47 @@ the same shape — read what the repository already says, and check the artefact
       - In an ordinary session: pull the boot medium out and keep signing.
 - [ ] Record the answers as a **boot-checklist run record** — the checklist is the procedure, the run
       record is the evidence, and only the second is something a stranger can check. Verdicts are
-      *pass*, *fail* and *deviated*; the third is load-bearing.
-- [ ] Write `docs/threat-model.md`. **Deferred here from M2 and scheduled nowhere until now**, which
+      *pass*, *fail* and *deviated*; the third is load-bearing, and a *deviated* with no written
+      reason is not a verdict. *This one goes in `docs/boot-runs/`, unsigned: the gate's exit is a
+      complete record, and the evidence has to be reviewable in the same diff as the change it
+      authorises — which is this repository's whole stance on where decisions live. Signing an
+      attestation for an ISO with no release identity is ceremony without a referent, so M5 signs
+      the release's record. `CONTEXT.md`'s* Boot-checklist run record *entry now distinguishes the
+      two, and the machine is identified by class and never by serial number.*
+- [x] Write `docs/threat-model.md`. **Deferred here from M2 and scheduled nowhere until now**, which
       in this repository means it was not going to happen. M3 is where it belongs: it is the first
       milestone with a real machine to be specific about, and the claims it has to state at their
       true strength are the ones a boot either supports or does not.
+      *Written, spined on adversary tier because `CONTEXT.md` calls that "the unit in which this
+      project promises anything". Its claim numbering was not free: `aobs/ui/app.py`,
+      `aobs/adapters/real/power.py`, `tests/test_app_shell.py` and `docs/secret-hygiene.md` already
+      cite claims (ii) and (iii) by number, so (i)–(iii) are the three amnesia guarantees in
+      `CONTEXT.md`'s order and the list may be appended to but not reordered. Two things the machine
+      forced into it: claim (x), that nothing verifies the boot medium before the kernel runs —
+      stated as the deliberate absence of a claim rather than a weak one — and developer mode as a
+      Tier 2 item, because unlocking a Chromebook lowers that host's boot integrity permanently and
+      that is a cost of the hardware path rather than a property of the image.*
 - [ ] Check the two claims a build cannot: that the modules tree really does leave the machine with
-      no network interface, and that the graphics decision holds. `build/modules.allow` ships no
-      DRM driver on the argument that `efifb` and `vesafb` are built in and sufficient. That
-      argument has never met a screen.
+      no network interface (`I-4`), and that the graphics decision holds. `build/modules.allow` ships
+      no DRM driver on the argument that `efifb` and `vesafb` are built in and sufficient.
+      **This is now two rows, because the target machine can only answer one of them.** The BIOS
+      half has met a screen — `vga=791`, `vesafb`, and the console large enough for an 85×43 QR
+      display, recorded by `I-7`. The UEFI half has not and cannot on this machine: `RW_LEGACY`
+      SeaBIOS is a BIOS path, and reaching `efifb` would mean flashing a full ROM. It is a
+      **`deviated`** verdict with a written reason, never a `pass` inferred from its sibling, and
+      the README says so in plain words.
+
+- [ ] **Post-gate: add `cros_ec_keyb` and `cros_ec_lpc`, or record that Chromebooks with an EC
+      keyboard are unsupported.** Deliberately not done alongside the finding above: no machine of
+      that kind has been booted, and adding a driver for an untested machine class is the exact
+      pattern of all four faults this milestone found. The honest position until then is the one
+      `build/modules.allow` now states — such a machine boots to a screen with no keys.
+
+- [ ] **Post-gate: Secure Boot, and with it the first UEFI boot.** `build/grub.cfg` already argues
+      it is achievable — Debian's signed shim, grub and kernel survive a module-tree prune, since
+      pruning does not touch the kernel image's signature — and names it the best candidate for the
+      first post-v0.1 milestone. It now has a second reason: it is what would close the `efifb` half
+      of the row above.
 
 **Exit**: one PSBT signed on real hardware and broadcast, and a run record with every row answered.
 
