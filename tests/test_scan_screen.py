@@ -308,7 +308,10 @@ async def test_parts_from_another_transaction_are_named_and_the_stream_resets(
 async def test_a_foreign_qr_is_named_in_the_one_failure_shape(
     tmp_path: Path, mainnet_wallet: Wallet, path: int, payload: str, condition: str
 ) -> None:
-    app = build([render_qr(payload, tmp_path)], wallet=mainnet_wallet)
+    # The wallet each path needs to be walkable at all, which is not the same answer for all
+    # three: *sign* and *verify* need one, and *restore* needs the session to have none —
+    # `docs/seed-entry.md` closes the three ways in once it has a wallet.
+    app = build([render_qr(payload, tmp_path)], wallet=None if path == BACKUP else mainnet_wallet)
     async with app.run_test(size=CONSOLE) as pilot:
         screen = await open_scan(app, pilot, path)
         drain(screen, 1)
