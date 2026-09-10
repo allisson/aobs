@@ -179,8 +179,56 @@ out.
   ([`docs/scan-feedback.md`](docs/scan-feedback.md)).
 - The camera view is a **framing aid**, not a preview: it exists to help you aim, and nothing is
   decided by what it shows.
-- Wallet backup travels as an **encrypted wallet QR**, protected by **eight EFF-large-wordlist
-  words ≈ 103.4 bits** ([`docs/export-password.md`](docs/export-password.md)).
+- Wallet backup travels its own way out — the **encrypted wallet QR**, below.
+
+---
+
+## 🔐 The encrypted wallet QR
+
+A wallet can leave the appliance as **one static QR code**, encrypted, to be scanned back in on a
+later boot through *Restore from an encrypted wallet QR*. It is the only thing besides a descriptor
+and a signature that ever comes out.
+
+**Two facts decide whether you are using it safely. Neither is the cryptography.**
+
+🔑 **The password is eight words the appliance picks, and you cannot choose your own.** Eight words
+from the EFF large wordlist is log₂(7776) × 8 ≈ **103.4 bits**, and that number is the entire
+protection. The words go through Argon2id (m = 64 MiB, t = 3, p = 1), but **the stretching is
+defence-in-depth, not the protection** — at 103 bits, brute force is infeasible whether derivation
+costs a microsecond or a second, and any README that sold you the KDF would be selling theatre.
+There is no field to type a password of your own into, which is the point: a self-chosen password
+here is not a weaker export password, it is not one.
+
+Before the export completes you type **all eight words back**, not a sampled subset. Sampling three
+of eight misses a single mistranscribed word 62% of the time, and that error surfaces months later,
+when the QR is the only copy of the wallet. A failed read-back retries **the same password** — a
+fresh one would silently invalidate what you already wrote down.
+
+🧠 **What the QR is worth on its own depends on your passphrase, and the appliance tells you which
+case you are in.** Encrypted is the BIP39 *entropy* and the word count — **never the passphrase**.
+
+- **Passphrase set.** The QR plus the eight words give back your recovery *words*, not your wallet.
+  The passphrase is in neither, so nothing is spendable without what is in your head. That is the
+  second factor working as designed.
+- **No passphrase.** The QR plus the eight words **are** the wallet. Anyone holding both can spend,
+  and keeping the paper away from the QR is the only thing between them and your funds.
+
+The rest is where you would expect it: **ChaCha20-Poly1305** with the full 16-byte tag, chosen over
+AES-GCM because the appliance boots on whatever amd64 machine you own, including ones without
+AES-NI; an 89-byte binary container at **ECC level H**; and a cleartext-but-authenticated network
+byte, so a backup from another chain is refused at the scan screen *before* you type eight words
+rather than after. Wrong password and corrupt QR are distinguished by framing, never by
+cryptography — a password verifier would hand an offline attacker a cheap oracle — so the appliance
+says *wrong password or tampering* and does not claim which.
+[`docs/encrypted-wallet-qr.md`](docs/encrypted-wallet-qr.md) fixes the format,
+[`docs/export-password.md`](docs/export-password.md) the eight words and their read-back.
+
+**How far this has been checked.** The export/restore round trip is covered in the authoritative
+test tier — `tests/test_qr_loopback.py` pins the container and its QR version,
+`tests/test_wallet_qr.py` and `tests/test_export_screens.py` the format and the screens. It has
+**not** been exercised on a booted appliance: the M3 hardware run (`docs/roadmap.md`) walked keymap,
+generate, descriptor export, PSBT review and signing, and stopped there. Green tests are not a run
+record.
 
 ---
 
