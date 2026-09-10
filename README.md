@@ -251,6 +251,162 @@ Power on with the stick in. There is no login, no desktop, no prompt.
 7. ✍️ **Sign.** The signature comes back out as QR; scan it with the coordinator and broadcast.
 8. 🔌 **`F12` powers off.** Nothing was written anywhere. The next boot is a stranger.
 
+### What it looks like
+
+Four screens from that session, at the 128×48 BIOS console the appliance boots into. These are
+**renders**, not photographs: the real application driven through the test harness and exported as
+the characters a console would show, at the published BIP39 vector every test here uses, so nothing
+below is a live wallet. `docs/console-appearance.md` fixes what they are and what they are not.
+
+**Home.** Every path the session offers, with the ones that need a wallet saying so in
+words. Nothing is greyed out silently.
+
+<!-- screen: home -->
+```text
+aobs                                                            signet  ·  DEVELOPMENT BUILD
+────────────────────────────────────────────────────────────────────────────────────────────
+
+WHAT YOU CAN DO
+
+► Generate a new wallet
+  Type a seed in
+  Restore from an encrypted wallet QR
+  Sign a transaction                                                        needs a wallet
+  Verify a receive address                                                  needs a wallet
+  Browse your addresses                                                     needs a wallet
+  Export the descriptor                                                     needs a wallet
+  Export the encrypted wallet QR                                            needs a wallet
+  Show recovery words                                                       needs a wallet
+  Choose the network  ·  signet
+
+The network is chosen before a wallet is made, and fixed for good once one is.
+No wallet is loaded yet, so the paths that need one are unavailable.
+
+────────────────────────────────────────────────────────────────────────────────────────────
+up/down choose  ·  F10 open this path  ·  F12 power off
+```
+
+**Scanning a transaction in.** The *slot map* is the eleven parts this stream was split
+into and the five that have arrived; the *framing aid* that helps you aim is gone, because bytes
+are already arriving and aiming is solved.
+
+<!-- screen: scan -->
+```text
+Sign a transaction
+────────────────────────────────────────────────────────────────────────────────────────────
+
+▮▮▮▮▮▯▯▯▯▯▯
+
+Scanning — 5 of 11 parts.
+```
+
+**Reviewing it.** Every output is money leaving unless the appliance can prove it is your
+own change — output 9 is *proven change*, and it shows the derivation path that proves it. The
+footer totals what leaves and what the fee costs.
+
+<!-- screen: review -->
+```text
+Review transaction                                                                    signet
+1 input  ·  9 outputs
+────────────────────────────────────────────────────────────────────────────────────────────
+  1  PAYMENT                                                 0.00200000 BTC  ·  200 000 sats
+     tb1q jgx2 04hx fwus e548 jc34 fjzg 6ffq 8pvr qwle x4
+     Address not seen before.
+
+  2  PAYMENT                                                 0.00200000 BTC  ·  200 000 sats
+     tb1q dz08 7gr9 rthd z0uu 5pek juc7 ada8 6d95 fmhd h0
+     Address not seen before.
+
+  3  PAYMENT                                                 0.00200000 BTC  ·  200 000 sats
+     tb1q urg4 y55d pv5z 80yh gmjq q6gw 83gu jt5r g5zr 3q
+     Address not seen before.
+
+  4  PAYMENT                                                 0.00200000 BTC  ·  200 000 sats
+     tb1q ql4q n3nm lzr7 7c8s 6xv5 2jhr 83hn d7dp sx6t 2w
+     Address not seen before.
+
+  5  PAYMENT                                                 0.00200000 BTC  ·  200 000 sats
+     tb1q 5tqm jggq q6ea 5f6m dsmr 0lma l3ug z30n pm3d 89
+     Address not seen before.
+
+  6  PAYMENT                                                 0.00200000 BTC  ·  200 000 sats
+     tb1q 8rys uuyn td94 qlnc 45t5 hpnv z04q mvsc clwv t0
+     Address not seen before.
+
+  7  PAYMENT                                                 0.00200000 BTC  ·  200 000 sats
+     tb1q 7g2p vcmq vt6n 5q5r 84zy ml0h fnd4 sgp9 69e3 6a
+     Address not seen before.
+
+  8  PAYMENT                                                 0.00200000 BTC  ·  200 000 sats
+     tb1q 33s3 rvrh wt0r nzhv kamy s8dv z0de nsdn kazy 68
+     Address not seen before.
+
+  9  CHANGE, PROVEN                                          0.00395000 BTC  ·  395 000 sats
+     m/84h/1h/0h/1/0
+     tb1q 9u62 588s pffm q4dz jxsr 5l29 7znf 3z6j 5p26 88
+
+
+────────────────────────────────────────────────────────────────────────────────────────────
+Leaving:   0.01600000 payments  +  0.00005000 fee  =  0.01605000 BTC
+                                                      1 605 000 sats
+Fee:  5 000 sats  ·  14.0 sat/vB  ·  0.31% of the amount sent
+────────────────────────────────────────────────────────────────────────────────────────────
+F10 sign  ·  esc discard  ·  F12 power off
+```
+
+**The signature coming back out.** One QR for the coordinator to scan. This is the only
+way anything leaves the appliance.
+
+<!-- screen: emit -->
+```text
+Signed transaction  ·  signet
+────────────────────────────────────────────────────────────────────────────────────────────
+
+   █████████████████████████████████████████████████████████████████████████████████████
+   █████████████████████████████████████████████████████████████████████████████████████
+   ████ ▄▄▄▄▄ ██▀▀▀▀▄█▄█▀▀▄ ▀▀▀▄█ ▄▄█▀█▄█▀ ▄█▄ ▄▀▄▀▄▄     ▄▀▀█▀▀▀▄▀ ▀ █▄█▀█▀█ ▄▄▄▄▄ ████
+   ████ █   █ █▄ ▀▀ ▄▀ ▀ █ █▄▄▀▀█▄▄█ ▄█▄ ▄ ▀▀▄▄▀█▀█ ▄█▀█ ▄▀█ ▄ ▀█ █▄▀▄▄████ █ █   █ ████
+   ████ █▄▄▄█ ███▄▀████▀ ▀▀▄▀▄▄ ▄▄▄ ▄ █▄ ▄ █▄▄  ▄ ▄▀  ▄▄▄ █▄▀▄ █▀█▄▀▀█▄ ▀ ▄▄█ █▄▄▄█ ████
+   ████▄▄▄▄▄▄▄█ ▀ █ ▀▄▀ ▀▄█ ▀ ▀ █▄█ █ █ ▀ █▄█▄█▄▀▄▀▄▀ █▄█ ▀ █▄█▄▀▄▀ ▀ █▄█ █ █▄▄▄▄▄▄▄████
+   ████▄▄▄█ ▄▄▄▄▀▀▄ ██  ▀██▀▀▄█▄   ▄█▀▄▄  █▄▀▄█  ▄▀▀▀  ▄▄▄▀▄▄█  █ █▄█▄▄▄▄█▄   ▀▀▀ █▀████
+   █████ ▄ ▄ ▄█ █   ▄▄▄▄█▀ ▀▀▄██▀  ▄█ ▀▀███ ██▄▄ ▄ ▀▀ ▄▄▀ ▀▄▀█▄▀██▀▀ ▄▄ █ █ ▄▄▀█ █  ████
+   ████ ▀▄   ▄ ▀▄▀█▄██▀ █▄ █ ▄▄██ ▀▄█▄  ▀▄▀▄▄ ███▀▀█ █▀█▀▄█▄ ▄▀  █▄▀ ▀ ███▀ ▀█▄ ██▀▄████
+   ████▀ ██ █▄█▀▄ ▄▄▀██▄▀█▄▄▀█▄▄█▀▀▀█ ███▀▀██ ▀██▄ █▀ █▄ ▄  █▀ █  ██▄▄▀▄█▀    ▄ ▄▀█▄████
+   ████▄▄▀█▄▄▄▄█ ▄▀▄ █▀█▄▄██▀█▀ ▀▀█▀ ▄█▄█▀▄▀▀█ ▄▀  ▀▀█▄ ▀ ▀█▀ ▀█▄▀▀▀▀█▀▀ ▄█ ▄▄ ▀█▀ █████
+   ████▀ █ ▀▄▄▀▀▀█▄▄▀▄ ▀█▄▄▀▀█▀▄█▄█▀▄▄█ ▀▄ █▄█▀██▀ ▀▀▄▄▄███▄▀ █▄█ ▄ ▀▄▀█▀▄ ▀    ▄▀█▀████
+   ████▀▀▀█▄ ▄▄▄▄▀ ▀██▄▀▄▀▀███▀▄ ▄▄▄▄▄ ▄ ▀▄▄ ▀▀▀▄▄  ▄ ▀ ▄▀▀▀█▀▀▄███▀▀▄█▀██▀▄ █▀▄▄█▀▄████
+   ██████▄█ ▄▄▀██▄█▀▀ █▄██▄▀▀▄▀▄ ▀   █▄▄█▄▀▄█ ▀▄█▀██ ▄▄  ▄▀█▀▀█▀▀▀▄█ ▄▀▀ ▄ ▄█ ▀▀▀▄█▀████
+   ████  ▀  ▄▄▄ ▀█ █▀▀  ▀▀▄█▀▄█ ▄▄▄ ▀▀  ▀█ ▀█▀ ▀▄▀▄   ▄▄▄ ▀██▄▀▀ █▀▄█▀▄▀▀▀▀ ▄▄▄ ▀  ▄████
+   ████▀▄▄▀ █▄█  ▄▀▄███ ▄█▀█▀▄▀ █▄█  ██  ██ ▀▄▄▀▀█▀██ █▄█ █  ▄  █▄▀  █▀ ▄   █▄█ ▀ ██████
+   ████▄█▄█ ▄▄  ▄  █▄█▀ ▄▀ ▄▀ ▀ ▄ ▄   ▀█▄▄█▄▀▄█▀██▄█▀ ▄  ▄▄█▀▀█▄ ▄▀▄▀▀ ▄▀▄▀  ▄▄ ▄█ ▄████
+   ████▄  ▄▀█▄▄▀██▀█▀▄▄█▄ ▀███▀▀█ █▀ ▄█▄██▀▄▀ ▄▀▄▀ █▄ ▀ █▄▀▀▀▄ ▄▀█ ▄ █   █▄▀ ▀█▄▄▄▄ ████
+   █████ ▀█▄▀▄█ ▀▀▄ ▀▀ █   ▄ ▄▄█  ▄█ ▄  █▀ ▀█▄  █▀▀█ ▀█ ▀▄▀▄▀ ▄▀▀  █▀▄▀█▀▀▀▀▄ █▄▄▄ ▀████
+   ████  ▀▀▀█▄██ ▀▄█▄▄▀ ▀▄█▄▄ ██▄██▀  ▀▄  ▄▀█  ▄█▄▀▄ ▀ █▀█▀▄▀ ▀▀  █ ▀   ███▀▀▀  ▀▄▄▄████
+   ██████▄▀▄▀▄█▄ ▄▀▀▀ █▄ ▄▀▄▀▀ ▄▄▄▀▄▀█ ▄ █  █ █▄ ▄▄▄ █▀▄ █▀▄ ▀▄█▄▄▄▄█▄██▄▀▀▀▀▀▀▄▄▄▄▄████
+   ████▀  ▄▄▀▄▀▀█▀ ▄▀▀ █▀▄▄ ▄  ▄▀  ▀██ ▄▀▄ ▀ █▄▄▀▄▄█▄█▀  ▄▀▄█▀  ▄▄█ ▄█ ▄█▀█▄███ █▄▀▀████
+   ████▄▀ ▀ ▀▄▀▀▀ █▀▄▄█▀▀ ▀   ▀▄ ▀ ▀ ▀ ▀ ▄▀▄  ▀▀█ █▄▄ ▀▀ ██▄█▀▄  ▄▀█▀▄▀▄▄   █▄█ ▀ ▀▄████
+   █████▄▀▀▀▄▄▄▀▄▀ █▄▄▀ ██▀▄▀▄▄▄▀▀ ▀█ ▄▀ ▄▀▄▀█▄▄█▀▀ ▀▀▄█▀▄▄▄▀▀   ▄▀█  ▄▄▀▄▀█▀▄▀ ▀▀█▄████
+   ████▄ █▄▄▄▄▄▄ ▀█ ▀▀ █▀▀█▄▀▀▀▀▀▄▀████▀  ▀ ▀▀▀    █▀▄▀▀▀▄█▄▀█▀▀▀▄▀ ▀▀  ▀▄█ █  █▄▄ ▀████
+   ████▀██▄ ▄▄▄ ▄▄▀▄█▄▀  ▄▀▄▄▄▀ ▄▄▄  █▀█▀███▀██▄▀██   ▄▄▄   ▀▄ ▀▀▀▀▄▀███ █▄ ▄▄▄ ▄▀█▀████
+   ████▀█▄█ █▄█ ▄▀ █▄██  ▄▀▄▀▄▀ █▄█ █▀█▀ █▀▀ ▄█▄ ▄█▀█ █▄█ ▄ ▀▄ ██▄ █▄█▄▀▀▄▄ █▄█ ██▄▀████
+   ████▄▄▄█▄▄▄ ▄▀ ▀▀▀▄▀█▀▄▄ ▀▄ ▄ ▄  █▄█  ▄▀▀  ▀▄▄██▀▄▄ ▄   █▀ █▄   █▄▄▀▀▄▀▀ ▄▄  ▀▀▄▀████
+   █████▀█▀█▄▄▄▄██▄▀▀  ███▄▀▀▄▀▄▀▄█▄ ▄ ▀ ▀ ▀▀█ ▀▀ ▄▄▀▀ ▀  ▀ █▄██   ▄▀█▄███ ▀   ▀█▄▀ ████
+   ████ ▀▄ █ ▄▄█▄▄▄█▀▀▀▄▀██▄█▄██▀  ▄█▀▄ ▀████  ▄▀▄█▀▀ ▀█▀ ▀▄▄▄█▀█   ▀█▀██▀▀ ▄▄▄▀ ▀▄▄████
+   ████▄█▀ ▀▄▄█▄▄ ▄▄ ▀▀▄▀█ ▄█ ▄ █▄▄▀█▀█ █▀█▄▀▄██ ▄ ▄▀█▀███▄▄▄█ ██▄  ▀██▄▄█ ▄▀█ █▀ ▄ ████
+   █████ ▄▀ ▄▄▀▄▄▀██  ▄▀▄▀▀▄██ ██▄█▄▀ █▄▄▄█  ▀▀▄ ▄▀██ ▀█▀▄▀▀▀█▄▀▀████▄  ▀▀█▄██▄ ▀▀  ████
+   ████ ▀▀▀██▄█▀ ▀▀▀█▀█▄  █▄ ▄▄▄▀▄▄ ▀▄█▀  ▀ ▄██▄▀ ▄▄▀██▀▄ ▀▄█▄ ▄▀█▀▀▀  █ ▄ ▄▄▀▀▄█ ▄▄████
+   ████▀ █ ▀ ▄██▀▄ ▀▀▄█ █▄█▄▀▄▀   ▀█▀▀███▀▀▄▄ ▄  ▄▀█▀█▄▄▄█▀▄ █▀▄ ▀█ █ ▄▄▀███▀▄  ▀█  ████
+   ████▄ ▄▀ ▀▄▀ ▀▄▀▄▀█ █ ▀██▀█▄ ▀█▀ ▀██▄█▀██▀▄█▄ ▀ ▀ ▀ ▄▀█▀▄ ▀▀ ▄█▄▀███▄ ▀▄ █ ▀▀▄  █████
+   █████▄██ ▄▄█▀▀▄▄▀ █▀▀ █▄█ ▀ ▄ ▀ ▄ ██▄█ ▀▀    ██ ▀▀█▀▄▄███▀▀▀▀▀▄ █▄██▀█▄ ▀▀▄█▄▀ ▀▄████
+   █████▄▄▄▄█▄█ █▀  ▄███  ▀▀▄▄▀ ▄▄▄ ▄▀▄▄  ▄█▄  █▄▄ █▀ ▄▄▄ █ ▄▄█▀██▄▀ ▄▄ ▀▄█ ▄▄▄ ▄▀█ ████
+   ████ ▄▄▄▄▄ █ █▀▄ ▀█ ▄█ ▀▄▀▄▀ █▄█ ██ ▄█  ██▀ ▄▀█ ▄  █▄█  █▀▄▀█▄  █▄██▀█▄█ █▄█ █▀▄█████
+   ████ █   █ █▄▀▄▄ █ ▄███▀ ▀▀ ▄▄ ▄▄██▀  ▄▀▄█▀ ▀▄█ ▄  ▄▄▄ ▀█▀█▄▄▄█▄▄▀   ▀▄█▄ ▄▄ ▀▀██████
+   ████ █▄▄▄█ █ ▄▀█ ▀  ▄█▄██▄▄█▄▀▀█  ▄▀█ ▄  ▀▄ ▀█ ▀▀█▄▄█▀ ▀█▀▄▄ █▄▀▄█▄ ▄▀▄▀█ ▀▀▀▄▀  ████
+   ████▄▄▄▄▄▄▄█▄██▄██▄█▄▄▄█▄█▄▄▄████▄██▄▄██▄▄▄█▄███▄▄▄█▄███▄█▄██▄▄▄▄▄▄▄▄███▄██▄██▄█▄████
+   █████████████████████████████████████████████████████████████████████████████████████
+   █████████████████████████████████████████████████████████████████████████████████████
+```
+
 Every screen prints its own keys. On the home screen: `up`/`down` choose · `F10` opens the path ·
 `F12` powers off.
 
