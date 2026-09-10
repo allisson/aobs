@@ -25,7 +25,8 @@ failure is on the wording, not on them.
 
 **ChaCha20-Poly1305, with the full 16-byte Poly1305 tag.**
 
-AES-256-GCM is equally available on Alpine, so the decision turns on hardware the appliance does not
+AES-256-GCM is equally available — both AEADs come from the same pinned `cryptography` wheel
+(`build/requirements.appliance.txt`), not from the distribution — so the decision turns on hardware the appliance does not
 control: it boots on whatever amd64 machine the user has, including older ones without AES-NI, where
 software AES is both slower and a timing-attack surface. ChaCha20 is constant-time in software by
 design. Nonce reuse is not a concern either way — a fresh salt per export makes every key unique —
