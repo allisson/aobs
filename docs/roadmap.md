@@ -392,8 +392,17 @@ the same shape — read what the repository already says, and check the artefact
       stated correctly in prose and never checked.* Replacing the glyphs is deliberately **not**
       done in advance — two of them sit inside row templates that `docs/review-screen.md` and
       `docs/scan-feedback.md` fix character by character, and the check is cheaper than the guess.
-- [ ] Check each structural claim on the running appliance: `ls -d /proc/[0-9]*`, `cat /proc/mounts`,
-      `ls /sys/block`, `command -v ip`, `cat /sys/bus/usb/devices/usb*/authorized_default`.
+- [ ] Check each claim in the image, **and say which boot each check belongs to** — the row as
+      written was not runnable, because a session has no prompt and the checks were listed as if it
+      did. `docs/overview.md` now carries the split; the checklist has to repeat it per row.
+      - In an `init=/bin/sh` boot: `cat /proc/mounts`, `ls /sys/block`, `command -v ip`,
+        `ls /lib/modules/*/kernel/net`, `ls /lib/modules/*/kernel/drivers/usb`.
+      - **Not** `ls -d /proc/[0-9]*` and **not** `cat /sys/bus/usb/devices/usb*/authorized_default`:
+        that boot replaces PID 1, so the count is the stranger's own shell and `build/init` never
+        ran to set the hubs. Both are source-level checks against `build/init` and
+        `build/verify.py`, and the run record says so rather than printing a number that looks like
+        evidence and is not.
+      - In an ordinary session: pull the boot medium out and keep signing.
 - [ ] Record the answers as a **boot-checklist run record** — the checklist is the procedure, the run
       record is the evidence, and only the second is something a stranger can check. Verdicts are
       *pass*, *fail* and *deviated*; the third is load-bearing.

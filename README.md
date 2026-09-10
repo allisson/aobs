@@ -47,7 +47,7 @@ already has code execution on the appliance.
 | The boot medium is never read after boot | 🧱 **Structural** — firmware reads it before Linux starts | pull the stick out and keep signing |
 | No network interface, and no tool to configure one | 🚫 **Absence** — no `kernel/net`, no `drivers/net`, no `iproute2` | `ls /lib/modules/*/kernel/net`, `command -v ip` |
 | No block device, so nothing can be written to a persistent medium | 🚫 **Absence** — storage drivers are not in the image; the block layer itself is in Debian's kernel | `ls /sys/block`, `ls /lib/modules/*/kernel/drivers/{ata,nvme,scsi}` |
-| USB binds nothing but HID and UVC | 🚫 **Absence + policy** — only those modules ship, and `authorized_default=0` once our own devices have enumerated | `ls /lib/modules/*/kernel/drivers/usb`, `cat /sys/bus/usb/devices/usb*/authorized_default` |
+| USB binds nothing but HID and UVC | 🚫 **Absence + policy** — only those modules ship, and PID 1 sets `authorized_default=0` once our own devices have enumerated | `ls /lib/modules/*/kernel/drivers/usb`, and read the write in `build/init` |
 | Nothing recoverable from RAM after power-off | ⚠️ **Best-effort, not promised** — there is no byte-zeroing | not checkable; stated as a limit |
 | The published ISO is byte-identical to an independent rebuild | 🚧 **Intended, not yet demonstrated** | `sha256sum`, once M4 and a signed manifest exist |
 
@@ -257,15 +257,18 @@ ls /sys/block                                     # no block devices
 command -v ip                                     # nothing
 ls /lib/modules/*/kernel/net                      # no networking modules
 ls /lib/modules/*/kernel/drivers/usb              # HID and UVC hosts only
-cat /sys/bus/usb/devices/usb*/authorized_default  # 0
 ```
 
-Two of the claims are **not** checkable that way, and it is worth being exact about why. In that
-boot *you* replaced PID 1, so a process count there says nothing about a real session — "exactly one
-userspace process" follows from PID 1 being the app itself, which you check by reading
-[`build/init`](build/init) and the assertions in [`build/verify.py`](build/verify.py) that PID 1's
-every command resolves. And `authorized_default=0` is set *after* our own devices enumerate, so in a
-shell boot the app never ran to set it.
+Two claims are **not** checkable that way, and it is worth being exact about why — in that boot
+*you* replaced PID 1, so anything PID 1 does never happened:
+
+- **"Exactly one userspace process"** — a process count there describes your own shell. The claim
+  follows from PID 1 being the app itself: read [`build/init`](build/init), which ends in
+  `exec python3 -m aobs`, and the assertions in [`build/verify.py`](build/verify.py) that every
+  command it runs resolves on PID 1's own `PATH` in the built rootfs.
+- **`authorized_default=0`** — PID 1 writes it at step 4, after our own devices enumerate, so in a
+  shell boot the value is whatever the kernel left. Reading it proves nothing; the write in
+  `build/init` and the seven entries in [`build/modules.allow`](build/modules.allow) are the check.
 
 The amnesia claim has a cheaper check that needs no shell at all: **in an ordinary session, pull the
 boot medium out and keep signing.** That is the one that makes "the boot medium is not storage"
