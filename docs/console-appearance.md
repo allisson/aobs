@@ -196,6 +196,59 @@ character. Changing those inside an appearance diff is precisely the move `CLAUD
 decision would live nowhere. The check comes first, on real hardware, and it is cheap — one screen
 showing all thirteen.
 
+## The blocks in the README
+
+`README.md` shows four screens, and this section fixes what they are. They are **renders**: the
+characters a console would show, produced by driving the real `SignerApp` through the test harness
+and exporting the composited screen as text. They are not photographs. A photograph is evidence
+that the image renders on the target panel — the claim this document's *The console this is drawn
+on* makes — and a render is evidence of nothing beyond what the code draws. Captioning one as the
+other would upgrade a claim's strength, which `CLAUDE.md` calls a defect.
+
+**Text, not an image, and the reason is mechanical.** Textual's SVG export
+(`rich/_export_format.py`) embeds an `@font-face` fetching Fira Code from `cdnjs.cloudflare.com`
+and places every glyph at that font's 0.61 aspect ratio (`rich/console.py`). Inside an `<img>` the
+browser blocks that fetch, so the glyphs land at Fira Code's metrics in whatever fallback the
+reader has. A README about an appliance with no network has no business shipping an artifact that
+makes its readers' browsers call a CDN, and a fenced block avoids the question entirely: the
+appliance is colourless monospace, which is what a fenced block already is. It also diffs as text.
+
+**What the blocks show, and at what size.** The console is 128×48 — the BIOS path `vga=791`, the
+size `docs/boot-pipeline.md` fixes and every screen suite drives. Not the floor of `MIN_COLUMNS ×
+MIN_ROWS`: at 30 rows the emit screen's QR is clipped and its key line falls off the bottom, so a
+floor-sized block would picture a screen no operator sees. The content block is capped at 96 and
+centred, so every line carries the same left gutter on a 128-column console; the gutter is removed
+so the README does not scroll sideways. Every character and every relative position survives that.
+
+**The data is the published BIP39 vector** already fixed in `tests/conftest.py`, and one corpus
+case for all four blocks, so the reader follows one transaction in and out. Two rules on which
+screens may appear:
+
+- **No screen whose content is a secret.** `RecoveryWordsScreen` and `ExportPasswordScreen` are out
+  permanently. Poisoning the vector does not save them: once poisoned there is nothing left to
+  show, and `docs/export-password.md` already says the password screen and the QR screen in one
+  frame *is* the attack — teaching that framing with a synthetic pair is still teaching it.
+- **No refusal, and no adversarial case.** A reader cannot tell a pictured refusal from a pictured
+  signing at a glance, and the corpus attacks are demonstrated in `tests/test_review_screen.py`
+  where a verdict is asserted beside them.
+
+**Captions use `CONTEXT.md`'s terms.** *Framing aid*, never "preview"; *slot map*, never "bar";
+*proven change*, never bare "change". A caption is prose written last and is where the wrong word
+gets back in.
+
+**A stale block is a false claim, so the suite regenerates and compares.**
+`tests/test_structure.py` renders the four screens and asserts the README carries each one
+character for character — the same device that already keeps the advisory list honest — and a
+companion test mutates a screen's text to prove the comparison bites. This is the golden-file
+assertion `aobs/ui/geometry.py` and `docs/review-screen.md` both already refer to. It is not the
+pixel-diffing `docs/test-harness.md` forbids: text has no font, so it cannot fail on a font change.
+What it does not do is catch a wrong address — it asserts the README agrees with the screen, never
+that the screen is right.
+
+The one fragile part is confined on purpose. `tests/screentext.py` reaches `Screen._compositor`,
+because Textual 8.2.8 has no plain-text export and that private attribute is what its own
+`export_screenshot()` uses. A Textual upgrade can break it; when it does, one module fails loudly.
+
 ## Open
 
 - ~~**Does `fbcon` render half-bright on this panel?**~~ **Answered: yes**, on the target machine's

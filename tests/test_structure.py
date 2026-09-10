@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import screentext
 from aobs.core.vendor.embit.psbt import PSBT
 
 ROOT = Path(__file__).parent.parent
@@ -530,3 +531,43 @@ def test_the_readme_carries_the_advisory_list_verbatim() -> None:
     both files and then runs this suite, so a half-done edit fails here rather than shipping.
     """
     assert _advisories_section() in _readme_advisories_section()
+
+
+# --- The README's screen blocks --------------------------------------------------------------------
+
+
+def _readme_block(name: str) -> str:
+    """The fenced block `README.md` carries for one screen, by its marker comment."""
+    text = (ROOT / "README.md").read_text()
+    marker = f"<!-- screen: {name} -->\n```text\n"
+    assert marker in text, f"README.md has lost its {name} screen block"
+    return text.split(marker, 1)[1].split("\n```", 1)[0]
+
+
+@pytest.mark.parametrize("name", list(screentext.SCREENS))
+async def test_the_readme_carries_each_screen_block_verbatim(name: str) -> None:
+    """A stale block is a false claim about what the appliance shows.
+
+    `docs/console-appearance.md`, *The blocks in the README*: the blocks are renders, so they are
+    regenerated here and compared character for character — the same device that keeps the advisory
+    list honest. This asserts the README agrees with the screen. It does not assert the screen is
+    right; the money path is asserted in `tests/test_review_screen.py`.
+    """
+    rendered = await screentext.SCREENS[name]()
+    assert _readme_block(name) == rendered, (
+        f"README.md's {name} block no longer matches the screen. "
+        "Regenerate the blocks rather than editing them by hand."
+    )
+
+
+async def test_the_readme_block_rule_bites() -> None:
+    """The comparison above passes trivially if it is comparing something to itself.
+
+    `build/verify.py`'s rule, applied here: feed the assertion a deliberately broken input and
+    prove it still fails. One changed character in the screen's own text is the smallest edit a
+    hand-written block would miss.
+    """
+    rendered = await screentext.SCREENS["home"]()
+    mutated = rendered.replace("WHAT YOU CAN DO", "WHAT YOU CAN DQ", 1)
+    assert mutated != rendered, "the mutation did not change anything"
+    assert _readme_block("home") != mutated
