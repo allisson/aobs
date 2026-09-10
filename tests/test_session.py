@@ -55,7 +55,7 @@ from aobs.ui.screens.dice import DiceScreen
 from aobs.ui.screens.emit import EmitScreen
 from aobs.ui.screens.export_password import ExportPasswordScreen
 from aobs.ui.screens.fingerprint import COMPARE_IT, RECORD_IT, FingerprintScreen
-from aobs.ui.screens.home import NETWORK_FIXED, PATHS, HomeScreen
+from aobs.ui.screens.home import HAVE_WALLET, NETWORK_FIXED, NO_WALLET, PATHS, HomeScreen
 from aobs.ui.screens.keymap import KeymapScreen
 from aobs.ui.screens.passphrase import PassphraseScreen
 from aobs.ui.screens.recovery_words import RecoveryWordsScreen
@@ -447,3 +447,44 @@ async def test_a_backup_from_another_network_is_refused_before_the_words_are_typ
         await pilot.pause()
         assert isinstance(app.screen, HomeScreen)
         assert NETWORK_FIXED not in texts(app)
+
+
+async def test_a_loaded_wallet_closes_the_three_ways_in_for_the_session() -> None:
+    """`docs/seed-entry.md`: a session holds one wallet, and there is no unloading.
+
+    Asserted against a loaded wallet rather than against a flag, because that is the rule — no
+    latch stands beside `network_fixed` for this one. The three stay on the screen with the reason
+    beside them, and the accept key on each does nothing: walking one is what used to replace the
+    wallet while leaving the previous wallet's encrypted backup in `app.export`.
+    """
+    app = build()
+    async with app.run_test(size=CONSOLE) as pilot:
+        await accept_the_keymap(app, pilot)
+        ways_in = [index for index, path in enumerate(PATHS) if path.needs_no_wallet]
+        assert len(ways_in) == 3, "generate, type a seed in, restore"
+        # This session has no camera, so *restore* is unavailable for that reason already; the
+        # other two are walkable right up to the moment the wallet exists.
+        for index in ways_in:
+            if PATHS[index].needs_camera:
+                continue
+            assert "path-unavailable" not in app.screen.query_one(f"#path-{index}", Static).classes
+
+        app.begin_passphrase(VECTOR_MNEMONIC)
+        await pilot.pause()
+        await decline_the_passphrase(app, pilot)
+        await leave_the_fingerprint(app, pilot)
+        assert app.wallet is not None
+
+        rendered = texts(app)
+        assert HAVE_WALLET in rendered
+        assert NO_WALLET not in rendered
+        for index in ways_in:
+            widget = app.screen.query_one(f"#path-{index}", Static)
+            assert "path-unavailable" in widget.classes, PATHS[index].name
+            assert "one wallet per session" in str(widget.content), PATHS[index].name
+
+        fingerprint = app.wallet.fingerprint_hex
+        for index in ways_in:
+            await open_path(app, pilot, PATHS[index].name)
+            assert isinstance(app.screen, HomeScreen), PATHS[index].name
+        assert app.wallet.fingerprint_hex == fingerprint, "no path replaced the wallet"

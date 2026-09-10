@@ -12,7 +12,9 @@ security claims only hold at that level.
 ## Session
 
 One boot of the appliance, from power-on to power-off. The unit of the appliance's memory: a
-Wallet exists for exactly one Session and no state crosses the boundary between two of them.
+Wallet exists for exactly one Session and no state crosses the boundary between two of them. A
+Session holds at most one Wallet — the ways in are closed once it has one, and there is no
+unloading.
 
 ## Amnesic
 
@@ -153,8 +155,8 @@ varies with what leaving it costs; the key's meaning does not.
 ## Wallet
 
 A single-sig BIP32 keychain derived from a Mnemonic and an optional Passphrase, held in RAM for
-one Session. Always single-sig; a multisig keychain is not a Wallet in this project's vocabulary
-and is out of scope.
+one Session, and one per Session. Always single-sig; a multisig keychain is not a Wallet in this
+project's vocabulary and is out of scope.
 
 ## Mnemonic
 

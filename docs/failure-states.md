@@ -81,6 +81,11 @@ exporting its descriptor need no camera at all** — both are outbound. A user s
 a machine with an unplugged webcam should get a working appliance with the scan paths disabled and one
 sentence saying why, not a dead screen.
 
+The rule generalises past the camera and is the wallet screen's whole availability model: **an
+unavailable path is shown with the reason beside it, never hidden.** It is why a session with no
+wallet still lists *sign a transaction*, and why a session that has one still lists the three ways
+in — closed for the rest of it, `docs/seed-entry.md`.
+
 ### Losing it mid-session is permanent, and the appliance must say so
 
 A consequence of #14 that is not obvious: **`authorized_default=0` is set before the first secret is

@@ -22,6 +22,12 @@ tickets were spent making safe. The network is chosen from here too, for the sam
 be settled before a wallet is constructed, and this is the last screen before every path that
 constructs one.
 
+**All three close once the session has a wallet** (`docs/seed-entry.md`): a session holds one, and
+there is no unloading. They stay on the screen with the reason beside them, like every other
+unavailable path. Before that, walking one with a wallet loaded replaced it silently and left the
+previous wallet's encrypted backup in `SignerApp.export` to be re-shown under the new wallet's
+name.
+
 **The network is a path, not an arrow key** (`docs/network-selection.md`). It used to move under
 `left`/`right` on this screen, which made it the only setting on the appliance that changed without
 `F10` — and put a money-affecting choice one key away from the `up`/`down` that selects a path. It
@@ -49,6 +55,12 @@ class Path:
     name: str
     needs_camera: bool = False
     needs_wallet: bool = False
+    #: Unavailable once the session **has** a wallet: the three ways in. Deliberately a question
+    #: about `app.wallet` rather than a latch beside `network_fixed`, because the rule really is
+    #: *a session holds one wallet* — nothing clears it, and a latch would restate the wallet's
+    #: own existence. A *forget this wallet* path would re-open these, which is why
+    #: `docs/seed-entry.md` rules that path out rather than leaving it to this flag.
+    needs_no_wallet: bool = False
     #: Unavailable once the session's network is fixed. Only the network path itself, which stops
     #: being a choice the moment a wallet is derived on the answer.
     needs_unfixed_network: bool = False
@@ -63,9 +75,14 @@ class Path:
 
 
 PATHS: tuple[Path, ...] = (
-    Path("Generate a new wallet", opens="open_generate"),
-    Path("Type a seed in", opens="open_seed_entry"),
-    Path("Restore from an encrypted wallet QR", needs_camera=True, scans=ScanTarget.WALLET_BACKUP),
+    Path("Generate a new wallet", needs_no_wallet=True, opens="open_generate"),
+    Path("Type a seed in", needs_no_wallet=True, opens="open_seed_entry"),
+    Path(
+        "Restore from an encrypted wallet QR",
+        needs_camera=True,
+        needs_no_wallet=True,
+        scans=ScanTarget.WALLET_BACKUP,
+    ),
     Path(
         "Sign a transaction",
         needs_camera=True,
@@ -95,6 +112,12 @@ PATHS: tuple[Path, ...] = (
 NO_CAMERA = "No camera was found, so the paths that scan a QR code are unavailable this session."
 
 NO_WALLET = "No wallet is loaded yet, so the paths that need one are unavailable."
+
+#: Its counterpart, and the sentence `docs/seed-entry.md` settled. It states the model rather than
+#: apologising: there is nothing to offer, because powering off *is* the way to a second wallet.
+HAVE_WALLET = (
+    "This session has its wallet. Making or restoring another means powering off and booting again."
+)
 
 #: Settled by `docs/network-selection.md`. Mainnet is the default and costs nothing, and the
 #: choice is stated rather than asked: here, and again on the fingerprint screen at the moment it
@@ -143,6 +166,7 @@ def is_available(path: Path, *, camera: bool, wallet: bool, network_fixed: bool)
     return (
         (camera or not path.needs_camera)
         and (wallet or not path.needs_wallet)
+        and (not wallet or not path.needs_no_wallet)
         and (not network_fixed or not path.needs_unfixed_network)
     )
 
@@ -162,6 +186,8 @@ def reason(path: Path, *, camera: bool, wallet: bool, network_fixed: bool) -> st
     """
     if path.needs_wallet and not wallet:
         return "needs a wallet"
+    if path.needs_no_wallet and wallet:
+        return "one wallet per session"
     if path.needs_camera and not camera:
         return "needs a camera"
     if path.needs_unfixed_network and network_fixed:
@@ -251,8 +277,7 @@ class HomeScreen(Screen):
                 yield Static(NETWORK_FIXED if network_fixed else CHOOSE_NETWORK, id="network")
                 if not camera:
                     yield Static(NO_CAMERA, id="no-camera")
-                if not wallet:
-                    yield Static(NO_WALLET, id="no-wallet")
+                yield Static(NO_WALLET if not wallet else HAVE_WALLET, id="no-wallet")
                 if notice:
                     yield Static(notice, id="notice")
             yield Static(KEYS, id="home-keys", classes="keys")

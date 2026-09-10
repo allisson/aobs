@@ -1,0 +1,37 @@
+# The host `build/mkiso.sh` expects, on a machine that is not one.
+#
+# CI builds the ISO on an `ubuntu-24.04` runner (`.github/workflows/tests.yml`), and that runner is
+# the only place the unprivileged-namespace claim has been measured. A developer on macOS, or on a
+# Linux that is not Ubuntu 24.04, has no such host — so this file is one, and `build/mkiso-docker.sh`
+# runs it. It is `amd64` because the ISO is: stage 3d executes the built rootfs's own Python.
+#
+#     sh build/mkiso-docker.sh
+#
+# The tool versions here are deliberately NOT pinned, and that is the same decision CI's
+# `The build tools` step already carries, for the same reason: these are the host's tools, not the
+# image's. Every byte that lands in the ISO comes from `build/inputs/` and stage 0's `sha256sum -c`
+# says so. What a differently-versioned `mmdebstrap` or `xorriso` can still change is the
+# ARRANGEMENT of those bytes, which is `docs/reproducible-build.md`'s question at M4 and not this
+# file's.
+#
+# The image's own user is `builder`, uid 1001, with the `subuid`/`subgid` ranges
+# `mmdebstrap --mode=unshare` maps into — the runner's shape, kept deliberately. It is **not** what
+# makes the local build unprivileged, and nothing here should be read as saying it is:
+# `build/mkiso-docker.sh` runs this image `--privileged`, for the reason it records. The uid stays
+# 1001 so that the day a host appears where the unprivileged path works, the only thing that has to
+# change is the `docker run` line.
+FROM ubuntu:24.04
+
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
+        mmdebstrap uidmap dpkg-dev kmod zstd xorriso mtools \
+        grub-efi-amd64-bin isolinux syslinux-common binutils \
+        python3 python3-pip ca-certificates rsync git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -u 1001 -s /bin/sh builder \
+    && printf 'builder:100000:65536\nroot:200000:65536\n' > /etc/subuid \
+    && printf 'builder:100000:65536\nroot:200000:65536\n' > /etc/subgid \
+    && mkdir -p /work && chown builder:builder /work
+
+USER builder
+WORKDIR /work

@@ -162,6 +162,27 @@ showing a fingerprint that looks like a confirmation and is not.
 and should read as peers — burying the encrypted QR under an import submenu would hide the path #9 and
 #16 spent two tickets making safe.
 
+**Once this session has a wallet, all three ways in are closed for the rest of it.** A session holds
+one wallet. The three rows stay on the wallet screen, unavailable with *one wallet per session*
+beside them, for the same reason every other unavailable path is shown rather than hidden
+(`docs/failure-states.md`) — a user who cannot find *generate a new wallet* concludes the appliance
+cannot generate one.
+
+There is no *unload* and no *forget this wallet*, and the closure is deliberate rather than
+incidental. Two things stand behind it. The session is the unit of the appliance's memory
+(`CONTEXT.md`), so a second wallet in one boot is a second session's worth of secrets in one
+session's RAM. And the network latch is one-way (`docs/network-selection.md`): a path that cleared
+the wallet would have to decide whether it also re-opens the network, and the honest answer is no —
+which leaves an *unload* that hands back a session where the one setting that matters is already
+spent. Powering off costs a boot and answers both.
+
+What this closes by construction rather than by check: before it, walking a way in with a wallet
+already loaded replaced `wallet` and `mnemonic` and left `export` untouched, so *export the
+encrypted wallet QR* would have re-shown the previous wallet's backup and its eight-word password
+under the new wallet's name. Nothing clears the wallet mid-session and nothing may, so the ways in
+are closed and the replacement never happens; the defensive clear is deliberately **not** added,
+because writing one would encode a replacement the rule says cannot occur.
+
 **Recovery words are re-showable on demand once a wallet is loaded**, behind an explicit *show recovery
 words* action and never on the way to anything else.
 
