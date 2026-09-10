@@ -335,6 +335,19 @@ go. `HomeScreen` turned out to have the identical defect. Both print their keys 
 source-level rule in `tests/test_structure.py` fails the build for the next screen that binds a
 function key without rendering it.
 
+**A later boot signed a real transaction, and the transaction half of the exit is met.** Booted from
+a live USB stick on a Chromebook, the appliance carried a session end to end: wallet loaded, an
+unsigned PSBT built in Sparrow scanned in over the QR channel, reviewed, signed, the signature
+scanned back out, and the transaction broadcast on **testnet4** —
+[`dcdfc90e38d7299caa00c5c7fb4c01ab73e9d093adee823745d9dbc6466b3a07`](https://mempool.space/testnet4/tx/dcdfc90e38d7299caa00c5c7fb4c01ab73e9d093adee823745d9dbc6466b3a07).
+Signet was the network written into the script below; testnet4 is a peer of it in
+`docs/network-selection.md` and the substitution changes nothing the run was checking.
+
+**The gate stays open.** The exit is two things joined by an *and*, and only the first is met: there
+is no run record, because `docs/boot-checklist.md` has not been written, and none of the boxes below
+has been answered as evidence a stranger can read. One machine that boots is also not a
+hardware-compatibility claim, and the README does not make one.
+
 Worth recording as a pattern, because all three findings share it: **each fault was a claim the
 repository stated correctly in prose and never checked.** `mount` was documented as coming from
 `util-linux`; the C++ runtime was assumed to arrive with the closure; the reserved keys were fixed
@@ -351,12 +364,17 @@ the same shape — read what the repository already says, and check the artefact
 
 - [ ] **Choose and characterise the target machine**: make, age, BIOS or UEFI, whether Secure Boot can
       be disabled in its firmware, built-in webcam or USB. Nothing below can be judged without this.
+      *Partly answered by the signing run above: a Chromebook, booted from a live USB stick. Make,
+      age, firmware path, Secure Boot and whether the camera is built-in are still unrecorded, so
+      the row stays open.*
 - [ ] Narrow the generic module allowlist to what that machine actually needs, or record why it stays
       generic.
 - [ ] `docs/boot-checklist.md`: the checks only a booted appliance can answer, published with the ISO.
 - [ ] Run it. Boot the stick, walk the keymap picker, generate a wallet, export the xpub by QR, build
       an unsigned PSBT in a watch-only wallet, scan it, review it, sign it, scan the signature back,
-      broadcast on signet.
+      broadcast on signet. *Done on testnet4 — see the signing run above. The row stays open because
+      it is the run **record** that closes it, not the run: no verdict per step has been written
+      down, and the checklist it would be written against does not exist yet.*
 - [ ] With the wallet loaded, confirm the three ways in read as unavailable — *one wallet per
       session* beside each row and the note under the list — and that `F10` on one does nothing.
       Photographed with the console check below, which is the boot that can answer whether the
@@ -374,8 +392,17 @@ the same shape — read what the repository already says, and check the artefact
       stated correctly in prose and never checked.* Replacing the glyphs is deliberately **not**
       done in advance — two of them sit inside row templates that `docs/review-screen.md` and
       `docs/scan-feedback.md` fix character by character, and the check is cheaper than the guess.
-- [ ] Check each structural claim on the running appliance: `ls -d /proc/[0-9]*`, `cat /proc/mounts`,
-      `ls /sys/block`, `command -v ip`, `cat /sys/bus/usb/devices/usb*/authorized_default`.
+- [ ] Check each claim in the image, **and say which boot each check belongs to** — the row as
+      written was not runnable, because a session has no prompt and the checks were listed as if it
+      did. `docs/overview.md` now carries the split; the checklist has to repeat it per row.
+      - In an `init=/bin/sh` boot: `cat /proc/mounts`, `ls /sys/block`, `command -v ip`,
+        `ls /lib/modules/*/kernel/net`, `ls /lib/modules/*/kernel/drivers/usb`.
+      - **Not** `ls -d /proc/[0-9]*` and **not** `cat /sys/bus/usb/devices/usb*/authorized_default`:
+        that boot replaces PID 1, so the count is the stranger's own shell and `build/init` never
+        ran to set the hubs. Both are source-level checks against `build/init` and
+        `build/verify.py`, and the run record says so rather than printing a number that looks like
+        evidence and is not.
+      - In an ordinary session: pull the boot medium out and keep signing.
 - [ ] Record the answers as a **boot-checklist run record** — the checklist is the procedure, the run
       record is the evidence, and only the second is something a stranger can check. Verdicts are
       *pass*, *fail* and *deviated*; the third is load-bearing.

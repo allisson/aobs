@@ -32,7 +32,7 @@ Say which kind you mean. A sentence that does not is not yet a claim.
 
 | Claim | Strength | How a stranger checks it |
 |---|---|---|
-| Exactly one userspace process exists for the whole session | **Structural** — the app is PID 1, there is no init system to start a second | `ls -d /proc/[0-9]*` |
+| Exactly one userspace process exists for the whole session | **Structural** — the app is PID 1, there is no init system to start a second | read `build/init`, which ends in `exec python3 -m aobs`, against the assertions in `build/verify.py`; **not** `ls -d /proc/[0-9]*`, see below |
 | No filesystem is mounted beyond tmpfs and pseudo-filesystems | **Structural** — the whole rootfs is the initramfs; there is nothing to mount from | `cat /proc/mounts` |
 | The boot medium is never read after boot | **Structural** — firmware reads it before Linux starts; pull the stick out and keep signing | pull the stick out |
 | No network interface, and no tool to configure one | **Absence** — no `kernel/net`, no `drivers/net`, no `iproute2` | `ls /lib/modules/*/kernel/net`, `command -v ip` |
@@ -40,6 +40,26 @@ Say which kind you mean. A sentence that does not is not yet a claim.
 | USB binds nothing but HID and UVC | **Absence + policy** — only those modules ship, and `authorized_default=0` after our own devices enumerate | `ls /lib/modules/*/kernel/drivers/usb`, `cat /sys/bus/usb/devices/usb*/authorized_default` |
 | Nothing recoverable from RAM after power-off | **Best-effort, not promised** — no byte-zeroing | not checkable; stated as a limit |
 | The published ISO is byte-identical to an independent rebuild | **Checkable by rebuilding** | `sha256sum`, against the signed manifest |
+
+**Where those commands are run, because a session offers no prompt.** There is no getty, no VT with
+a login and no path from the running app to a shell (`docs/boot-pipeline.md`), so every command in
+the third column that is not "pull the stick out" is run in a *different* boot — one where the
+stranger types `init=/bin/sh` at the bootloader. That is stated rather than defended: a person at
+the machine with the stick in their hand already owns it.
+
+Two rows do not survive that substitution, and neither may be written up as if it does:
+
+- **The process count.** In an `init=/bin/sh` boot the stranger *is* PID 1, so `ls -d /proc/[0-9]*`
+  describes their own shell and says nothing about a session. The claim is checked by reading
+  `build/init` and the `build/verify.py` assertions that every command in it resolves on PID 1's own
+  `PATH` — a source-level check, and the reason the row above names one.
+- **`authorized_default=0`.** PID 1 writes it (`build/init`, step 4, after our own devices
+  enumerate), and an `init=/bin/sh` boot replaces PID 1, so `build/init` never runs and the value
+  is whatever the kernel left. Reading it there proves nothing; the check is the write in
+  `build/init` and the module list in `build/modules.allow`.
+
+A **boot-checklist run record** answers the rest, and the checklist has to say which boot each row
+belongs to. It does not exist yet; `docs/roadmap.md` M3 carries it.
 
 Three of these are weaker than they were in this project's Alpine ancestry, where a hand-written
 kernel config compiled out networking, modules and the block layer entirely. `docs/adr/0001-debian-base-and-stock-kernel.md`
@@ -174,11 +194,11 @@ cannot be.
 | `docs/adr/0001-debian-base-and-stock-kernel.md` | The base OS and the kernel, and what the switch cost |
 | `docs/adr/0002-python-dependencies-from-pinned-wheels.md` | Where the Python layer comes from, and where a prebuilt blob may live |
 | `docs/boot-pipeline.md` | The build's stages, PID 1, the module allowlist, the RAM floor |
-| `docs/threat-model.md` | Adversary tiers, and every claim above at its stated strength |
-| `docs/reproducible-build.md` | The reproducibility contract and the divergence sources it fixes |
+| `docs/threat-model.md` — **not yet written**, due in M3 | Adversary tiers, and every claim above at its stated strength |
+| `docs/reproducible-build.md` — **not yet written**, due in M4 | The reproducibility contract and the divergence sources it fixes |
 | `docs/test-harness.md` | The four tiers and what each one is authoritative for |
-| `docs/release.md` | The release ritual, the manifest, the release-mode refusals |
-| `docs/boot-checklist.md` | The checks only a booted appliance can answer |
+| `docs/release.md` — **not yet written**, due in M5 | The release ritual, the manifest, the release-mode refusals |
+| `docs/boot-checklist.md` — **not yet written**, due in M3 | The checks only a booted appliance can answer |
 | `docs/psbt-review-model.md`, `docs/review-screen.md` | The proof rule, the three output categories, the screen |
 | `docs/seed-entry.md`, `docs/secret-hygiene.md` | Mnemonic and passphrase entry, and how secrets are handled |
 | `docs/address-verification.md` | Address display and the proof behind it |
