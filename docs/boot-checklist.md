@@ -194,6 +194,25 @@ This is one half of the graphics decision in `build/modules.allow`, and the half
 firmware path you booted. **The other path stays unobserved and the run record must say so** rather
 than let a reader infer both from one.
 
+### `I-7b` — Which framebuffer devices were offered, and which driver lost
+
+```
+ls /sys/devices/platform/ | grep -i framebuffer
+dmesg | grep -iE 'simple-?fb|vesafb|efifb|aperture|coreboot'
+```
+
+**Record both verbatim.** `I-7` names the driver that won; this names the field it won on, and the
+two are not the same question. The kernel can register more than one framebuffer device and only
+one of them gets the memory: `devm_aperture_acquire` refuses an overlapping range with `-EBUSY`,
+first come, so the second driver to probe fails and never appears in `/proc/fb`. Which driver that
+was, and whether it was offered a device at all, is visible only here.
+
+Expect up to two entries. `sysfb` registers a `vesa-framebuffer` device on a `vga=791` BIOS boot
+whenever `CONFIG_SYSFB_SIMPLEFB` is unset, which it is in the pinned kernel; a coreboot machine
+also has `framebuffer-coreboot` registering a `simple-framebuffer` from the coreboot table, which
+is a different path and not governed by that symbol. **There is no pass or fail here.** The run
+record carries what was seen, and `docs/boot-pipeline.md` is corrected from it.
+
 ### `I-8` — Which controller the keyboard is on
 
 ```

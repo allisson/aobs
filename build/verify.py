@@ -619,7 +619,12 @@ def kernel_config_symbols(text: str) -> dict[str, str]:
 REQUIRED_BUILT_IN = {
     "FB_EFI": "the UEFI firmware framebuffer, which is the console on a UEFI boot",
     "FB_VESA": "the BIOS firmware framebuffer, which is the console on a `vga=791` boot",
-    "FRAMEBUFFER_CONSOLE": "fbcon, without which neither framebuffer is a console",
+    "FB_SIMPLE": (
+        "simplefb, which is the console on the one machine this project has booted: coreboot "
+        "registers a `simple-framebuffer` device from its own table and simplefb takes the "
+        "aperture before vesafb does"
+    ),
+    "FRAMEBUFFER_CONSOLE": "fbcon, without which no framebuffer is a console",
     "SERIO_I8042": "the controller a laptop's built-in keyboard is behind",
     "KEYBOARD_ATKBD": "the driver that binds a keyboard on it",
     "VT": "the terminal the application draws on, and the keyboard handler input arrives through",
@@ -632,8 +637,10 @@ def kernel_provides_console_and_input(symbols: dict[str, str]) -> None:
     **This is the assertion the third hardware boot should have had.** `build/modules.allow` names
     `usbhid` and `hid_generic`, every description of input in this repository was written around
     them, and then the appliance was driven end to end on a laptop whose keyboard used neither:
-    it sits behind a built-in i8042 controller that Debian compiles in. The same is true of both
-    framebuffers, which is the argument `build/modules.allow` rests on when it ships no DRM driver.
+    it sits behind a built-in i8042 controller that Debian compiles in. The same is true of all
+    three framebuffers, which is the argument `build/modules.allow` rests on when it ships no DRM
+    driver. `FB_SIMPLE` is here because the same boot found the console on `simplefb` and not on
+    `vesafb`: the driver the appliance actually runs on was the one symbol nothing was watching.
 
     So the image's console and its keyboard both depend on Debian's config staying as it is, and
     nothing was watching it. A Debian that flips `KEYBOARD_ATKBD` or `FB_VESA` to `m` deletes the

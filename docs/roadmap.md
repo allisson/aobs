@@ -603,8 +603,40 @@ them are claims the repository makes that this run did not support.
       console size was 128×48, exactly what `vga=791` predicts, so the mode is right and no screen
       is affected. But the pinned kernel's own config has `# CONFIG_SYSFB_SIMPLEFB is not set`, and
       `docs/boot-pipeline.md:466` cites that unset symbol as the reason the BIOS path lands on
-      `vesafb`. With it unset, `simplefb` should never bind. It bound. Until that is explained,
-      these are unsupported rather than wrong and none has been edited:
+      `vesafb`. With it unset, `simplefb` should never bind. It bound.
+
+      **Half of this is now explained, against the 6.12 source rather than against a guess.** The
+      `simple-framebuffer` device does not come from `sysfb` at all: `CONFIG_GOOGLE_FRAMEBUFFER_COREBOOT=y`
+      builds in `framebuffer-coreboot`, which reads the framebuffer entry out of the coreboot table
+      and registers a `simple-framebuffer` platform device
+      (`drivers/firmware/google/framebuffer-coreboot.c:64`). `CONFIG_SYSFB_SIMPLEFB` governs the
+      `sysfb` path only, so it never had a say. `simplefb` reports `simple`
+      (`drivers/video/fbdev/simplefb.c:32`) and `vesafb` reports `VESA VGA`
+      (`drivers/video/fbdev/vesafb.c:53`), so the observation does discriminate between them.
+
+      **The other half is not explained, and it is the half that decides the wording.** `sysfb_init`
+      is unconditional, and with `CONFIG_SYSFB_SIMPLEFB` unset it falls through to registering a
+      `vesa-framebuffer` device (`drivers/firmware/sysfb.c:157`) on a `vga=791` boot. So two
+      framebuffer devices were most likely offered and one lost: `devm_aperture_acquire` returns
+      `-EBUSY` on any overlap (`drivers/video/aperture.c:175`), first come. Which one lost, and
+      whether `vesafb` was offered a device at all, cannot be derived from source — it is probe
+      order on that machine, and only `dmesg` saw it. **`I-7b` is written to capture exactly that**
+      and this row closes on the next inspection boot, not before.
+
+      The correction, when it is written, is a **first-registrar** story and not a firmware-path
+      one: three firmware framebuffers are built in — `FB_EFI`, `FB_VESA`, `FB_SIMPLE` — the
+      firmware decides which devices exist, and whichever probes first takes the aperture. That is
+      true of both machine classes, where BIOS → `vesafb` is true of neither reliably. The
+      load-bearing conclusion is unchanged: no DRM driver is needed.
+
+      **One thing this already changed in the image.** `build/verify.py` asserted `FB_EFI` and
+      `FB_VESA` and not `FB_SIMPLE`, so a Debian demoting `FB_SIMPLE` to `m` would have deleted the
+      console from the one machine this project has ever booted with every assertion still green.
+      `FB_SIMPLE` is now in `REQUIRED_BUILT_IN`, with the broken inputs the parametrised tests give
+      it for free. `CONTEXT.md` names `simplefb` alongside `efifb` and `vesafb` in the list of
+      drivers the allowlist cannot be credited with.
+
+      Until `I-7b` is run, these stay unsupported rather than wrong and none has been edited:
       `docs/console-appearance.md:29` (which marks the chain **observed** on this machine, and this
       run is that observation), `docs/boot-pipeline.md:457`, `:466`–`:467`, `:480`,
       `build/modules.allow:25`–`26`, `docs/roadmap.md:353`, `:529`, `:531`, `docs/overview.md:153`,
