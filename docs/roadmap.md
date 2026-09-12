@@ -557,7 +557,10 @@ the same shape — read what the repository already says, and check the artefact
       **This is two rows, because the target machine can only answer one of them.** The UEFI half
       has not met a screen and cannot on this machine: `RW_LEGACY` SeaBIOS is a BIOS path, and
       reaching `efifb` would mean flashing a full ROM. It is a **`deviated`** verdict with a written
-      reason, never a `pass` inferred from its sibling, and the README says so in plain words.
+      reason, never a `pass` inferred from its sibling, and the README says so in plain words. That
+      verdict is issued by `I-7c` in `docs/boot-checklist.md`, a row that exists to be `deviated`
+      until a UEFI machine boots: a promise of a `deviated` with no row to hold it was the same
+      silence it was meant to prevent.
 
       *Closed 2026-09-12.* The network half was done by `I-4`: no module under `kernel/net` or
       `kernel/drivers/net`, and no `ip`, `ifconfig`, `wpa_supplicant`, `curl`, `wget` or `ssh` on
@@ -581,7 +584,8 @@ the same shape — read what the repository already says, and check the artefact
       it is achievable — Debian's signed shim, grub and kernel survive a module-tree prune, since
       pruning does not touch the kernel image's signature — and names it the best candidate for the
       first post-v0.1 milestone. It now has a second reason: it is what would close the `efifb` half
-      of the row above.
+      of the row above. Concretely, a UEFI boot is the only thing that can turn `I-7c` from a
+      `deviated` into a verdict.
 
 The five rows below come from walking the checklist on 2026-09-11 —
 `docs/boot-runs/2026-09-11-cb514-1h.md`, Findings. None of them is a `fail` and none blocks the
