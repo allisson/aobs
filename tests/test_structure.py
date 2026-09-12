@@ -87,15 +87,20 @@ def test_the_ports_have_two_adapters_each() -> None:
     from aobs.adapters import fake, real
 
     assert set(ports.__all__) == {
+        "CameraError",
+        "CameraReason",
         "DEFAULT_LAYOUT",
         "EntropySource",
         "Frame",
         "FrameSource",
         "Keymap",
+        "LateArrival",
         "Power",
+        "UsbBus",
     }
     assert set(fake.__all__) == {
         "FixedEntropySource",
+        "FixedUsbBus",
         "ImageFileFrameSource",
         "RecordingKeymap",
         "RecordingPower",
@@ -104,6 +109,7 @@ def test_the_ports_have_two_adapters_each() -> None:
         "ForcedPowerOff",
         "KernelEntropySource",
         "LoadkeysKeymap",
+        "SysfsUsbBus",
         "V4L2FrameSource",
     }
 
