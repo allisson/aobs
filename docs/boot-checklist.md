@@ -315,25 +315,38 @@ Neither is a failure. The row exists because claim (v) is about **what USB binds
 keystrokes come from, and because a Chromebook that routed its keyboard through the embedded
 controller would have *no keys at all* — `cros_ec_keyb` is a module and is not in the image.
 
-### `I-9` — Whether the console has a glyph for the five characters that need one
+### `I-9` — Whether the console has a glyph for the four characters that need one
 
 ```
-python3 -c 'print("U+2588 [█]  U+2591 [░]  U+0021 [!]  U+002D [-]")'
+python3 -c 'print("U+2588 [\u2588]  U+2591 [\u2591]  U+0021 [!]  U+002D [-]")'
 ```
 
 Or, staying in the shell:
 
 ```
-printf 'U+2588 [\0342\0226\0210]  U+2591 [\0342\0226\0221]  U+0021 [!]  U+002D [-]\n'
+printf 'U+2588 [\342\226\210]  U+2591 [\342\226\221]  U+0021 [!]  U+002D [-]\n'
 ```
 
 **Octal, not `\xHH`, and do not "fix" this back.** `/bin/sh` is dash and its builtin `printf` is
-POSIX: it understands `\0NNN` and prints `\xHH` literally, so a `\x` form produces a line of
-backslashes that looks like a failed glyph and is actually a failed command. That is exactly what
-this row's first attempt did. `python3` is the appliance's own interpreter, is in the image by
-construction, and draws to the same console through the same font — either form is representative.
+POSIX: it prints `\xHH` literally, so a `\x` form produces a line of backslashes that looks like a
+failed glyph and is actually a failed command. That is exactly what this row's first attempt did.
 
-**Record each of the five separately**: rendered, or not. A blank, a `?`, a solid box or a wrong
+**And the octal is `\ddd`, not `\0ddd`.** The three-digit `\0ddd` spelling is the form for a `%b`
+*argument*; in a format string dash consumes `\0` plus **two** further digits and prints the
+leftover one, so `\0342\0226\0210` draws `260` and tests no glyph while looking like a row that
+ran. That is what this row's second attempt did, on 2026-09-11 — `docs/boot-runs/2026-09-11-cb514-1h.md`.
+The `\u2588` escape in the `python3` form is there for the same reason: neither `█` nor `░` can be
+typed on the console under test.
+
+**The shell form above has not been observed on a panel.** The 2026-09-11 run answered this row
+with the `python3` form. The `\ddd` spelling is derived — from dash's documented behaviour and from
+the digits the broken form put on screen — not run. Until a run record says otherwise, answer the
+row with the `python3` form and treat the shell form as the fallback it is named for.
+
+`python3` is the appliance's own interpreter, is in the image by construction, and draws to the
+same console through the same font — either form is representative.
+
+**Record each of the four separately**: rendered, or not. A blank, a `?`, a solid box or a wrong
 glyph are all *not rendered*.
 
 **This row now confirms a derivation rather than discovering one.** The five characters below were
@@ -341,7 +354,7 @@ glyph are all *not rendered*.
 `drivers/tty/vt/cp437.uni`, 303 codepoints — so they were replaced with `!`, `█`, `░` and `-`, and
 `tests/test_structure.py` fails the build for the next character outside the set. What this row
 adds is observation on a real panel, which no amount of reading the kernel gives you. **Run it
-against the characters the appliance actually draws now**, and expect all five of *these* to
+against the characters the appliance actually draws now**, and expect all four of *these* to
 render; a `fail` here means the derivation was wrong and the repertoire list is not what the
 console is using.
 
