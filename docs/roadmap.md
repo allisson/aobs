@@ -604,6 +604,18 @@ them are claims the repository makes that this run did not support.
       learns the camera was there. If the fix is to wait for expected devices instead of sleeping,
       that is a change to a load-bearing ordering and belongs in `docs/boot-pipeline.md` first.
 
+      *Half of that failure mode is closed as of #19: the appliance now reads every USB device's
+      `authorized` when it finds no capture node, and names any **Late arrival** on the home screen
+      beside the sentence about the camera. It still does not say the camera was deauthorised,
+      because it cannot — the device class lives in an interface descriptor that is never read for
+      an unauthorised device. Nothing about the diagnosis changed and `build/init` was not touched:
+      the row stays open, and this checkbox means diagnosed.*
+
+      *What it bought is that the next occurrence identifies itself instead of needing to be caught.
+      `S-1b` in `docs/boot-checklist.md` records the camera note verbatim on every session boot; a
+      run that shows the late-arrival line is the evidence this row has been waiting for, and the
+      point at which the `sleep 2` candidate may be argued as the cause rather than assumed.*
+
 - [x] **Post-gate: find out why the BIOS console is `simple` and not `vesafb`, then fix whichever
       is wrong — the ten statements or the image.** *Closed 2026-09-12 by the `I-7b` run,
       `docs/boot-runs/2026-09-12-cb514-i7b.md`. The answer was not that `simplefb` beat `vesafb`.

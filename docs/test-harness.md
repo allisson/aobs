@@ -64,7 +64,7 @@ inputs, the same way `tests/test_build_verifier.py` does for `build/verify.py`.
 
 ## The seam
 
-The core is pure and the world is behind four ports. `aobs/core/` may not import any adapter,
+The core is pure and the world is behind five ports. `aobs/core/` may not import any adapter,
 `aobs.ui`, or `aobs.ports` — a test enforces it.
 
 | port | the appliance's adapter | the harness's adapter |
@@ -73,10 +73,20 @@ The core is pure and the world is behind four ports. `aobs/core/` may not import
 | `Keymap` | `loadkeys`, against the image's own `console-data` tree | a recorder that reports what was asked for |
 | `EntropySource` | `getrandom(2)` | fixed bytes, so a derivation is reproducible |
 | `Power` | `reboot(2)` with `RB_POWER_OFF` | a recorder that captures the call instead of making it |
+| `UsbBus` | every device's `authorized` under `/sys/bus/usb/devices` | a fixed set of readings, so a Late arrival can be staged |
 
 **There is no `Screen` port, and its absence is deliberate.** Its two adapters would have been
 "Textual on the console" and "Textual `run_test()`" — the same application under two drivers, not two
 implementations of an interface. The application *is* the display seam.
+
+**`UsbBus` is the fifth, and it had to argue past two precedents to get here.** `Screen` was refused
+for having one implementation under two drivers; `release` was refused a port in `aobs/ui/app.py`
+because *reading one file has one implementation, and the seam the tests need is this value being
+passed in*. Neither applies. A sysfs walk and a canned set of readings are two implementations, the
+way `getrandom(2)` and fixed bytes are. And unlike `release`, the bus is asked **again on every
+home-screen composition** — a value passed in once cannot answer differently the second time, and
+answering the second time is the entire point (`docs/failure-states.md`, *A late arrival is reported
+and never interpreted*).
 
 A fake must never be reachable from the appliance. `aobs/__main__.py` imports no
 `aobs.adapters.fake` module and reads neither `os.environ` nor `sys.argv`, so there is no flag and no

@@ -78,13 +78,63 @@ mistake.
 
 Refusing to boot without a camera is the obvious move and it is wrong: **generating a wallet and
 exporting its descriptor need no camera at all** — both are outbound. A user setting up a new wallet on
-a machine with an unplugged webcam should get a working appliance with the scan paths disabled and one
+a machine with an unplugged webcam should get a working appliance with the scan paths disabled and a
 sentence saying why, not a dead screen.
 
 The rule generalises past the camera and is the wallet screen's whole availability model: **an
 unavailable path is shown with the reason beside it, never hidden.** It is why a session with no
 wallet still lists *sign a transaction*, and why a session that has one still lists the three ways
 in — closed for the rest of it, `docs/seed-entry.md`.
+
+### "No camera was found" is four conditions, and saying one of them four times is a defect
+
+The probe is one frame, once, before any secret exists, and it can fail in four ways the adapter
+already tells apart. Until #19 all four printed *No camera was found*, and three of those were
+false: a camera that answered and then failed is not a camera that is absent.
+
+| what the probe hit | what the screen says |
+|---|---|
+| no capture node at all | *No camera was found, so the paths that scan a QR code are unavailable this session.* |
+| a node offering no format the appliance can read | *The camera offers no image format this appliance can read, so …* |
+| a node that granted no capture buffers | *The camera granted no capture buffers, so …* |
+| a node that opened and then produced no frames | *The camera was found but produced no frames, so …* |
+
+The trailing clause is identical in all four on purpose: the consequence is the same session with
+the same paths disabled, and only the cause differs. This is the *short stable identifier for the
+condition* that **There is no diagnostic export, on purpose** asks for, spent where it costs
+nothing — a sentence already on screen, carried off the machine in the user's own words.
+
+### A late arrival is reported and never interpreted
+
+The first row above has two causes that look identical from V4L2 and are not: a machine with no
+webcam, and a webcam that enumerated too late to be authorised — a **Late arrival** (`CONTEXT.md`).
+The second loses the user every scan path for a session while the appliance says exactly what it
+would say on a machine that never had a camera. That is the silent failure #19 exists for.
+
+So when no capture node is found, the appliance reads every USB device's `authorized` and names
+what arrived late:
+
+```
+No camera was found, so the paths that scan a QR code are unavailable this session.
+One USB device arrived after the bus was closed and was not authorised:
+  04f2:b64f Chicony HD WebCam
+```
+
+**It stops there.** It does not say the camera was deauthorised, because it cannot know that: the
+device class lives in an interface descriptor that is never read for an unauthorised device. The
+operator reads the vendor string, recognises their own webcam, and draws the conclusion the
+appliance is not entitled to draw.
+
+Three consequences follow from the same rule, and each is a line that was deliberately not written:
+
+- **The camera works and something else arrived late: silence.** The line is a reason attached to a
+  disabled path, and there is no disabled path. This screen is not a notification area.
+- **An `authorized` that cannot be read is skipped, not counted.** A device we cannot classify is
+  not evidence, and counting it would manufacture the inference the section above refuses.
+- **No claim in `docs/overview.md` changes.** That table forbids `cat /sys/bus/usb/devices/usb*/authorized_default`
+  as *evidence for* the containment claim, which is a different file read for a different purpose:
+  this is per-device `authorized`, read to describe one session, and it proves nothing about the
+  image. Nothing here becomes structural.
 
 ### Losing it mid-session is permanent, and the appliance must say so
 
