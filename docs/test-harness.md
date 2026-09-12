@@ -164,21 +164,20 @@ here is a recommendation about which machine to use — an arm64 tier would be j
 against a different libc and a different `libsecp256k1`, and the pin is what makes that
 unreachable rather than merely unlikely.
 
-**Measured, in the authoritative tier on CI's native x86_64:** 720 passed, 4 skipped, 2 deselected,
-0 failed, in 427 s, the run reporting `python 3.13.5, EC backend ctypes_secp256k1, authoritative
-tier yes` — run [34166600257](https://github.com/allisson/aobs/actions/runs/34166600257) on
-[#3](https://github.com/allisson/aobs/pull/3).
+**Measured, in the authoritative tier on CI's native x86_64:** 876 passed, 3 skipped, 2 deselected,
+0 failed, in 416.23 s, the run reporting `python 3.13.5, EC backend ctypes_secp256k1, authoritative
+tier yes` — run [34706000285](https://github.com/allisson/aobs/actions/runs/34706000285) on
+`fbf563f`, from [#37](https://github.com/allisson/aobs/pull/37).
 
-**That figure is dated, and it is written that way on purpose.** It was the count when #3 merged and
-it is not the count now; the suite has grown by 155 tests since, and a sentence that reads as *what
-the tier reports* goes quietly wrong every time somebody adds a test. What the number is evidence
-for is that this tier ran green on CI's own x86_64 on that commit — which is the only thing a
-measurement can ever be evidence for. **Each figure here names its run.**
+**Every figure here names its run, and that is the format rather than a courtesy.** The previous
+entry — 720 passed, 4 skipped in 427 s, run
+[34166600257](https://github.com/allisson/aobs/actions/runs/34166600257) on
+[#3](https://github.com/allisson/aobs/pull/3) — was written as *what the tier reports* and went
+quietly wrong 156 tests later, which is how #19 found it. A measurement is only ever evidence that
+this tier ran green on that commit, so the commit is part of the measurement.
 
-Corroboration on the current tree, under qemu on an arm64 Mac: 876 passed, 3 skipped, 2 deselected,
-0 failed, in 509.17 s, the run reporting the same `python 3.13.5, EC backend ctypes_secp256k1,
-authoritative tier yes`. That is corroboration and is **not** what a claim cites — the rule has not
-moved, and the next CI run on this branch is what replaces the paragraph above.
+The same image under qemu on an arm64 Mac gave the same 876/3/2 in 509.17 s. That is corroboration
+and is **not** what a claim cites.
 
 ## What only a boot can check
 
