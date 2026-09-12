@@ -27,18 +27,25 @@ dependencies = [
     # `qrcode`, not `segno`, and the reason is no longer "what Alpine packages": it is what the
     # renderer in `aobs/ui/qrcodes.py` was written against.
     "qrcode>=8",
-    # Inbound, not outbound, and both are appliance dependencies rather than harness ones:
-    # `aobs/ui/qrdecode.py` decodes a captured frame with `zxingcpp` and wraps it in a
-    # `PIL.Image`, and `aobs/ui/screens/scan.py` — an appliance screen — calls it. The V4L2
-    # adapter reads raw frames through `ioctl`; deciding what is in them is this.
+    # Inbound, not outbound: `aobs/ui/qrdecode.py` decodes a captured frame and
+    # `aobs/ui/screens/scan.py` — an appliance screen — calls it. The V4L2 adapter reads raw
+    # frames through `ioctl`; deciding what is in them is this. It is handed a
+    # `zxingcpp.ImageView` over the frame's own bytes, so no image library is involved on the way
+    # in either — see `pillow` under `test` below, and #24.
     "zxing-cpp>=2.2",
-    "pillow>=10",
 ]
 
 [project.optional-dependencies]
 # The harness, and nothing that reaches the rootfs.
 test = [
     "pytest>=8",
+    # HARNESS-ONLY SINCE #24, and it was an appliance dependency until then. One line in
+    # `aobs/ui/qrdecode.py` wrapped a captured frame as a `PIL.Image` for zxingcpp, and the image
+    # paid for it with an AVIF decoder and a bundled `libavif` — an untrusted-input image decoder
+    # on an offline signer, fed by the only bytes that come from outside it. What still needs it
+    # is the harness: `aobs/adapters/fake/frames.py` reads fixture images (and no longer ships,
+    # `build/mkiso.sh`), and four test modules build frames the same way.
+    "pillow>=10",
     # `run_test()` is an async context manager, so the app suite is async. `asyncio_mode =
     # "auto"` below is what keeps that from being a decorator on every test.
     "pytest-asyncio>=1.3",

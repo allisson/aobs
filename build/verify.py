@@ -412,6 +412,32 @@ def no_packaging_tool_in_the_python_layer(paths: set[str]) -> None:
         )
 
 
+#: Where the harness half of every port lives, as it would appear in the image. `build/mkiso.sh`
+#: excludes it from the copy; this is what makes that an assertion rather than a `tar` flag nobody
+#: reads again.
+_FAKE_ADAPTERS_IN_ROOTFS = "opt/aobs/aobs/adapters/fake/"
+
+
+def no_harness_code_in_the_app_tree(paths: set[str]) -> None:
+    """The fakes are not in the image, checked by prefix rather than by file name.
+
+    Not an entry in `FORBIDDEN_IN_ROOTFS`: that map's error says "these published claims are
+    false", and no claim in `docs/overview.md` is about this. What is true is narrower and worth
+    checking anyway — the fakes are the harness half of every port, and one of them (#24) is the
+    reason `pillow` was still imported inside an image that no longer needs an image library.
+
+    A prefix and not a list of names, because a file added to the fake tree next year must fail
+    here without anyone remembering to add it.
+    """
+    found = sorted(path for path in paths if path.startswith(_FAKE_ADAPTERS_IN_ROOTFS))
+    if found:
+        raise PinFileError(
+            f"the image carries {len(found)} fake-adapter files, e.g. {found[:3]}. "
+            "build/mkiso.sh excludes aobs/adapters/fake from the app tree: the harness half of "
+            "a port has no business in the appliance"
+        )
+
+
 def required_files_present(paths: set[str]) -> None:
     """PID 1, a shell, the interpreter, the identity file and the app.
 
@@ -868,6 +894,7 @@ def _check_rootfs(args: argparse.Namespace, apt: dict[str, dict[str, str]]) -> N
         raise PinFileError(f"{args.files} lists {len(paths)} paths; that is not a Debian rootfs")
 
     no_forbidden_file_in_rootfs(paths)
+    no_harness_code_in_the_app_tree(paths)
     no_packaging_tool_in_the_python_layer(paths)
     required_files_present(paths)
     no_network_module_in_tree(paths)

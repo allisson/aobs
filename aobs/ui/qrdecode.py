@@ -10,6 +10,15 @@ parts are text (`docs/qr-emit-parameters.md`: uppercased, alphanumeric mode); th
 QR is *binary byte mode, no base64* (`docs/encrypted-wallet-qr.md`), so its magic and version bytes
 can only be checked against the raw bytes. Guessing at the raw bytes by re-encoding the text is how
 a container gets misread as a foreign QR.
+
+**The frame is handed over as a buffer, never as a decoded image (#24).** `zxing-cpp` reads a
+`zxingcpp.ImageView` — a pointer, dimensions and a pixel format — and `Frame` already promises
+exactly that: 8-bit greyscale, row-major, `width * height` bytes. Wrapping it in a `PIL.Image`
+first was one line, and the price was an image library in the image: an AVIF decoder and a
+bundled `libavif`, fed by camera frames, which are the only bytes on this appliance that come
+from outside it. `ImageFormat.Lum` names the format the port already guarantees rather than
+inferring it from the shape of a `memoryview` cast, which is the other way the buffer could be
+passed and the way that hides the assumption.
 """
 
 from __future__ import annotations
@@ -17,7 +26,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import zxingcpp
-from PIL import Image
 
 from aobs.ports.frame_source import Frame
 
@@ -37,8 +45,10 @@ def decode_frame(frame: Frame) -> Decoded | None:
     aiming, and a frame that fails to decode fails *to* decode — QR's own checksum and UR's
     per-part CRC32 mean it never decodes wrongly.
     """
-    image = Image.frombytes("L", (frame.width, frame.height), frame.data)
-    results = zxingcpp.read_barcodes(image)
+    view = zxingcpp.ImageView(
+        frame.data, frame.width, frame.height, zxingcpp.ImageFormat.Lum
+    )
+    results = zxingcpp.read_barcodes(view)
     if not results:
         return None
     result = results[0]

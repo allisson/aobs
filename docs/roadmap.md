@@ -320,7 +320,9 @@ package declares mentions what they link — the same reason `libsecp256k1-2` is
 chroot so the build proves the image can start and not only that it can sign, and
 `no_unresolved_shared_library` resolves every `DT_NEEDED` in the tree against the image's own
 libraries — needed as well as the import check, because Pillow loads its format plugins lazily and
-`_avif` is not on the startup import path.
+`_avif` is not on the startup import path. (#24 has since taken `pillow` out of the appliance, so
+`zxingcpp.abi3.so` is the only object left linking the runtime. The record stands as it happened:
+the lazy-plugin argument is why the sweep exists, and it survives the example leaving.)
 
 **And it took an unpacked initramfs and a chroot to identify a one-line fault**, because the fault
 screen showed `ImportError.` and nothing else. `docs/secret-hygiene.md` now carves out that one
@@ -422,13 +424,25 @@ repository stated correctly in prose and never checked.** `mount` was documented
 in a document that assumed screens printed them. The assertions added in this milestone are all of
 the same shape — read what the repository already says, and check the artefact against it.
 
-- [ ] **Follow-up, after the gate: drop `pillow` from the appliance.** It is in the image for one
-      line — `aobs/ui/qrdecode.py:20` wraps a captured frame as a `PIL.Image` for zxingcpp — and its
-      only other use is the *fake* frame source, which is harness-only. In exchange the image
-      carries an AVIF decoder and a bundled `libavif`. zxing-cpp's Python API also takes a raw
-      buffer with dimensions, which would remove an untrusted-input image decoder from an offline
-      signer. Deliberately **not** done alongside the boot fixes: it changes a working decode path,
-      and M3 is a gate precisely to stop that.
+- [x] **Follow-up, after the gate: drop `pillow` from the appliance** (#24). `aobs/ui/qrdecode.py`
+      hands zxing-cpp a `zxingcpp.ImageView` over the frame's own bytes — which is what `Frame`
+      already promised — so the appliance closure is 18 wheels and the AVIF decoder and bundled
+      `libavif` are out of the image. An untrusted-input image decoder, fed by the only bytes on
+      the appliance that come from outside it, is gone.
+
+      **Two things the row did not know.** The *fake* frame source was described as harness-only
+      and shipped anyway: `build/mkiso.sh` copied the whole `aobs` package, so
+      `aobs/adapters/fake/frames.py` was in the image importing `pillow` from a module nothing on
+      the appliance calls. It is excluded from the app tree now, and
+      `no_harness_code_in_the_app_tree` asserts it. And the group split, which
+      `pyproject.toml` calls load-bearing, was checked only against the rootfs — a *wheel* in the
+      image. `tests/test_structure.py` now checks the other direction, where this failure lived:
+      no module that ships may import a distribution from the `test` group.
+
+      **No claim row was added to `docs/overview.md`.** The attack surface is genuinely smaller,
+      but a claim is a promise with an assertion behind it, and the assertion here — no harness
+      wheel in the image — already exists under the group split. A second, weaker spelling of one
+      guarantee is what `CONTEXT.md` warns against.
 
 - [x] **Choose and characterise the target machine**: make, age, BIOS or UEFI, whether Secure Boot can
       be disabled in its firmware, built-in webcam or USB. Nothing below can be judged without this.

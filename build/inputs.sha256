@@ -264,7 +264,6 @@ b42a28c1844fd9de8f3f7d540e36b66f3a9c83fceac7170ebc7a6a19edd9dcae  build/inputs/w
 9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a  build/inputs/wheels/appliance/markdown_it_py-4.2.0-py3-none-any.whl
 214c82fb2ac524472ab6a5bcab1de80f73b50443e187f401bfd77efbc7c6481d  build/inputs/wheels/appliance/mdit_py_plugins-0.6.1-py3-none-any.whl
 84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8  build/inputs/wheels/appliance/mdurl-0.1.2-py3-none-any.whl
-0847a763afefb695bc912d7c131e7e0632d4edc1d8698f58ddabec8e46b8b6d3  build/inputs/wheels/appliance/pillow-12.3.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
 e34ff91a24bcddc6d939b878bdf3f5c437c9c46fe9e212b1bf455fdf1ee57586  build/inputs/wheels/appliance/platformdirs-4.11.4-py3-none-any.whl
 b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992  build/inputs/wheels/appliance/pycparser-3.0-py3-none-any.whl
 2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9  build/inputs/wheels/appliance/pygments-2.21.0-py3-none-any.whl

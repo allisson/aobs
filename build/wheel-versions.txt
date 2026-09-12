@@ -20,20 +20,19 @@
 # installs the appliance group ONLY, and build/verify.py fails the build if a name from
 # the harness group reaches the rootfs. A package outside any group is a parse error.
 #
-# Three of these ship prebuilt binaries — cryptography (its own Rust and OpenSSL),
-# pillow, zxing-cpp — and argon2-cffi-bindings and cffi compile against libffi. The ADR
+# Two of the appliance's ship prebuilt binaries — cryptography (its own Rust and OpenSSL)
+# and zxing-cpp — and argon2-cffi-bindings and cffi compile against libffi. The ADR
 # draws the line at where a blob lives: in the input archive, hash-pinned and published,
 # it is no different in kind from a .deb; in the repository it would be. `embit` stays
 # vendored from source for that reason and its own wheel stays out.
 
 # @group appliance
-# Installed into the rootfs. 19 packages, the closure of `[project].dependencies`.
+# Installed into the rootfs. 18 packages, the closure of `[project].dependencies`.
 
 argon2-cffi==25.1.0
 argon2-cffi-bindings==26.1.0
 cffi==2.1.1
 cryptography==50.0.0
-pillow==12.3.0
 qrcode==8.2
 textual==8.2.8
 zxing-cpp==3.1.1
@@ -61,6 +60,10 @@ colorama==0.4.6  # marker: sys_platform == 'win32'
 # if any name below reaches the rootfs.
 
 hypothesis==6.165.10
+# Harness-only since #24. It was in the appliance group for one `PIL.Image` wrap in
+# `aobs/ui/qrdecode.py`; the frame goes to zxing-cpp as a buffer now, and the AVIF decoder
+# and bundled libavif that came with the wheel are out of the image with it.
+pillow==12.3.0
 pytest==9.1.1
 pytest-asyncio==1.4.0
 urtypes==1.0.1

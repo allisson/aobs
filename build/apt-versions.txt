@@ -76,8 +76,9 @@ libsecp256k1-2=0.5.0-2+b1
 # THE C++ RUNTIME THE WHEELS LINK, and the second pin in this file that exists because apt cannot
 # see what the Python layer needs. `pip --target` unpacks the wheels from OUTSIDE the chroot, so no
 # installed .deb declares a dependency on anything they link, and apt resolves a closure that is
-# correct for the packages and blind to the application. Three objects in the image need this one:
-# `zxingcpp.abi3.so`, `PIL/_avif...so` and pillow's bundled `libavif`.
+# correct for the packages and blind to the application. One object in the image needs this one:
+# `zxingcpp.abi3.so`. It was three until #24 dropped `pillow` from the appliance, and the pin is
+# not weaker for it — one object that cannot load is one object that cannot load.
 #
 # Measured: without it the second hardware boot reached `exec python3 -m aobs` and died at
 # `import zxingcpp` — `libstdc++.so.6: cannot open shared object file`. The .deb was already in

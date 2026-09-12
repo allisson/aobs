@@ -301,6 +301,7 @@ GOOD_ROOTFS = {
     "etc/aobs-modules",
     "etc/aobs-ec-backend",
     "opt/aobs/aobs/__main__.py",
+    "opt/aobs/aobs/adapters/real/v4l2.py",
     "opt/aobs-python/textual/__init__.py",
     "usr/lib/modules/6.12.0/kernel/drivers/hid/usbhid/usbhid.ko.xz",
 }
@@ -312,6 +313,7 @@ def test_find_output_becomes_paths_without_the_dot_slash() -> None:
 
 def test_a_clean_rootfs_passes_every_file_level_assertion() -> None:
     verify.no_forbidden_file_in_rootfs(GOOD_ROOTFS)
+    verify.no_harness_code_in_the_app_tree(GOOD_ROOTFS)
     verify.no_packaging_tool_in_the_python_layer(GOOD_ROOTFS)
     verify.required_files_present(GOOD_ROOTFS)
     verify.no_network_module_in_tree(GOOD_ROOTFS)
@@ -347,6 +349,33 @@ def test_removing_pip_alone_is_not_enough() -> None:
             verify.no_packaging_tool_in_the_python_layer(
                 GOOD_ROOTFS | {f"opt/aobs-python/{name}/__init__.py"}
             )
+
+
+def test_a_fake_adapter_in_the_image_fails_the_build() -> None:
+    """The image the M3 gate passed carried all five of these, and #24 is how it was found.
+
+    `frames.py` is the one that cost something: it imports `pillow` at module scope, so an image
+    that had dropped the wheel would have carried an unresolvable import — invisible to
+    `build/signcheck.py`, which imports `aobs.ui.app` and never reaches the fakes.
+    """
+    for name in ("frames.py", "entropy.py", "keymap.py", "power.py", "usb.py", "__init__.py"):
+        with pytest.raises(verify.PinFileError) as raised:
+            verify.no_harness_code_in_the_app_tree(
+                GOOD_ROOTFS | {f"opt/aobs/aobs/adapters/fake/{name}"}
+            )
+        assert name in str(raised.value)
+
+
+def test_the_real_adapters_are_not_caught_by_the_fake_adapter_rule() -> None:
+    """`GOOD_ROOTFS` carries `adapters/real/v4l2.py` and the assertion above passes on it.
+
+    Stated as its own test because the rule is a path prefix, and a prefix written one component
+    short — `opt/aobs/aobs/adapters/` — would empty the app tree of the adapters the appliance
+    actually runs on and fail no test that only feeds it fakes.
+    """
+    verify.no_harness_code_in_the_app_tree(
+        GOOD_ROOTFS | {"opt/aobs/aobs/adapters/real/frames.py", "opt/aobs/aobs/adapters/release.py"}
+    )
 
 
 def test_a_wheel_whose_name_merely_starts_with_a_forbidden_one_is_not_a_false_positive() -> None:

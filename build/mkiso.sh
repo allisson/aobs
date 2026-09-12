@@ -145,8 +145,17 @@ python3 -m pip install \
 find "$STAGING/aobs-python" -name '__pycache__' -type d -exec rm -rf {} +
 
 # Copied, never `pip install`ed. It is not a distribution and there is nothing for a resolver to do.
+#
+# `aobs/adapters/fake/` is EXCLUDED, and it is an exclusion rather than a later `rm` for the same
+# reason `pip` is absent by construction above: a removal step can silently remove nothing after a
+# tree is reorganised. The fakes are the harness half of every port — `ImageFileFrameSource` reads
+# image files with `pillow`, `FixedEntropySource` returns a counter — and #24 is what shipping them
+# cost: the appliance's one remaining `pillow` import was in a module nothing on the appliance
+# calls. Nothing under `aobs/` imports them (`aobs/adapters/__init__.py` is empty and
+# `aobs/__main__.py` names only the real adapters, which `tests/test_structure.py` enforces), so
+# the exclusion is invisible to the running appliance and visible to `build/verify.py`.
 mkdir -p "$STAGING/aobs"
-tar -C "$ROOT" -cf - aobs | tar -C "$STAGING/aobs" -xf -
+tar -C "$ROOT" --exclude='aobs/adapters/fake' -cf - aobs | tar -C "$STAGING/aobs" -xf -
 find "$STAGING/aobs" -name '__pycache__' -type d -exec rm -rf {} +
 
 POOL=$(mktemp -d /tmp/aobs-pool.XXXXXX)
