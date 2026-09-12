@@ -681,6 +681,27 @@ them are claims the repository makes that this run did not support.
       address-verify path is two deep as well, and is not touched — `esc` there lands on a live
       scan screen ready for the next address, which is a destination the user plausibly wants.
 
+- [x] **Post-gate: the key inventory said it was complete and had been wrong since before `F9`
+      had four meanings.** *Found 2026-09-12 while adding `F5` to it for #31, and independent of
+      that finding.* `docs/failure-states.md`'s table is there, in its own words, "so the inventory
+      is not silently incomplete". Walking every `Binding(` under `aobs/ui` found it incomplete in
+      all three rows: **Confirm** named four screens of thirteen, **Navigation** three of six and
+      omitted `←` `→` on the seed grid, and **Its own** named `F9` on emit while `F9` is bound on
+      five screens with four distinct meanings — step down, toggle script type, search further,
+      show the words again. `F2`, which reveals the passphrase, was absent from the table entirely,
+      which also made the sentence under it false: `F9` was not "the only key in the appliance that
+      changes state without confirming anything". `docs/seed-entry.md` settled hold-to-reveal as a
+      behaviour and never named its key, so `F2` had no home under the document's own rule either;
+      it does now.
+
+      **The defect was not that the table was wrong — it was that nothing could tell**, which is
+      why the fix is a check and not an edit. `tests/test_structure.py` resolves every `Binding`
+      key in `aobs/ui` (literal, module constant, or one reached through an `aobs.ui` module — all
+      three forms exist in the tree, and a form it cannot read fails rather than being dropped) and
+      requires the table to name it, with the *rule bites* twin the repository pairs such tests
+      with. No GitHub issue: unlike #20 and #31 there was no open decision to close first, only a
+      document that did not match the code.
+
 - [ ] **Post-gate: correct `I-9`'s shell fallback in `docs/boot-checklist.md`, and keep the
       warning.** The row offers `printf 'U+2588 [\0342\0226\0210] …'` and it tests no glyph: dash's
       `printf` consumed `\0` plus two octal digits and printed the leftover digit, so the screen

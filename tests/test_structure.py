@@ -258,6 +258,128 @@ def test_the_printed_key_rule_bites() -> None:
     assert _function_keys_bound_but_not_printed(printed) == []
 
 
+# --- The key inventory in `docs/failure-states.md` ---------------------------------------------
+
+#: The two keys the document reserves globally. They are settled in its own three-key inventory
+#: above the table, so the table does not repeat them and this check does not look for them.
+_RESERVED_GLOBALLY = frozenset({"escape", "f12"})
+
+#: How a bound key is spelled in the table, which is prose for a human to read. A key with no entry
+#: here fails rather than being skipped — a new *kind* of key is exactly the case where someone has
+#: to go and write the document, which is the whole point of the check.
+_KEY_IN_THE_INVENTORY = {
+    "f2": "`F2`",
+    "f5": "`F5`",
+    "f9": "`F9`",
+    "f10": "`F10`",
+    "y": "`y`",
+    "up": "`↑`",
+    "down": "`↓`",
+    "left": "`←`",
+    "right": "`→`",
+    "pageup": "`PgUp`",
+    "pagedown": "`PgDn`",
+}
+
+
+def _module_level_strings(tree: ast.Module) -> dict[str, str]:
+    """`STEP_DOWN_KEY = "f9"` and nothing cleverer. A key assembled at runtime would not resolve
+    here, and should not: the document has to name a literal for a human to read."""
+    return {
+        target.id: node.value.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+
+
+def _keys_bound_across_the_ui() -> tuple[set[str], list[str]]:
+    """Every key any `Binding(...)` in `aobs/ui` takes, with the constants resolved.
+
+    Three forms exist in the tree and all three are resolved: a literal, a module-level constant in
+    the same file, and one reached through an `aobs.ui` module — `addresstext.SEARCH_FURTHER_KEY`.
+    Anything else is returned as unresolved and fails the caller rather than being dropped, because
+    a key this cannot read is a key that could be missing from the document unnoticed.
+    """
+    paths = sorted((ROOT / "aobs" / "ui").rglob("*.py"))
+    assert len(paths) > 20, "the UI tree moved; this test is looking in the wrong place"
+    trees = {path: ast.parse(path.read_text(encoding="utf-8")) for path in paths}
+    constants = {path.stem: _module_level_strings(tree) for path, tree in trees.items()}
+
+    keys: set[str] = set()
+    unresolved: list[str] = []
+    for path, tree in trees.items():
+        local = constants[path.stem]
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "Binding"
+                and node.args
+            ):
+                continue
+            argument = node.args[0]
+            if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+                keys.add(argument.value.lower())
+            elif isinstance(argument, ast.Name) and argument.id in local:
+                keys.add(local[argument.id].lower())
+            elif (
+                isinstance(argument, ast.Attribute)
+                and isinstance(argument.value, ast.Name)
+                and argument.attr in constants.get(argument.value.id, {})
+            ):
+                keys.add(constants[argument.value.id][argument.attr].lower())
+            else:
+                unresolved.append(f"{path.name}:{argument.lineno}")
+    return keys, unresolved
+
+
+def _inventory_table() -> str:
+    """The three-row table under *Per-screen keys are named in their own screen's document*."""
+    document = (ROOT / "docs" / "failure-states.md").read_text(encoding="utf-8")
+    rows = [line for line in document.splitlines() if line.startswith("| **")]
+    assert len(rows) == 3, f"the inventory table is not three rows: {len(rows)}"
+    return "\n".join(rows)
+
+
+def _keys_missing_from_the_inventory(keys: set[str], table: str) -> list[str]:
+    return sorted(
+        f"{key} is bound and the inventory does not name it"
+        for key in keys - _RESERVED_GLOBALLY
+        if _KEY_IN_THE_INVENTORY.get(key, f"`{key}`") not in table
+    )
+
+
+def test_the_key_inventory_names_every_key_the_ui_binds() -> None:
+    """`docs/failure-states.md`'s table says it is there *so the inventory is not silently
+    incomplete*. It went silently incomplete anyway, twice: `F2` was never in it, and `F9` grew
+    from one meaning to four across five screens without the table moving.
+
+    Prose that claims completeness and nothing checks is the shape this repository rejects
+    elsewhere, so this is the check. It is deliberately narrow — every key bound anywhere under
+    `aobs/ui` must appear in the table, and nothing here reads the *meaning* beside it. A wrong
+    description is a review's job; a missing key is a mechanical fact and belongs here.
+    """
+    keys, unresolved = _keys_bound_across_the_ui()
+    assert not unresolved, f"a Binding key this check cannot read: {unresolved}"
+    assert "f10" in keys, "no Binding was found at all; the resolver is broken, not the document"
+    assert not _keys_missing_from_the_inventory(keys, _inventory_table())
+
+
+def test_the_key_inventory_rule_bites() -> None:
+    """Fed the table as it stood before this check existed — `F9` present, `F2` absent."""
+    before = "| **Its own** | `F9` — *step the QR down one rung* | emit |"
+    assert _keys_missing_from_the_inventory({"f9", "f2"}, before) == [
+        "f2 is bound and the inventory does not name it"
+    ]
+    assert _keys_missing_from_the_inventory({"f9"}, before) == []
+    # And the reserved keys are never looked for: they are settled above the table, not in it.
+    assert _keys_missing_from_the_inventory({"escape", "f12"}, before) == []
+
+
 # --- The inspection boot's command line ------------------------------------------------------
 
 #: Everything published that could tell a reader how to reach the inspection boot. A wrong

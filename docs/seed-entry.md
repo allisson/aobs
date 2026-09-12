@@ -152,6 +152,18 @@ acknowledged, explicitly not defended — whereas a passphrase silently mistyped
 is a total loss, which #12 called the appliance's worst failure mode. The character count is always
 visible, because a doubled or dropped keystroke is the common error and counting is free.
 
+**The key is `F2`**, and it is named here because `docs/failure-states.md` owns only what is
+identical on every screen — a key one screen binds is that screen's document's to settle, and this
+one had been settled as a *behaviour* here without its key ever being written down. A function key
+for the same reason `F12` is one: the keymap is whatever the user picked on the first screen, so a
+letter is not in a known place and a function key is — and on this screen above all others, since
+every letter key is a letter that could have gone into the passphrase instead.
+
+**What is recorded here is the property, not a reconstructed motive**: `F1` and `F3` are bound on no
+screen, and `F2` is a keyboard's width from `F10 done` and `F12 power off`, so no slip onto or off
+it accepts the passphrase or ends the session. That is the same kind of inertness
+`docs/qr-emit-parameters.md` buys for `F9`, and it is the reason to leave `F2` where it is.
+
 Then the fingerprint, with #15's caveat surfaced rather than buried: **on a first-ever passphrase there
 is nothing to compare against.** The appliance says so and tells the user to record it, instead of
 showing a fingerprint that looks like a confirmation and is not.
