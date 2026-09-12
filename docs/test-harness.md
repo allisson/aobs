@@ -155,10 +155,30 @@ pytest tests/test_review.py
 
 `-rs` stays in CI so the same run prints why each permitted skip skipped.
 
+**The commands above are the whole procedure on any host, including an arm64 Mac.** They were not,
+until #19 ran them there: `build/Dockerfile.test` resolved `debian:trixie-slim` to the host's
+architecture while `build/fetch-inputs.sh` had fetched an amd64 closure, and the build died on
+`dpkg:arm64 Conflicts dpkg:amd64`. The `FROM` line now pins `--platform=linux/amd64`, which is the
+pin `fetch-inputs.sh` already applies to its own two `docker run` calls and to the wheels. Nothing
+here is a recommendation about which machine to use — an arm64 tier would be judging this code
+against a different libc and a different `libsecp256k1`, and the pin is what makes that
+unreachable rather than merely unlikely.
+
 **Measured, in the authoritative tier on CI's native x86_64:** 720 passed, 4 skipped, 2 deselected,
 0 failed, in 427 s, the run reporting `python 3.13.5, EC backend ctypes_secp256k1, authoritative
-tier yes`. The same image under qemu on an arm64 Mac gave the same 720/4/2 in 496 s; that is
-corroboration and is not what a claim cites.
+tier yes` — run [34166600257](https://github.com/allisson/aobs/actions/runs/34166600257) on
+[#3](https://github.com/allisson/aobs/pull/3).
+
+**That figure is dated, and it is written that way on purpose.** It was the count when #3 merged and
+it is not the count now; the suite has grown by 155 tests since, and a sentence that reads as *what
+the tier reports* goes quietly wrong every time somebody adds a test. What the number is evidence
+for is that this tier ran green on CI's own x86_64 on that commit — which is the only thing a
+measurement can ever be evidence for. **Each figure here names its run.**
+
+Corroboration on the current tree, under qemu on an arm64 Mac: 876 passed, 3 skipped, 2 deselected,
+0 failed, in 509.17 s, the run reporting the same `python 3.13.5, EC backend ctypes_secp256k1,
+authoritative tier yes`. That is corroboration and is **not** what a claim cites — the rule has not
+moved, and the next CI run on this branch is what replaces the paragraph above.
 
 ## What only a boot can check
 
