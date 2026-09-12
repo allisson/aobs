@@ -1,6 +1,6 @@
 """The appliance's half of every port.
 
-Four ports, each with exactly two adapters — this package is the other one. Nothing here is
+Five ports, each with exactly two adapters — this package is the other one. Nothing here is
 imported by `aobs/ui/`, which knows only the ports; `aobs/__main__.py` is the single module that
 names these classes, which is what keeps the whole application drivable with the fakes and free of
 any conditional asking what it is running on.
@@ -15,10 +15,12 @@ from .entropy import KernelEntropySource
 from .frames import V4L2FrameSource
 from .keymap import LoadkeysKeymap
 from .power import ForcedPowerOff
+from .usb import SysfsUsbBus
 
 __all__ = [
     "ForcedPowerOff",
     "KernelEntropySource",
     "LoadkeysKeymap",
+    "SysfsUsbBus",
     "V4L2FrameSource",
 ]

@@ -1,4 +1,4 @@
-"""The appliance's own halves of the four ports.
+"""The appliance's own halves of the five ports.
 
 Two kinds of test here, and the split is #48's testing decision rather than convenience.
 
@@ -30,7 +30,9 @@ import pytest
 from aobs.adapters.real import entropy as real_entropy
 from aobs.adapters.real import keymap as real_keymap
 from aobs.adapters.real import power as real_power
+from aobs.adapters.real import usb as real_usb
 from aobs.adapters.real import v4l2
+from aobs.ports.frame_source import CameraError, CameraReason
 from aobs.ports.keymap import DEFAULT_LAYOUT
 
 # --- Keymap: what a directory listing offers ----------------------------------------------------
@@ -457,4 +459,99 @@ def test_the_camera_error_is_an_oserror() -> None:
     """Both callers already read `OSError` — the probe as "no camera", the scan screen as "the
     camera is gone". This adapter is written to those two contracts rather than asking them to
     learn a third exception."""
-    assert issubclass(v4l2.CameraError, OSError)
+    assert issubclass(CameraError, OSError)
+    assert v4l2.CameraError is CameraError
+
+
+def test_a_camera_error_carries_the_condition_and_not_only_a_sentence() -> None:
+    """The screen reads the reason; the message is for a traceback this appliance never prints.
+
+    Matching on the message would make an operator-facing sentence depend on prose nobody would
+    think twice about rewording.
+    """
+    with pytest.raises(CameraError) as raised:
+        v4l2.to_greyscale(v4l2.fourcc("MJPG"), b"\xff" * 100, 3, 2, 5)
+    assert raised.value.reason is CameraReason.NO_USABLE_FORMAT
+
+
+def test_every_reason_is_distinct_and_named() -> None:
+    """Four conditions, four names. `docs/failure-states.md` gives each one its own sentence, and
+    two reasons sharing a value would silently merge two of those sentences."""
+    values = [reason.value for reason in CameraReason]
+    assert len(set(values)) == len(values) == 4
+
+
+# --- UsbBus: which readings are a late arrival --------------------------------------------------
+#
+# `build/init` flips `authorized_default=0` after the appliance's own devices enumerate, so a
+# device reading `0` is one that arrived after that line. These are pure functions of readings
+# already taken; `SysfsUsbBus` is the walk that takes them and is not covered here, the same way
+# the `ioctl` glue is not.
+
+
+def _reading(
+    authorized: str | None,
+    vendor_id: str | None = "04f2\n",
+    product_id: str | None = "b64f\n",
+    name: str | None = "Chicony HD WebCam\n",
+) -> dict[str, str | None]:
+    return {
+        real_usb.AUTHORIZED: authorized,
+        real_usb.VENDOR_ID: vendor_id,
+        real_usb.PRODUCT_ID: product_id,
+        real_usb.NAME: name,
+    }
+
+
+def test_a_bus_whose_devices_all_arrived_in_time_has_no_late_arrivals() -> None:
+    """The ordinary answer, and the one a machine with no webcam at all also gives — which is why
+    the home screen says nothing new when this is empty."""
+    assert real_usb.late_arrivals([_reading("1\n"), _reading("1\n")]) == ()
+
+
+def test_a_device_that_was_not_authorized_is_a_late_arrival_with_its_identifiers() -> None:
+    (arrival,) = real_usb.late_arrivals([_reading("1\n"), _reading("0\n")])
+    assert (arrival.vendor_id, arrival.product_id) == ("04f2", "b64f")
+    assert arrival.name == "Chicony HD WebCam"
+
+
+def test_a_device_with_no_product_string_is_reported_without_a_name() -> None:
+    """Plenty of devices ship without one. Inventing a placeholder would put a word on screen that
+    no sticker on the machine will match."""
+    (arrival,) = real_usb.late_arrivals([_reading("0\n", name=None)])
+    assert arrival.name is None
+    (blank,) = real_usb.late_arrivals([_reading("0\n", name="  \n")])
+    assert blank.name is None
+
+
+@pytest.mark.parametrize("authorized", [None, "", "  \n", "2\n", "yes\n"])
+def test_an_authorization_that_cannot_be_read_is_skipped_and_never_counted(
+    authorized: str | None,
+) -> None:
+    """A device we cannot classify is not evidence. Counting it would manufacture exactly the
+    inference `docs/failure-states.md` refuses to let the appliance make — and from less than
+    nothing, since the reading failed."""
+    assert real_usb.late_arrivals([_reading(authorized)]) == ()
+
+
+@pytest.mark.parametrize(("vendor_id", "product_id"), [(None, "b64f\n"), ("04f2\n", None)])
+def test_a_late_arrival_with_no_identifiers_is_not_reported(
+    vendor_id: str | None, product_id: str | None
+) -> None:
+    """The identifiers are the entire value of the line: *one USB device arrived late* with nothing
+    to look up tells an operator only that they cannot act on it."""
+    assert real_usb.late_arrivals([_reading("0\n", vendor_id, product_id)]) == ()
+
+
+def test_the_order_given_is_the_order_reported() -> None:
+    """The screen redraws on every return to the home screen, and a set of lines that reshuffles
+    between draws reads as the state changing when it has not."""
+    readings = [
+        _reading("0\n", "04f2\n", "b64f\n", "Chicony HD WebCam\n"),
+        _reading("1\n", "1d6b\n", "0002\n", "xHCI Host Controller\n"),
+        _reading("0\n", "8087\n", "0aaa\n", None),
+    ]
+    assert [arrival.product_id for arrival in real_usb.late_arrivals(readings)] == [
+        "b64f",
+        "0aaa",
+    ]

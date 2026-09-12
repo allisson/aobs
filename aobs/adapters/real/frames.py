@@ -11,8 +11,11 @@ covers — `docs/boot-checklist.md` items 12 and 13 are its verification procedu
 **What the two callers already expect of this, unchanged:**
 
 * `SignerApp._camera_present` pulls exactly one frame before any secret exists and treats *nothing
-  yielded* and `OSError` alike as "no camera". A machine with no webcam therefore reaches the home
-  screen with the outbound paths offered and the scan paths disabled.
+  yielded* and `OSError` alike as "no camera is usable this session". A machine with no webcam
+  therefore reaches the home screen with the outbound paths offered and the scan paths disabled.
+  It no longer treats all four as *no camera was found*: every `CameraError` below names its
+  `CameraReason`, and `docs/failure-states.md` holds the sentence each one earns. Three of the four
+  mean a node existed and the camera failed after it was opened, which is not absence.
 * `ScanScreen` turns an `OSError` mid-scan into the camera-lost screen, and its own `on_unmount`
   closes the iterator. **A leaked descriptor is a camera that works once per session**, so opening
   and releasing are both tied to the generator: the probe's `close()` releases the buffers and the
@@ -29,7 +32,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from . import v4l2
-from aobs.ports.frame_source import Frame
+from aobs.ports.frame_source import CameraError, CameraReason, Frame
 
 DEVICE_ROOT = Path("/dev")
 
@@ -72,13 +75,14 @@ class V4L2FrameSource:
 
         Raises `CameraError` — an `OSError` — when there is no usable camera, when the device
         offers no format the appliance can read, and when the device stops answering mid-stream.
-        Both callers already read `OSError`, and the distinction between the three is not one
-        either of them can act on differently: a camera that cannot be used is a session with no
-        camera.
+        Both callers still read `OSError` and neither acts differently on which: a camera that
+        cannot be used is a session with no scan paths, whichever way it failed. What the reason
+        buys is the sentence the user is shown, which is not the same question — three of these
+        four mean a camera was found, and saying it was not found is a lie the user cannot check.
         """
         path = self._find_device()
         if path is None:
-            raise v4l2.CameraError("no capture device")
+            raise CameraError(CameraReason.NO_CAPTURE_DEVICE, "no capture device")
 
         fd = os.open(path, os.O_RDWR)
         buffers: list[mmap.mmap] = []
@@ -140,7 +144,10 @@ class V4L2FrameSource:
         """Ask for a format the appliance can convert, and read back what was actually set."""
         chosen = v4l2.choose_format(self._offered_formats(fd))
         if chosen is None:
-            raise v4l2.CameraError("the camera offers no format the appliance can read")
+            raise CameraError(
+                CameraReason.NO_USABLE_FORMAT,
+                "the camera offers no format the appliance can read",
+            )
         request = v4l2.FORMAT.pack(
             v4l2.BUF_TYPE_VIDEO_CAPTURE,
             v4l2.PREFERRED_WIDTH,
@@ -161,7 +168,10 @@ class V4L2FrameSource:
         ) = v4l2.FORMAT.unpack(raw)
         if pixelformat not in v4l2.PREFERRED_FORMATS:
             # `S_FMT` is allowed to answer with something other than what was asked for.
-            raise v4l2.CameraError("the camera offers no format the appliance can read")
+            raise CameraError(
+                CameraReason.NO_USABLE_FORMAT,
+                "the camera offers no format the appliance can read",
+            )
         return pixelformat, width, height, bytes_per_line
 
     def _offered_formats(self, fd: int) -> list[int]:
@@ -194,7 +204,9 @@ class V4L2FrameSource:
         raw = fcntl.ioctl(fd, v4l2.VIDIOC_REQBUFS, request)
         count = v4l2.REQUESTBUFFERS.unpack(raw)[0]
         if count == 0:
-            raise v4l2.CameraError("the camera granted no capture buffers")
+            raise CameraError(
+                CameraReason.NO_BUFFERS, "the camera granted no capture buffers"
+            )
         buffers = []
         for index in range(count):
             queried = v4l2.BUFFER.unpack(
@@ -222,7 +234,9 @@ class V4L2FrameSource:
 
     def _dequeue(self, fd: int, timeout: float) -> tuple[int, int]:
         if not select.select([fd], [], [], timeout)[0]:
-            raise v4l2.CameraError("the camera stopped producing frames")
+            raise CameraError(
+                CameraReason.NO_FRAMES, "the camera stopped producing frames"
+            )
         dequeued = v4l2.BUFFER.unpack(fcntl.ioctl(fd, v4l2.VIDIOC_DQBUF, _buffer(0)))
         return dequeued[0], dequeued[2]
 

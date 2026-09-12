@@ -9,6 +9,11 @@ needs a device.
 `aobs/adapters/real/frames.py` holds the `ioctl` glue that calls into here. Nothing in this module
 opens anything.
 
+`CameraError` used to be declared here and now lives on the `FrameSource` port with the
+`CameraReason` names, because #19 made it vocabulary the screens and the harness both need and
+neither may import `aobs.adapters.real`. It is still the same `OSError`, raised from the same
+places.
+
 **The port's contract is unchanged and the conversion is why.** Whatever the device offers becomes
 greyscale before it crosses the port, so neither the viewfinder nor `zxing-cpp` ever learns what a
 pixel format is.
@@ -18,6 +23,8 @@ from __future__ import annotations
 
 import struct
 from collections.abc import Sequence
+
+from aobs.ports.frame_source import CameraError, CameraReason
 
 # --- ioctl request numbers -------------------------------------------------------------------
 #
@@ -120,15 +127,6 @@ PREFERRED_HEIGHT = 480
 TARGET_FRAME_RATE = 5
 
 
-class CameraError(OSError):
-    """The camera cannot produce frames the appliance can use.
-
-    An `OSError` on purpose: `SignerApp._camera_present` and `ScanScreen.scan_once` both already
-    read that as "no camera" and "the camera is gone", and this adapter is written to those two
-    contracts rather than asking them to learn a third exception.
-    """
-
-
 def choose_format(offered: Sequence[int]) -> int | None:
     """The format to ask for, from what the device enumerated. `None` if none is usable."""
     for candidate in PREFERRED_FORMATS:
@@ -184,11 +182,14 @@ def to_greyscale(
     elif pixelformat == fourcc("UYVY"):
         step, start = 2, 1
     else:
-        raise CameraError("the camera produced a format the appliance cannot read")
+        raise CameraError(
+            CameraReason.NO_USABLE_FORMAT,
+            "the camera produced a format the appliance cannot read",
+        )
 
     needed = (height - 1) * bytes_per_line + start + (width - 1) * step + 1
     if bytes_per_line < width * step or len(data) < needed:
-        raise CameraError("the camera produced a short frame")
+        raise CameraError(CameraReason.NO_FRAMES, "the camera produced a short frame")
 
     out = bytearray(width * height)
     for row in range(height):
