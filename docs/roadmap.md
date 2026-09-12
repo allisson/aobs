@@ -546,6 +546,69 @@ the same shape — read what the repository already says, and check the artefact
       first post-v0.1 milestone. It now has a second reason: it is what would close the `efifb` half
       of the row above.
 
+The five rows below come from walking the checklist on 2026-09-11 —
+`docs/boot-runs/2026-09-11-cb514-1h.md`, Findings. None of them is a `fail` and none blocks the
+gate; all five are things the run learned that the repository did not already state, and two of
+them are claims the repository makes that this run did not support.
+
+- [ ] **Post-gate: diagnose the intermittent camera, then decide whether step 4 may sleep a
+      constant.** One session boot reported `No camera was found`; a power-cycle off the same
+      medium found it normally. Same image, same PID 1, same machine — which rules out anything
+      static and leaves timing. The only candidate anybody has is `build/init`'s fixed `sleep 2`
+      before `authorized_default=0`: a camera that enumerates after that line is deauthorised and
+      never binds. **Not diagnosed, and the candidate must not be written up as the cause until
+      somebody catches it in the act.** What makes this worth a row rather than a footnote is the
+      failure mode: the appliance says a camera was not found, which is exactly what it would say
+      on a machine that has none, so an operator loses the scan paths for a session and never
+      learns the camera was there. If the fix is to wait for expected devices instead of sleeping,
+      that is a change to a load-bearing ordering and belongs in `docs/boot-pipeline.md` first.
+
+- [ ] **Post-gate: find out why the BIOS console is `simple` and not `vesafb`, then fix whichever
+      is wrong — the ten statements or the image.** `I-7` recorded `/proc/fb` as `0 simple` and
+      `fb0/name` as `simple`, which is `simplefb`'s identity; `vesafb` reports `VESA VGA`. The
+      console size was 128×48, exactly what `vga=791` predicts, so the mode is right and no screen
+      is affected. But the pinned kernel's own config has `# CONFIG_SYSFB_SIMPLEFB is not set`, and
+      `docs/boot-pipeline.md:466` cites that unset symbol as the reason the BIOS path lands on
+      `vesafb`. With it unset, `simplefb` should never bind. It bound. Until that is explained,
+      these are unsupported rather than wrong and none has been edited:
+      `docs/console-appearance.md:29` (which marks the chain **observed** on this machine, and this
+      run is that observation), `docs/boot-pipeline.md:457`, `:466`–`:467`, `:480`,
+      `build/modules.allow:25`–`26`, `docs/roadmap.md:353`, `:529`, `:531`, `docs/overview.md:153`,
+      `README.md:493`. `build/verify.py`'s `FB_VESA` assertion is untouched by this: `FB_VESA=y` is
+      still true of the image.
+
+- [ ] **Post-gate: decide what the descriptor screen's prefix label is for, then make it say
+      something true.** `S-4` exported a testnet4 wallet under the footer `BIP84 · bc1q`, while
+      every address that wallet produces begins `tb1q`. The label is a constant keyed on script
+      type with no network in scope — `aobs/ui/addresstext.py:152`. It is not a signing defect and
+      the descriptor bytes are not in question; it is a wrong statement on screen, on an appliance
+      whose claim is that the user can check what it tells them. The two fixes are not equivalent:
+      deriving the prefix from the session's network keeps the mnemonic, dropping the prefix admits
+      the addresses already carry it. `aobs/ui/screens/address_list.py:10` and
+      `docs/address-verification.md:54` both rest on *the prefix already says which*, so this is an
+      `docs/address-verification.md` decision before it is a code change.
+
+- [ ] **Post-gate: correct `I-9`'s shell fallback in `docs/boot-checklist.md`, and keep the
+      warning.** The row offers `printf 'U+2588 [\0342\0226\0210] …'` and it tests no glyph: dash's
+      `printf` consumed `\0` plus two octal digits and printed the leftover digit, so the screen
+      showed `260` and `261`. `\0ddd` with three digits is the form for a `%b` argument, not for
+      the format string; in the format string it is `\ddd`. The row already carries a "do not fix
+      this back" note written after `\xHH` failed the same way — that note is right about `\xHH`
+      and wrong about what replaces it, so the correction keeps the warning and changes the form.
+      Reverting to `\xHH` would be the third wrong answer. Also worth fixing in the same pass: the
+      `python3` form prints the literal `█` and `░`, which cannot be typed on the console under
+      test; `█` / `░` is what actually ran.
+
+- [ ] **Post-gate: make the checklist capture the image digest when the medium is written.** The
+      run record has to name the image that booted, and this one could only name it by the
+      operator's recollection: two builds of `460b475` existed, `51c7d664…04aab` in the M3 handoff
+      and `3aa115ad…0a2c1` in `out/`, and nothing recorded which went on the stick. That two builds
+      of one commit differ is expected — the reproducibility contract is M4 and claim (ix) says so
+      — and it is not what is missing. What is missing is procedural: the checklist asks the record
+      for a digest but never tells the operator to take it at the only moment it can come from the
+      thing that actually boots. A digest recovered afterwards from a build directory is a guess
+      about history.
+
 **Exit**: one PSBT signed on real hardware and broadcast, and a run record with every row answered.
 
 Everything below this line waits.
