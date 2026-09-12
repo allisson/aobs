@@ -100,6 +100,18 @@ def script_type_from_address(address: str) -> ScriptType | None:
     return None
 
 
+def address_prefix(network: Network, script_type: ScriptType) -> str:
+    """What every address of this kind begins with: `bc1q`, `tb1p`, `bcrt1q`.
+
+    The exact inverse of `script_type_from_address` and of `networks_for_address`, and derived
+    from the same two facts they read — the HRP and the witness version's bech32 character. A
+    screen that states this prefix is stating something about the addresses the wallet produces,
+    so it is a fact about the network and the script type together, never about either alone
+    (`docs/address-verification.md`).
+    """
+    return f"{network.hrp}1{BECH32_CHARSET[script_type.witness_version]}"
+
+
 def networks_for_address(address: str) -> set[Network]:
     """Which networks an address's HRP could belong to; empty if none of ours."""
     body = address.strip().lower()

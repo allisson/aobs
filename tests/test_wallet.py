@@ -7,9 +7,11 @@ public (`docs/test-harness.md`).
 import pytest
 
 from aobs.core.wallet import (
+    RECEIVE_CHAIN,
     Network,
     ScriptType,
     Wallet,
+    address_prefix,
     descriptor_checksum,
     networks_for_address,
     script_type_from_address,
@@ -150,3 +152,30 @@ def test_hrp_does_not_identify_a_single_network() -> None:
         Network.REGTEST
     }
     assert networks_for_address("ltc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4") == set()
+
+
+@pytest.mark.parametrize("network", list(Network))
+@pytest.mark.parametrize("script_type", list(ScriptType))
+def test_the_address_prefix_is_a_prefix_of_a_real_address(
+    network: Network, script_type: ScriptType
+) -> None:
+    """Checked against a derived address, never against a second constant.
+
+    A screen states this prefix (`docs/address-verification.md`), and the constant it replaced
+    said `bc1q` on every network — including a testnet4 wallet whose every address begins `tb1q`
+    (#20). Deriving the address here is what makes a divergence a failure rather than a silence.
+    """
+    wallet = Wallet.from_mnemonic(VECTOR_MNEMONIC, network=network)
+    address = wallet.address(script_type, RECEIVE_CHAIN, 0)
+    assert address.startswith(address_prefix(network, script_type))
+
+
+def test_the_address_prefix_distinguishes_every_network_and_script_type() -> None:
+    """Sweeping the parametrised test above proves each prefix fits; this proves none is shared
+    between two things a user is meant to tell apart — except `tb`, which is shared on purpose."""
+    assert address_prefix(Network.MAINNET, ScriptType.P2WPKH) == "bc1q"
+    assert address_prefix(Network.MAINNET, ScriptType.P2TR) == "bc1p"
+    assert address_prefix(Network.REGTEST, ScriptType.P2WPKH) == "bcrt1q"
+    # testnet4 and signet share `tb`, exactly as `networks_for_address` reads it back.
+    assert address_prefix(Network.TESTNET4, ScriptType.P2WPKH) == "tb1q"
+    assert address_prefix(Network.SIGNET, ScriptType.P2WPKH) == "tb1q"

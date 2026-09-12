@@ -10,6 +10,11 @@ is `QR_ECC_STATIC` (H) and there is no animation, no fountain and no step-down l
 Green's taproot gap costs the user taproot and nothing else — but it also means only one of the
 two can be on screen at a time, and the user needs a way to reach the other.
 
+**The label under the code names the script type and the prefix its addresses carry**, and the
+prefix is derived from the session's network rather than fixed — `docs/address-verification.md`
+settles what that label is for. It used to read `bc1q` on every network, including the testnet4
+wallet of `docs/boot-runs/2026-09-11-cb514-1h.md` (#20).
+
 Nothing here can spend: the payload carries the account *public* key, its origin path and the
 master fingerprint.
 """
@@ -62,7 +67,13 @@ class DescriptorScreen(Screen):
                 yield Static(
                     qrcodes.render(self.payload, ecc=QR_ECC_STATIC).text, id="descriptor-qr"
                 )
-            yield Static(addresstext.SCRIPT_TYPE_NAMES[self.script_type], id="descriptor-which")
+            yield Static(
+                addresstext.script_type_name(
+                    self.app.wallet.network,  # type: ignore[attr-defined]
+                    self.script_type,
+                ),
+                id="descriptor-which",
+            )
             yield Static(addresstext.DESCRIPTOR_INSTRUCTION, id="descriptor-instruction")
             yield Static(addresstext.DESCRIPTOR_NEXT, id="descriptor-next")
             yield Static(addresstext.DESCRIPTOR_KEYS, id="descriptor-keys", classes="keys")

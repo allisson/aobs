@@ -371,6 +371,29 @@ async def test_the_list_toggles_script_type() -> None:
         assert "86h" in blob(app.screen)
 
 
+@pytest.mark.parametrize(
+    ("network", "prefix"),
+    [
+        (Network.MAINNET, "bc1q"),
+        (Network.TESTNET4, "tb1q"),
+        (Network.SIGNET, "tb1q"),
+        (Network.REGTEST, "bcrt1q"),
+    ],
+)
+async def test_the_list_header_names_the_prefix_the_rows_below_it_carry(
+    network: Network, prefix: str
+) -> None:
+    """The one screen where the label sits directly above the evidence: a header saying `bc1q`
+    over twenty `tb1q` rows is the defect #20 found, one screen over from where it was found."""
+    app = build(network)
+    async with app.run_test(size=CONSOLE) as pilot:
+        screen = await open_list(app, pilot)
+        header = str(screen.query_one("#address-header", Static).content)
+        assert header.endswith(f"BIP84 · {prefix}")
+        for line in rows(screen):
+            assert line.split(maxsplit=1)[1].replace(" ", "").startswith(prefix)
+
+
 async def test_every_listed_address_is_full_and_grouped_in_fours() -> None:
     """The same rule as the review screen, for the opposite reason: here the human genuinely is
     comparing by eye against a watch-only wallet."""

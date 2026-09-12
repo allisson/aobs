@@ -638,7 +638,7 @@ them are claims the repository makes that this run did not support.
       floor against the rendered code so a larger QR version moves the floor rather than silently
       outgrowing it.
 
-- [ ] **Post-gate: decide what the descriptor screen's prefix label is for, then make it say
+- [x] **Post-gate: decide what the descriptor screen's prefix label is for, then make it say
       something true.** `S-4` exported a testnet4 wallet under the footer `BIP84 · bc1q`, while
       every address that wallet produces begins `tb1q`. The label is a constant keyed on script
       type with no network in scope — `aobs/ui/addresstext.py:152`. It is not a signing defect and
@@ -648,6 +648,17 @@ them are claims the repository makes that this run did not support.
       the addresses already carry it. `aobs/ui/screens/address_list.py:10` and
       `docs/address-verification.md:54` both rest on *the prefix already says which*, so this is an
       `docs/address-verification.md` decision before it is a code change.
+
+      **Decided: the prefix is a statement about the addresses, so it is derived, not dropped.**
+      `docs/address-verification.md` now carries it, under "What the script-type label states" — and
+      it also records that "the prefix already says which" is about a *scanned* address, not an
+      argument that this label is redundant. The descriptor screen says nothing else about the
+      network at all, which is what made a wrong prefix cost something. `address_prefix()` in
+      `aobs/core/wallet.py` is the exact inverse of `script_type_from_address` and reads the same
+      two facts; `SCRIPT_TYPE_NAMES` is gone and both halves of the label are derived. The suite
+      derives address 0 for every network and script type and asserts the label's prefix is a
+      prefix of it, so a divergence fails rather than ships — which is the check the constant never
+      had, and why nothing caught it before a hardware boot did.
 
 - [ ] **Post-gate: correct `I-9`'s shell fallback in `docs/boot-checklist.md`, and keep the
       warning.** The row offers `printf 'U+2588 [\0342\0226\0210] …'` and it tests no glyph: dash's

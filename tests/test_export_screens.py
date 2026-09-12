@@ -30,7 +30,7 @@ from aobs.core.constants import (
     WALLET_QR_TOTAL_BYTES,
 )
 from aobs.core.descriptor import output_descriptor_ur
-from aobs.core.wallet import Network, ScriptType, Wallet
+from aobs.core.wallet import RECEIVE_CHAIN, Network, ScriptType, Wallet
 from aobs.core.wallet_qr import decode
 from aobs.ui import addresstext, qrcodes
 from aobs.ui.app import SignerApp
@@ -113,6 +113,29 @@ async def test_the_descriptor_screen_reaches_both_script_types() -> None:
         await pilot.pause()
         assert app.screen.payload == output_descriptor_ur(app.wallet, ScriptType.P2TR)
         assert "BIP86" in blob(app.screen)
+
+
+@pytest.mark.parametrize(
+    ("network", "prefix"),
+    [
+        (Network.MAINNET, "bc1q"),
+        (Network.TESTNET4, "tb1q"),
+        (Network.SIGNET, "tb1q"),
+        (Network.REGTEST, "bcrt1q"),
+    ],
+)
+async def test_the_descriptor_label_names_this_sessions_prefix(
+    network: Network, prefix: str
+) -> None:
+    """The screen says nothing else about the network, so the prefix is the whole of what it
+    states — and it said `bc1q` on a testnet4 wallet until #20 (`docs/address-verification.md`)."""
+    app = build(network=network)
+    async with app.run_test(size=CONSOLE) as pilot:
+        app.open_descriptor()
+        await pilot.pause()
+        label = str(app.screen.query_one("#descriptor-which", Static).content)
+        assert label == f"BIP84 · {prefix}"
+        assert app.wallet.address(ScriptType.P2WPKH, RECEIVE_CHAIN, 0).startswith(prefix)
 
 
 # --- The encrypted wallet QR --------------------------------------------------------------------
