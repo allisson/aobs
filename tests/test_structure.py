@@ -705,3 +705,50 @@ async def test_the_readme_block_rule_bites() -> None:
     mutated = rendered.replace("WHAT YOU CAN DO", "WHAT YOU CAN DQ", 1)
     assert mutated != rendered, "the mutation did not change anything"
     assert _readme_block("home") != mutated
+
+
+def _kernel_options(text: str, marker: str) -> list[str]:
+    """The kernel parameters on the one line of a boot config that carries them."""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(marker):
+            return stripped[len(marker) :].split()
+    raise AssertionError(f"no {marker!r} line found")
+
+
+def test_the_two_firmware_paths_boot_the_same_cmdline() -> None:
+    """BIOS and UEFI differ in bootloader, never in what the kernel is told.
+
+    They used to differ by `vga=791`, on the argument that a BIOS boot needs a VESA mode set or it
+    lands in 80x25 text. `docs/adr/0003-the-console-is-enforced-not-requested.md` records why that
+    came out: on the one machine this project has booted, `vga=791` never set a mode — it printed
+    `Undefined video mode number: 317` and stalled 30 seconds on every boot — and the console came
+    from coreboot's own framebuffer at the resolution the parameter happened to ask for.
+
+    A difference between the paths is worth an assertion in either direction. While one existed it
+    meant `I-7` measured a console through a stall the appliance also paid for; now that none does,
+    a reintroduced `vga=` would put it back with nothing to say so.
+    """
+    isolinux = (ROOT / "build" / "isolinux.cfg").read_text(encoding="utf-8")
+    grub = (ROOT / "build" / "grub.cfg").read_text(encoding="utf-8")
+
+    session = _kernel_options(isolinux, "APPEND ")
+    uefi = _kernel_options(grub, "linux /boot/vmlinuz ")
+    assert session == uefi, (
+        f"the BIOS cmdline {session} and the UEFI cmdline {uefi} differ; "
+        "an appliance that boots differently per firmware path is two appliances"
+    )
+
+    appended = [line for line in isolinux.splitlines() if line.strip().startswith("APPEND ")]
+    assert len(appended) == 2, "one APPEND per label, and there are two labels"
+    inspect = _kernel_options(appended[1] + "\n", "APPEND ")
+    assert inspect == session + ["rdinit=/bin/sh"], (
+        f"the inspection cmdline {inspect} differs from the session cmdline by more than "
+        "`rdinit=/bin/sh`; an inspection boot must inspect the image that signs"
+    )
+
+    assert not [opt for opt in session if opt.startswith("vga=")], (
+        "a `vga=` came back. There is no portable value: the kernel's resolution form matches on "
+        "pixel counts that overflow the u16 it compares (`video-mode.c:88`), and a mode number is "
+        "one firmware's. The console floor is enforced in `aobs/ui/geometry.py` instead"
+    )

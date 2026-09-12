@@ -20,10 +20,13 @@
 #
 #   * `CONFIG_DRM_SIMPLEDRM is not set`. The module does not exist in Debian's kernel, so a quarter
 #     of the old allowlist named a file that was never going to be found.
-#   * `CONFIG_FB_EFI=y` and `CONFIG_FB_VESA=y`. **Both firmware framebuffers are built in**, so the
-#     console mechanism the document actually names — fbcon over a firmware framebuffer — needs no
-#     module on either firmware path. UEFI gets `efifb` at the GOP's resolution; BIOS gets `vesafb`
-#     at the `vga=791` mode.
+#   * `CONFIG_FB_EFI=y`, `CONFIG_FB_VESA=y` and `CONFIG_FB_SIMPLE=y`. **All three firmware
+#     framebuffers are built in**, so the console mechanism the document actually names — fbcon
+#     over a firmware framebuffer — needs no module on any firmware path. Which of the three binds
+#     is the firmware's decision and not the boot path's: UEFI gets `efifb` at the GOP's
+#     resolution, a coreboot machine gets `simplefb` from the coreboot table, and a BIOS machine
+#     with a VESA mode set gets `vesafb`. The target machine is the coreboot case, which is why
+#     `FB_SIMPLE` is asserted in `build/verify.py` alongside the other two.
 #   * The three DRM drivers need firmware blobs this image does not ship. Loading one would take
 #     the framebuffer away from a driver that is working and hand it to one that may not come up —
 #     trading a console that is guaranteed for a console that is faster, on an appliance that draws

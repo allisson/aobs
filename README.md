@@ -494,6 +494,14 @@ machine. In particular the **UEFI boot path has never drawn a screen** — `buil
 it is an argument and not an observation, so if you boot this on a UEFI machine you are the first
 person testing it.
 
+**And the one machine is less representative than it looks.** It is a coreboot machine, so its
+console came from `simplefb` binding a framebuffer the coreboot table described — not from
+`vesafb`, which is what a generic BIOS machine would use and what this repository claimed had been
+observed until the M3 run said otherwise. The appliance does not ask the firmware for a console
+mode at all: it refuses to start below 100 × 43 and says so on screen. If your firmware brings up
+a smaller framebuffer, that refusal is what you will see, and it is the intended behaviour rather
+than a failure to configure.
+
 Two claims are **not** checkable that way, and it is worth being exact about why — in that boot
 *you* replaced PID 1, so anything PID 1 does never happened:
 

@@ -252,7 +252,8 @@ Kernel cmdline, fixed in the bootloader config:
 
 - `random.trust_cpu=off random.trust_bootloader=off` — both default on, and leaving them there would
   rest the entropy floor claim on RDRAND. `docs/entropy-mixing.md` states what that floor promises.
-- `vga=791` on the BIOS path — see *Console* below.
+- **No `vga=`, on either path.** It was on the BIOS line until M3 and never once set a mode on the
+  machine this project booted; see *The console floor* below.
 - `panic=0` — hang rather than reboot. There is nothing to reboot into, and a reboot loop flashes
   the failure past the user.
 
@@ -454,9 +455,30 @@ and it costs nothing — a fresh boot holds no secrets, which is the point of th
 
 ## Console
 
-**`fbcon` over firmware framebuffers** — `efifb` on UEFI, `vesafb` on BIOS. **Both are built into
-Debian's kernel** (`CONFIG_FB_EFI=y`, `CONFIG_FB_VESA=y`), so the console needs no module at all on
-either firmware path.
+**`fbcon` over a firmware framebuffer, and which driver provides it is the firmware's decision, not
+the boot path's.** Three are built into Debian's kernel — `CONFIG_FB_EFI=y`, `CONFIG_FB_VESA=y`,
+`CONFIG_FB_SIMPLE=y` — so the console needs no module on any of them.
+
+**First registrar takes the aperture.** The firmware decides which framebuffer *devices* exist, and
+whichever device probes first acquires the memory: `devm_aperture_acquire` refuses an overlapping
+range with `-EBUSY` (`drivers/video/aperture.c:175`), so a second driver simply never comes up.
+There is no fixed mapping from firmware path to driver:
+
+- **UEFI** — `sysfb` registers `efi-framebuffer` from the GOP's mode, and `efifb` binds it.
+  Unobserved; this project has never booted a UEFI machine.
+- **coreboot** — `framebuffer-coreboot` reads the framebuffer entry out of the coreboot table and
+  registers a `simple-framebuffer` device (`drivers/firmware/google/framebuffer-coreboot.c:64`),
+  which `simplefb` binds. This is independent of `CONFIG_SYSFB_SIMPLEFB`, which governs the `sysfb`
+  path only. **This is what the one machine this project has booted does**, at `1.765199`.
+- **generic BIOS with a VESA mode set** — `sysfb` registers `vesa-framebuffer` and `vesafb` binds
+  it. Unobserved.
+- **BIOS with no linear framebuffer** — `sysfb` registers `vga-framebuffer`, nothing in this image
+  binds it, and the console falls back to `vgacon` at 80×25. The appliance refuses to start; see
+  *The console floor* below.
+
+**"BIOS means `vesafb`" was this document's claim until M3 and it is wrong.** The target machine is
+a BIOS boot and it runs `simplefb`. See
+`docs/adr/0003-the-console-is-enforced-not-requested.md`.
 
 **There is no graphics driver in the allowlist, and this document used to say there was.** It named
 `i915`, `amdgpu`, `nouveau` and `simpledrm`. Three facts, all read off the pinned kernel's own
@@ -464,9 +486,10 @@ config, closed that:
 
 - `CONFIG_DRM_SIMPLEDRM is not set`. **The module does not exist in Debian's kernel**, so a quarter
   of the old allowlist named a file that was never going to be found. `CONFIG_SYSFB_SIMPLEFB` is
-  unset too; what Debian actually provides on UEFI is `efifb`, and it is `y`.
-- The two firmware framebuffers above are built in, so the mechanism this section names is already
-  satisfied without loading anything.
+  unset too, which stops `sysfb` from registering a `simple-framebuffer` — it does **not** stop
+  `simplefb` itself, which is `CONFIG_FB_SIMPLE=y` and binds whatever registers such a device.
+- The three firmware framebuffers above are built in, so the mechanism this section names is
+  already satisfied without loading anything.
 - The three DRM drivers need firmware blobs this image does not ship. Loading one takes the
   framebuffer away from a driver that is working and hands it to one that may not come up — trading
   a console that is guaranteed for a console that is faster, on an appliance that draws QR codes
@@ -475,10 +498,28 @@ config, closed that:
 They also cost about 70 MiB of the 98 MiB module tree, which is the least interesting of the three
 reasons and the only one that would have been reversible.
 
-**Legacy BIOS needs `vga=791`, and this is not cosmetic.** `vgacon` gives 80×25 text, and the QR
-display is fixed at **85 columns × 43 rows** — so a BIOS boot in text mode could not display a QR
-code at all. With `vga=791` (1024×768) `vesafb` provides a graphical framebuffer and `fbcon` gives
-128×48. **1024×768 is therefore the resolution floor on both firmware paths.**
+#### The console floor
+
+**The appliance enforces its console size; it does not request it.** The QR display is fixed at
+**85 columns × 43 rows**, and the QR channel is the only path out, so a console that cannot draw it
+is a console the appliance must refuse rather than start on. `aobs/ui/geometry.py` sets the floor at
+**100 × 43** and `aobs/ui/app.py` pushes `ConsoleTooSmallScreen` below it, before the keymap picker
+and before anything else in the session. 1024×768 at the kernel's 8×16 font is 128×48, which clears
+it.
+
+**`vga=791` used to be named here as the mechanism, and it was never one.** The argument was that
+`vgacon`'s 80×25 cannot draw the QR display, so a BIOS boot needs a VESA mode set. The premise is
+right and the conclusion was not: on the only machine this project has booted, `vga=791` printed
+`Undefined video mode number: 317` and stalled 30 seconds on every boot, and the 1024×768 console
+came from coreboot's own framebuffer. A `vga=` value is one firmware's mode number — that machine's
+SeaVGABIOS offers `0x141`–`0x144`, an OEM range that includes neither `0x117` (`vga=791`) nor the
+standard `0x118` — and the kernel's portable `0xRRCC` form reaches text modes only, because
+`video-mode.c:88` matches on pixel counts that overflow the `u16` it compares
+(`(768 << 8) + 1024`). There is no parameter that portably guarantees a framebuffer.
+
+So `build/isolinux.cfg` and `build/grub.cfg` now carry **identical** cmdlines with no `vga=`, and
+the guarantee moved to the one place that can make it: a check inside the appliance that says on
+screen what it needs and what it got. `docs/adr/0003-the-console-is-enforced-not-requested.md`.
 
 #### The release identity footer
 

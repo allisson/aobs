@@ -91,8 +91,9 @@ real `zxing-cpp` against real pixels — the fake is the *source*, never the dec
 decoder would test the harness's idea of a QR code rather than a QR code.
 
 **The display** is asserted through Textual's `run_test()`, against the geometry the appliance
-actually has: 85 columns × 43 rows, the floor `docs/boot-pipeline.md` fixes with `vga=791` on the
-BIOS path.
+actually has: 85 columns × 43 rows, which is the QR display and the floor `aobs/ui/geometry.py`
+enforces. Nothing in the boot path fixes a console size — see
+`docs/adr/0003-the-console-is-enforced-not-requested.md` — so the floor is the appliance's own.
 
 **Fixtures** live in `fixtures/` and are produced by the one script that generates them all,
 `fixtures/generate.py`, so a fixture is never a file somebody once made and nobody can remake.

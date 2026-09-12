@@ -65,7 +65,9 @@ from conftest import CORPUS, VECTOR_MNEMONIC, fixed_bytes
 
 ROOT = Path(__file__).parent.parent
 
-#: Comfortably above the floor, and the BIOS console `docs/boot-pipeline.md` fixes with `vga=791`.
+#: Comfortably above the floor, and the console the appliance was measured on: a 1024x768
+#: firmware framebuffer at the kernel's 8x16 font. No boot parameter fixes it; see
+#: `docs/adr/0003-the-console-is-enforced-not-requested.md`.
 CONSOLE = (128, 48)
 
 

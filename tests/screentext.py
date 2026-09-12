@@ -39,10 +39,14 @@ from aobs.ui.screens.home import HomeScreen
 from aobs.ui.screens.review import ReviewScreen
 from aobs.ui.screens.scan import ScanScreen
 
-#: The BIOS console the appliance actually boots into — `docs/boot-pipeline.md` fixes it with
-#: `vga=791` — and the size every screen suite here already drives. Not the floor `MIN_COLUMNS` ×
-#: `MIN_ROWS`: at 30 rows the emit screen's QR is clipped (`aobs/ui/geometry.py` puts a QR at
-#: 85×43), and a block showing a cut-off QR with no key line would picture a screen nobody sees.
+#: The console the appliance was measured on — 128×48, which is what a 1024×768 firmware
+#: framebuffer gives fbcon — and the size every screen suite here already drives. It is a real
+#: geometry rather than the floor, so the blocks picture a roomy screen and not a minimal one.
+#:
+#: This comment used to say `docs/boot-pipeline.md` fixes the size with `vga=791`, and to note that
+#: the floor was avoided because at `MIN_ROWS` the emit screen's QR is clipped. Both are gone:
+#: `vga=791` never set a mode on the machine this was measured on, and a floor that clips the QR
+#: was a defect rather than a reason to drive a different size — `MIN_ROWS` is now 43.
 CONSOLE = (128, 48)
 
 

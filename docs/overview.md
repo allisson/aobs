@@ -150,9 +150,10 @@ re-derives — the floor and the image cannot drift apart.
 by hand. The modules tree is then pruned to an explicit allowlist and everything else is deleted,
 including all of `kernel/net` and `drivers/net`. **Measured: 20 modules ship and 4209 are deleted.**
 The allowlist is the USB host controllers, HID and UVC, plus dependencies — and **no graphics
-driver at all**: `simpledrm` does not exist in Debian's kernel, `efifb` and `vesafb` are both built
-in, and the three DRM drivers need firmware this image does not ship. `build/modules.allow` and
-`docs/boot-pipeline.md` carry the argument; M3 is where it meets a screen. A `modprobe` blacklist
+driver at all**: `simpledrm` does not exist in Debian's kernel, `efifb`, `vesafb` and `simplefb`
+are all three built in, and the DRM drivers need firmware this image does not ship.
+`build/modules.allow` and `docs/boot-pipeline.md` carry the argument; M3 is where it met a screen,
+and the driver that drew it was `simplefb` from the coreboot table. A `modprobe` blacklist
 exists as a cheap second line and is **never** cited as the claim; the claim is that the module is
 not in the image.
 
@@ -196,6 +197,7 @@ cannot be.
 |---|---|
 | `docs/adr/0001-debian-base-and-stock-kernel.md` | The base OS and the kernel, and what the switch cost |
 | `docs/adr/0002-python-dependencies-from-pinned-wheels.md` | Where the Python layer comes from, and where a prebuilt blob may live |
+| `docs/adr/0003-the-console-is-enforced-not-requested.md` | Why the image asks the firmware for no video mode, and enforces the console size itself |
 | `docs/boot-pipeline.md` | The build's stages, PID 1, the module allowlist, the RAM floor |
 | `docs/threat-model.md` | Adversary tiers, and every claim above at its stated strength |
 | `docs/reproducible-build.md` — **not yet written**, due in M4 | The reproducibility contract and the divergence sources it fixes |
