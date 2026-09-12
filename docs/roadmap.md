@@ -702,16 +702,23 @@ them are claims the repository makes that this run did not support.
       with. No GitHub issue: unlike #20 and #31 there was no open decision to close first, only a
       document that did not match the code.
 
-- [ ] **Post-gate: correct `I-9`'s shell fallback in `docs/boot-checklist.md`, and keep the
-      warning.** The row offers `printf 'U+2588 [\0342\0226\0210] …'` and it tests no glyph: dash's
-      `printf` consumed `\0` plus two octal digits and printed the leftover digit, so the screen
-      showed `260` and `261`. `\0ddd` with three digits is the form for a `%b` argument, not for
-      the format string; in the format string it is `\ddd`. The row already carries a "do not fix
-      this back" note written after `\xHH` failed the same way — that note is right about `\xHH`
-      and wrong about what replaces it, so the correction keeps the warning and changes the form.
-      Reverting to `\xHH` would be the third wrong answer. Also worth fixing in the same pass: the
-      `python3` form prints the literal `█` and `░`, which cannot be typed on the console under
-      test; `█` / `░` is what actually ran.
+- [ ] **Post-gate: observe `I-9`'s corrected shell fallback on a panel.** The row offered
+      `printf 'U+2588 [\0342\0226\0210] …'` and it tested no glyph: dash's `printf` consumed
+      `\0` plus two octal digits and printed the leftover digit, so the screen showed `260` and
+      `261`. `\0ddd` with three digits is the form for a `%b` argument, not for the format string;
+      in the format string it is `\ddd`. The row already carried a "do not fix this back" note
+      written after `\xHH` failed the same way — that note is right about `\xHH` and wrong about
+      what replaces it. Reverting to `\xHH` would be the third wrong answer.
+
+      *Text corrected 2026-09-12 by issue #21: the row now publishes the `\ddd` format-string form,
+      the warning gains the `\ddd` vs `\0ddd` clause, and the `python3` form uses a codepoint escape
+      because neither block character can be typed on the console under test. The same escape was
+      restored in `docs/boot-runs/2026-09-11-cb514-1h.md`, which said the escaped form was what ran
+      and then printed the literal glyph — the identical defect, inside the document correcting it.*
+
+      **What is still open is the observation, and only that.** No corrected shell form has been run
+      on a panel; the 2026-09-11 run answered `I-9` with the `python3` form. The row says so, and
+      this entry is struck when a run record shows the `\ddd` form drawing both blocks.
 
 - [x] **Post-gate: make the checklist capture the image digest when the medium is written.** The
       run record has to name the image that booted, and this one could only name it by the
