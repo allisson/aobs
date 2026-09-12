@@ -16,6 +16,11 @@ the wallet is not reading, and that is the moment `F9` earns its place.
 **No warning about a long scan.** *Frame 2 of 47* is on screen for every scan anyway, and it tells
 the user everything a warning would, at the moment it is actionable, with no click-through reflex
 to build.
+
+**Two ways off, because they lead somewhere different.** `F5` ends the path at the home screen;
+`esc` backs out one screen, onto the review this transaction was signed from, where `F10` and `y`
+emit it again. The second is the recovery path for a wallet that would not read the code, and it
+is why `esc` here is not the way to say *done* (#31).
 """
 
 from __future__ import annotations
@@ -36,17 +41,29 @@ from aobs.ui import qrcodes
 #: navigation — the only one that changes state without confirming anything.
 STEP_DOWN_KEY = "f9"
 
+#: The end of the path, and the only key on the appliance that reaches the home screen without
+#: walking back through the screens that led here (`docs/qr-emit-parameters.md`). Not `F10`: `F9`
+#: above was chosen precisely because `F10` does nothing here, and a key that abandons a scan in
+#: progress is the wrong thing to put one slip away from the step-down. `F5` is the left edge of
+#: its own group — `F4` is across the keyboard gap and `F6` is unbound — so it has the same
+#: property `F9` was given.
+DONE_KEY = "f5"
+
 INSTRUCTION = "Show this to your wallet until it has read the whole code."
-#: `esc done` rather than `back` or `discard`: the key's meaning is global, the word is per-screen
-#: and names what leaving costs. Nothing is lost here — this screen replaced the confirm, so `esc`
-#: lands on the still-unlocked review and `F10`, `y` signs the same bytes again and emits again.
-KEYS = "F9 smaller code  ·  esc done  ·  F12 power off"
+#: The word *done* belongs to the key that ends the path, and `esc` names where backing out lands:
+#: this screen replaced the confirm, so `esc` reaches the still-unlocked review and `F10`, `y`
+#: signs the same bytes again and emits again. Printing `esc done` beside an `F5 done` would be one
+#: word for two destinations (`docs/failure-states.md`).
+KEYS = "F9 smaller code  ·  F5 done  ·  esc back to the review  ·  F12 power off"
 #: What the last rung says instead of offering a step that does not exist.
 LAST_RUNG = "This is the least dense code the appliance can show."
 
 
 class EmitScreen(Screen):
-    BINDINGS = [Binding(STEP_DOWN_KEY, "step_down", "Smaller code")]
+    BINDINGS = [
+        Binding(STEP_DOWN_KEY, "step_down", "Smaller code"),
+        Binding(DONE_KEY, "done", "Done"),
+    ]
 
     DEFAULT_CSS = """
     EmitScreen #qr-row { height: auto; }
@@ -109,6 +126,18 @@ class EmitScreen(Screen):
         if self._timer is not None:
             self._timer.stop()
             self._timer = None
+
+    # --- the end of the path ------------------------------------------------------------------
+
+    def action_done(self) -> None:
+        """The wallet has read it. Back to the home screen, not back through the path.
+
+        `esc` still backs out one screen at a time and still reaches the review, which is what
+        keeps a wallet that failed to read the code one `F10`, `y` away from a second emission.
+        This key is the other exit, and the session continues: the wallet stays loaded and the
+        home screen is where every path starts.
+        """
+        self.app.return_home()  # type: ignore[attr-defined]
 
     # --- the ladder ---------------------------------------------------------------------------
 

@@ -31,7 +31,7 @@ from aobs.core.wallet import Network, Wallet
 from aobs.ui import qrcodes
 from aobs.ui.app import SignerApp
 from aobs.ui.geometry import MAX_COLUMNS, MIN_COLUMNS, MIN_ROWS
-from aobs.ui.screens.emit import KEYS, LAST_RUNG, STEP_DOWN_KEY, EmitScreen
+from aobs.ui.screens.emit import DONE_KEY, KEYS, LAST_RUNG, STEP_DOWN_KEY, EmitScreen
 
 from conftest import CORPUS, VECTOR_MNEMONIC
 
@@ -266,6 +266,17 @@ def test_the_step_down_key_is_f9_and_the_screen_teaches_it() -> None:
     assert "F11" not in KEYS
 
 
+def test_the_done_key_is_f5_and_is_not_the_key_beside_the_step_down() -> None:
+    """`F9`'s whole argument is bought with `F10`'s inertness on this screen, so *done* may not be
+    `F10`: the recovery from that slip is re-scanning the PSBT (#31)."""
+    assert DONE_KEY == "f5"
+    assert DONE_KEY != STEP_DOWN_KEY
+    assert "F5 done" in KEYS
+    # The word belongs to the key that ends the path; `esc` names where backing out lands.
+    assert "esc done" not in KEYS
+    assert "esc back to the review" in KEYS
+
+
 async def test_f10_is_inert_on_this_screen_which_is_why_f9_sits_beside_it() -> None:
     """The load-bearing half of the key choice: a slip from `F10` to `F9` is harmless because
     `F10` does nothing here. A later ticket that binds it on this screen fails here."""
@@ -281,11 +292,11 @@ async def test_f10_is_inert_on_this_screen_which_is_why_f9_sits_beside_it() -> N
 
 
 async def test_esc_leaves_the_emit_screen_reversibly() -> None:
-    """What makes `esc done` honest rather than a commit.
+    """The recovery path, and the reason `esc` here is *back to the review* rather than *done*.
 
     The confirm reaches emit with `switch_screen`, so emit replaces the confirm and sits on the
-    review — which kept its scroll and its open lock. A user who presses `esc` before the wallet
-    has finished reading lands back there and can re-sign the same bytes and emit again.
+    review — which kept its scroll and its open lock. A user whose wallet would not read the code
+    presses `esc` and can re-sign the same bytes and emit again.
     """
     from aobs.ui.screens.review import ReviewScreen
 
@@ -312,6 +323,33 @@ async def test_esc_leaves_the_emit_screen_reversibly() -> None:
         await pilot.pause()
         assert isinstance(app.screen, EmitScreen)
         assert app.screen.signed_psbt == emitted
+
+
+async def test_done_ends_the_path_at_home_in_one_press() -> None:
+    """The defect #31 names: `esc` alone walks emit → review → scan → home, three presses through
+    two screens the user is finished with. `F5` ends the path, and ends nothing else."""
+    from aobs.ui.screens.home import HomeScreen
+    from aobs.ui.screens.review import ReviewScreen
+
+    app = build()
+    app.wallet = Wallet.from_mnemonic(VECTOR_MNEMONIC, network=Network.SIGNET)
+    wallet = app.wallet
+    async with app.run_test(size=CONSOLE) as pilot:
+        await pilot.press("f10")  # accept the keymap
+        await pilot.pause()
+        app.open_review((CORPUS / "honest_p2wpkh.psbt").read_bytes())
+        await pilot.pause()
+        assert isinstance(app.screen, ReviewScreen)
+        await pilot.press("f10", "y")
+        await pilot.pause()
+        assert isinstance(app.screen, EmitScreen)
+
+        await pilot.press(DONE_KEY)
+        await pilot.pause()
+        assert isinstance(app.screen, HomeScreen), "F5 did not end the path at home"
+        # The path ended, not the session: `F12` is still the only key that ends one.
+        assert app.wallet is wallet
+        assert not app.power.powered_off  # type: ignore[attr-defined]
 
 
 # --- What is not on the screen --------------------------------------------------------------------

@@ -196,8 +196,15 @@ one of three kinds:
 | kind | keys | screens |
 |---|---|---|
 | **Confirm** | `F10`, and `y` on the confirm | keymap, home, review, confirm |
-| **Navigation** | `↑` `↓` `PgUp` `PgDn` — move a selection or a viewport, act on nothing | keymap, home, review |
+| **Navigation** | `↑` `↓` `PgUp` `PgDn` — move a selection or a viewport, act on nothing; and `F5` — *end the path, back to the home screen* (`docs/qr-emit-parameters.md`) | keymap, home, review; `F5` on emit |
 | **Its own** | `F9` — *step the QR down one rung of the density ladder* (`docs/qr-emit-parameters.md`) | emit |
+
+**`F5` is navigation and nothing more**, which is why it is in the second kind rather than the
+third: it acts on nothing, commits nothing and ends no session — it is `esc` without the walk, on
+the one path deep enough for the walk to be three presses. It is not a fourth global key. Home is
+reachable from the emit screen because that is where the money path ends; a *home* key on every
+screen would leave from anywhere with no per-screen word naming what leaving costs, which is the
+property `esc` has and a global would not.
 
 **Only the third kind is new ground**, and there is one key in it: `F9` is the only key in the
 appliance that changes state without confirming anything and without being navigation. That is why
@@ -211,9 +218,14 @@ that carried that argument, and it carried it on the strength of being unreachab
 ### The word beside `esc` is per-screen; the key is not
 
 `esc` means *back out without acting* on every screen, and that is the part nothing may vary. **What
-each screen prints beside it does vary**, and should: the review says `esc discard`, the confirm says
-`esc back to the review`, the emit screen says `esc done`. Each names what leaving *that* screen
-costs, which is more use to the user than one word repeated.
+each screen prints beside it does vary**, and should: the review says `esc discard`, the address list
+says `esc done`, and the confirm and the emit screen both say `esc back to the review`. Each names
+what leaving *that* screen costs, which is more use to the user than one word repeated.
+
+**One word may not name two destinations on one screen.** The emit screen said `esc done` until it
+gained an `F5 done` that ends the path at home (`docs/qr-emit-parameters.md`); with both printed,
+*done* would have meant two different places on the same key line. The word went to the key that
+ends the path, and `esc` took the label for where backing out actually lands.
 
 The rule this protects is unchanged — a user who has learned `esc` means *back* must never meet a
 screen where it means *proceed*. A screen whose honest label for `esc` would be a commit has a
