@@ -234,9 +234,10 @@ a pure-Python signer.
       pool of an appliance whose first published claim is that it has none.
 - [x] Prune the modules tree to the allowlist and regenerate `modules.dep`. **Measured: 20 modules
       ship, 4209 are deleted.** The allowlist this box named is not the allowlist that shipped:
-      `simpledrm` does not exist in Debian's kernel, `efifb` and `vesafb` are both built in, and the
-      three DRM drivers need firmware this image does not ship — so there is no graphics driver in
-      it at all. `build/modules.allow` says why. `modules.dep` is not in the `.deb`, so the first
+      `simpledrm` does not exist in Debian's kernel, `efifb`, `vesafb` and `simplefb` are all three
+      built in, and the DRM drivers need firmware this image does not ship — so there is no
+      graphics driver in it at all. (`simplefb` was added to that list on 2026-09-12: it is the one
+      that actually drew, and it was the only one nothing asserted.) `build/modules.allow` says why. `modules.dep` is not in the `.deb`, so the first
       `depmod` is what creates the graph the prune runs against.
 - [x] A `modprobe` blacklist as a cheap second line. It is never cited as the claim, and
       `build/modprobe-blacklist.conf` says what it is actually for: the window between PID 1
@@ -350,8 +351,11 @@ machine that boots is also not a hardware-compatibility claim, and the README do
 **The machine was then characterised, and characterising it found a fourth fault — this one in the
 vocabulary.** The target is an **Acer Chromebook 514 `CB514-1H-C0FF`** (Intel Apollo Lake,
 manufactured 2020-10), booted through **coreboot's `RW_LEGACY` SeaBIOS payload with the machine in
-developer mode**: a BIOS path, so `vga=791` and `vesafb` drew every screen this project has ever
-seen and `efifb` remains unobserved. Keystrokes came from the **laptop's own keyboard** — and that is
+developer mode**: a BIOS path, and `efifb` remains unobserved. *This sentence used to continue "so
+`vga=791` and `vesafb` drew every screen this project has ever seen", and both halves were false —
+`vga=791` never set a mode on this machine and `vesafb` never bound. What drew every screen is
+`simplefb`, over the framebuffer coreboot's own table describes. See
+`docs/adr/0003-the-console-is-enforced-not-requested.md`.* Keystrokes came from the **laptop's own keyboard** — and that is
 the fault. `build/modules.allow` said *"`hid_generic` is the driver that actually binds a keyboard"*,
 `CONTEXT.md` said *"the keyboard is a USB device and so is the camera"*, and on the only machine this
 appliance has ever run on neither module carried a keystroke: `CONFIG_SERIO_I8042=y` and
@@ -547,26 +551,25 @@ the same shape — read what the repository already says, and check the artefact
       stated as the deliberate absence of a claim rather than a weak one — and developer mode as a
       Tier 2 item, because unlocking a Chromebook lowers that host's boot integrity permanently and
       that is a cost of the hardware path rather than a property of the image.*
-- [ ] Check the two claims a build cannot: that the modules tree really does leave the machine with
+- [x] Check the two claims a build cannot: that the modules tree really does leave the machine with
       no network interface (`I-4`), and that the graphics decision holds. `build/modules.allow` ships
-      no DRM driver on the argument that `efifb` and `vesafb` are built in and sufficient.
-      **This is now two rows, because the target machine can only answer one of them.** The BIOS
-      half has met a screen — `vga=791`, `vesafb`, and the console large enough for an 85×43 QR
-      display, recorded by `I-7`. The UEFI half has not and cannot on this machine: `RW_LEGACY`
-      SeaBIOS is a BIOS path, and reaching `efifb` would mean flashing a full ROM. It is a
-      **`deviated`** verdict with a written reason, never a `pass` inferred from its sibling, and
-      the README says so in plain words.
+      no DRM driver on the argument that the firmware framebuffers are built in and sufficient.
+      **This is two rows, because the target machine can only answer one of them.** The UEFI half
+      has not met a screen and cannot on this machine: `RW_LEGACY` SeaBIOS is a BIOS path, and
+      reaching `efifb` would mean flashing a full ROM. It is a **`deviated`** verdict with a written
+      reason, never a `pass` inferred from its sibling, and the README says so in plain words.
 
-      **Half of this row is answered and half is now blocked on a finding.** The network half is
-      done: `I-4` found no module under `kernel/net` or `kernel/drivers/net` and no `ip`,
-      `ifconfig`, `wpa_supplicant`, `curl`, `wget` or `ssh` on PID 1's `PATH`. The UEFI half is
-      unobserved and unobservable here, as this row already said. What changed is the BIOS half:
-      it met a screen and the console cleared 85×43 at 128×48, but `I-7` recorded the driver as
-      **`simple`, not `vesafb`** — so the two sentences above naming `vesafb` are among the ten
-      statements this run left unsupported. **The row stays open deliberately.** Ticking it would
-      record the graphics decision as confirmed on the strength of a driver that did not appear,
-      and correcting the sentences before the diagnosis would be guessing at which way. It closes
-      when the `simple` finding below does.
+      *Closed 2026-09-12.* The network half was done by `I-4`: no module under `kernel/net` or
+      `kernel/drivers/net`, and no `ip`, `ifconfig`, `wpa_supplicant`, `curl`, `wget` or `ssh` on
+      PID 1's `PATH`. The BIOS half is now answered too, and **the argument survives while its
+      wording did not**: the console came up with no DRM driver, which is what this row checks. What
+      it did not come up through is `vesafb`. It came up through `simplefb`, over the framebuffer
+      coreboot's own table describes, and `vga=791` — which both sentences above used to name —
+      never set a mode at all. Three firmware framebuffers are built in, the firmware decides which
+      devices exist, and first registrar takes the aperture;
+      `docs/adr/0003-the-console-is-enforced-not-requested.md` is the corrected account, and
+      `FB_SIMPLE` is now asserted alongside `FB_EFI` and `FB_VESA` so the driver that actually draws
+      is one the build watches.
 
 - [ ] **Post-gate: add `cros_ec_keyb` and `cros_ec_lpc`, or record that Chromebooks with an EC
       keyboard are unsupported.** Deliberately not done alongside the finding above: no machine of
@@ -597,19 +600,39 @@ them are claims the repository makes that this run did not support.
       learns the camera was there. If the fix is to wait for expected devices instead of sleeping,
       that is a change to a load-bearing ordering and belongs in `docs/boot-pipeline.md` first.
 
-- [ ] **Post-gate: find out why the BIOS console is `simple` and not `vesafb`, then fix whichever
-      is wrong — the ten statements or the image.** `I-7` recorded `/proc/fb` as `0 simple` and
-      `fb0/name` as `simple`, which is `simplefb`'s identity; `vesafb` reports `VESA VGA`. The
-      console size was 128×48, exactly what `vga=791` predicts, so the mode is right and no screen
-      is affected. But the pinned kernel's own config has `# CONFIG_SYSFB_SIMPLEFB is not set`, and
-      `docs/boot-pipeline.md:466` cites that unset symbol as the reason the BIOS path lands on
-      `vesafb`. With it unset, `simplefb` should never bind. It bound. Until that is explained,
-      these are unsupported rather than wrong and none has been edited:
-      `docs/console-appearance.md:29` (which marks the chain **observed** on this machine, and this
-      run is that observation), `docs/boot-pipeline.md:457`, `:466`–`:467`, `:480`,
-      `build/modules.allow:25`–`26`, `docs/roadmap.md:353`, `:529`, `:531`, `docs/overview.md:153`,
-      `README.md:493`. `build/verify.py`'s `FB_VESA` assertion is untouched by this: `FB_VESA=y` is
-      still true of the image.
+- [x] **Post-gate: find out why the BIOS console is `simple` and not `vesafb`, then fix whichever
+      is wrong — the ten statements or the image.** *Closed 2026-09-12 by the `I-7b` run,
+      `docs/boot-runs/2026-09-12-cb514-i7b.md`. The answer was not that `simplefb` beat `vesafb`.
+      `vesafb` was never offered a device: `vga=791` has never set a video mode on this machine.*
+
+      *The boot screen prints `Undefined video mode number: 317` — `0x317`, the hex of 791, from
+      `arch/x86/boot/video.c:334` — then shows a mode menu and stalls 30 seconds, on every boot,
+      `inspect` included, since the first commit. `0x317` asks for VBE `0x117`, 1024×768×16bpp;
+      this framebuffer is 32bpp and its SeaVGABIOS offers `0x141`–`0x144`, an OEM range that does
+      not contain the standard `0x118` either. The mode-set fails, `orig_video_isVGA` stays
+      `VIDEO_TYPE_VGAC`, and `sysfb` registers the `vga-framebuffer.0` that `I-7b` found. What drew
+      every screen is `simplefb`, over the framebuffer coreboot's own table describes — and
+      coreboot's mode is 1024×768, which is also what `vga=791` asks for. That coincidence is why a
+      dead parameter survived to M3 with three documents insisting it was load-bearing.*
+
+      *All ten statements are corrected, and the image changed in three ways.* **`vga=` is removed
+      from both `APPEND` lines**, so `build/isolinux.cfg` and `build/grub.cfg` now carry identical
+      cmdlines; there is no portable `vga=` value, because `video-mode.c:88` matches on pixel
+      counts that overflow the `u16` it compares. **`FB_SIMPLE` joins `REQUIRED_BUILT_IN`** in
+      `build/verify.py` — a Debian demoting it to `m` would have deleted the console from the only
+      machine this project has booted, with every other assertion green. **`MIN_ROWS` goes 30 → 43**
+      in `aobs/ui/geometry.py`; see the row below, which this row found.
+      `docs/adr/0003-the-console-is-enforced-not-requested.md` records the decision.
+
+- [x] **The startup console floor was below the QR display it exists to guarantee.** *Found
+      2026-09-12 while establishing what actually holds the console up, and independent of the boot
+      run that caused anyone to look.* `aobs/ui/geometry.py` set `MIN_ROWS = 30` against an emit
+      screen fixed at 85 × 43, so a 100 × 30 console passed the check in `aobs/ui/app.py:195` and
+      then clipped the QR — the appliance's only path out. `tests/screentext.py:44` had recorded the
+      clipping in a comment and drove 128×48 to avoid picturing it, which sidesteps the geometry
+      instead of rejecting it. `MIN_ROWS` is now 43, and `tests/test_emit_screen.py` asserts the
+      floor against the rendered code so a larger QR version moves the floor rather than silently
+      outgrowing it.
 
 - [ ] **Post-gate: decide what the descriptor screen's prefix label is for, then make it say
       something true.** `S-4` exported a testnet4 wallet under the footer `BIP84 · bc1q`, while

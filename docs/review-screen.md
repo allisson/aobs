@@ -11,21 +11,28 @@ them: `esc` backs out, `F12` powers off from anywhere, and confirm is never `ent
 ## The canvas is 128 × 48, not 85 × 43
 
 [#3](https://github.com/allisson/aobs/issues/3)'s **85 columns × 43 rows** is the half-block grid a
-QR code occupies. It is not the console. `boot-pipeline.md` fixes the console at **128 × 48** — 1024×768
-via `vga=791`, kernel 8×16 font — and [#17](https://github.com/allisson/aobs/issues/17)'s
+QR code occupies. It is not the console. The console measured **128 × 48** on the target machine —
+a 1024×768 firmware framebuffer at the kernel's 8×16 font, and not a size any boot parameter set —
+and [#17](https://github.com/allisson/aobs/issues/17)'s
 five-rows-of-chrome budget was a constraint of the QR screen, which has to fit a 77-module symbol.
 The review screen has the whole console and subtracts nothing.
 
-**128 × 48 is a floor, not a target.** `vga=791` pins the BIOS path exactly, but the UEFI path takes
-`efifb` at the GOP's native mode: a 1920×1080 panel gives 240×67, a 4K one gives far more. So the
-appliance will meet at least three real geometries.
+**128 × 48 is what the target machine gave, not a floor the image sets.** A UEFI machine takes
+`efifb` at the GOP's native mode, so a 1920×1080 panel gives 240×67 and a 4K one far more. So the appliance will meet at least three real
+geometries. Nothing in the boot path pins any of them — see
+`docs/adr/0003-the-console-is-enforced-not-requested.md` — which is why the floor below is enforced
+in the application.
 
 **Rows are fluid, columns are capped at 96, and the block is centred.** More rows is pure win — more
 outputs visible before scrolling, and the pinned-region model below does not care. More columns is
 not: 96 is chosen against the widest atom on the screen (see below), and it stops a warning sentence
 from stretching to 240 columns, which is unreadable. One column budget also means **one layout to
 test**, so [#13](https://github.com/allisson/aobs/issues/13)'s golden-file assertions stay stable
-across every geometry. A startup check refuses to run below 100 × 30 rather than degrading silently.
+across every geometry. A startup check refuses to run below 100 × 43 rather than degrading silently
+— **43 and not 30, because 30 admitted a console the emit screen's 85 × 43 QR cannot be drawn on**,
+which made the floor smaller than the thing it exists to guarantee. See
+`docs/adr/0003-the-console-is-enforced-not-requested.md`; that check, and not any boot parameter, is
+the appliance's console guarantee.
 
 **One row is reserved, and it is not on this screen.** #61 gives the keymap picker and every failure
 screen a release identity footer — two lines: `aobs v0.1.0 · 4f1c8a6e2b90 · 2026-09-14`, and where

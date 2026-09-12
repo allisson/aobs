@@ -1,7 +1,7 @@
 """The one column budget, and the floor below which the appliance refuses to run.
 
 `docs/review-screen.md` settled both. The appliance meets at least three real console geometries —
-128×48 on the BIOS floor with `vga=791`, 240×67 on a 1080p panel, more on 4K — and the answer is
+128×48 from a 1024×768 firmware framebuffer, 240×67 on a 1080p panel, more on 4K — and the answer is
 not a layout per geometry:
 
 **Rows are fluid, columns are capped at 96, and the block is centred.** More rows is pure win. More
@@ -20,9 +20,14 @@ from __future__ import annotations
 MAX_COLUMNS = 96
 
 #: Below this the appliance refuses to start rather than degrading into an unreadable layout.
-#: Chosen under 128×48 so the BIOS floor clears it with room, and above the 85×43 a QR needs.
+#:
+#: **Both numbers are above the 85×43 a QR needs, and the row one was not.** `MIN_ROWS` was 30,
+#: which admitted a console the emit screen cannot draw a QR code on — the appliance's only path
+#: out — and `tests/screentext.py` said so in a comment while driving 128×48 to avoid picturing it.
+#: A floor below the thing it exists to guarantee is not a floor. 43 is the QR row count and the
+#: appliance will not start under it.
 MIN_COLUMNS = 100
-MIN_ROWS = 30
+MIN_ROWS = 43
 
 
 def fits(columns: int, rows: int) -> bool:

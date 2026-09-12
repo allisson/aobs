@@ -134,9 +134,10 @@ mechanism behind the current *Offline* claim and behind half of *No data path*, 
 strength.
 
 It says nothing about drivers the kernel image carries built in, and a claim must not be attributed
-to it that it cannot make. `efifb`, `vesafb`, the vt keyboard handler and the i8042 controller are
-`=y` in the pinned kernel: they are in the image whatever this file says, they cannot be removed by
-editing it, and the reasons they are wanted are recorded where the allowlist's are.
+to it that it cannot make. `efifb`, `vesafb`, `simplefb`, the vt keyboard handler and the i8042
+controller are `=y` in the pinned kernel: they are in the image whatever this file says, they
+cannot be removed by editing it, and the reasons they are wanted are recorded where the
+allowlist's are.
 
 The `modprobe` blacklist beside it is a second line and is **never** the claim: a blacklist is a
 policy, and the allowlist is a fact about what is in the image. Say "the module is not present",

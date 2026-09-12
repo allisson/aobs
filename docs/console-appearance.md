@@ -26,8 +26,8 @@ words* below, and that rule is there because the current screen fails it.
 
 | fact | where it comes from | how well it is known |
 |---|---|---|
-| **128×48** at the BIOS floor; 240×67 on a 1080p panel, more on 4K | `build/isolinux.cfg`'s `vga=791` → `vesafb` → `fbcon`; `docs/boot-pipeline.md` | **observed** on the target machine in M3 |
-| **96 columns, centred, rows fluid**, and a refusal below 100×30 | `aobs/ui/geometry.py`, fixed by `docs/review-screen.md` | settled, and enforced by `fits()` |
+| **128×48** on the target machine; 240×67 on a 1080p panel, more on 4K | whatever firmware framebuffer came up → `fbcon`; `docs/boot-pipeline.md` | **observed** on the target machine in M3 — coreboot's 1024×768 through `simplefb`, **not** `vga=791` → `vesafb`, which never set a mode there |
+| **96 columns, centred, rows fluid**, and a refusal below 100×43 | `aobs/ui/geometry.py`, fixed by `docs/review-screen.md` | settled, and enforced by `fits()` — this is the console guarantee, and no boot parameter is |
 | **16 ANSI colours, not truecolor** | `build/init` exports no `TERM`, so `rich` resolves the console to its `standard` system | **derived, not observed.** `rich.Console(force_terminal=True, _environ={})` answers `standard`; nobody has checked the panel |
 | **The kernel's built-in 8×16 font**, whose repertoire is the IBM one | `build/init` runs `loadkeys` and never `setfont`; `printf '%G'` puts the console in UTF-8 | **derived, not observed** |
 
@@ -77,7 +77,7 @@ indistinguishable from an available one — *sign a transaction* looking exactly
 wallet loaded as with one.
 
 **It does render.** A photograph of the appliance booted on the target machine — BIOS path,
-`vga=791`, 128×48 — shows the six rows that need a wallet visibly greyer than the four that do not.
+`simplefb`, 128×48 — shows the six rows that need a wallet visibly greyer than the four that do not.
 That is one panel and one framebuffer driver, so it is an observation and not a guarantee; the
 rule below is unchanged by it, because a distinction that survives only where somebody happened to
 look is not a distinction the appliance can publish.
@@ -224,9 +224,10 @@ reader has. A README about an appliance with no network has no business shipping
 makes its readers' browsers call a CDN, and a fenced block avoids the question entirely: the
 appliance is colourless monospace, which is what a fenced block already is. It also diffs as text.
 
-**What the blocks show, and at what size.** The console is 128×48 — the BIOS path `vga=791`, the
-size `docs/boot-pipeline.md` fixes and every screen suite drives. Not the floor of `MIN_COLUMNS ×
-MIN_ROWS`: at 30 rows the emit screen's QR is clipped and its key line falls off the bottom, so a
+**What the blocks show, and at what size.** The console is 128×48 — what the target machine's
+firmware framebuffer gave, and the size every screen suite drives. Not the floor of `MIN_COLUMNS ×
+MIN_ROWS`, which is a minimum rather than a representative screen: the blocks picture a roomy
+console on purpose, so a
 floor-sized block would picture a screen no operator sees. The content block is capped at 96 and
 centred, so every line carries the same left gutter on a 128-column console; the gutter is removed
 so the README does not scroll sideways. Every character and every relative position survives that.
@@ -263,7 +264,7 @@ because Textual 8.2.8 has no plain-text export and that private attribute is wha
 ## Open
 
 - ~~**Does `fbcon` render half-bright on this panel?**~~ **Answered: yes**, on the target machine's
-  BIOS path at `vga=791`. Observed on the home screen, where the rows that need a wallet are
+  BIOS path, on `simplefb`. Observed on the home screen, where the rows that need a wallet are
   visibly greyer. One panel, one driver — the redundancy rule stands regardless.
 - **Which of the thirteen glyphs resolve?** Still open, and the home screen exercises none of the
   five doubtful ones. `docs/boot-checklist.md`, one screen showing all thirteen.

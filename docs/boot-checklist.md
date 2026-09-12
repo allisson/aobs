@@ -86,9 +86,9 @@ initramfs, so the kernel never mounts a root and never reaches the `init=` path:
 appliance normally. It does not error. It looks exactly like a working command line, which is why this
 repository documented it in six places for as long as it did.
 
-Options typed after the label are appended to that entry's `APPEND` line, so `vga=791` and both
-`random.trust_*=off` survive — which matters for `I-7`, where a console without `vga=791` is an
-80×25 text mode that could not draw a QR code and is not what a Session sees.
+Options typed after the label are appended to that entry's `APPEND` line, so both
+`random.trust_*=off` survive — which matters, because an inspection boot that differed from the
+Session boot in any option would be inspecting a different image from the one that signs.
 
 **The UEFI path is unexercised** — see the note under `I-7`. It ships the same two entries.
 
@@ -185,14 +185,43 @@ cat /sys/class/graphics/fb0/name
 stty size
 ```
 
-**Record all three verbatim.** `efifb` means the firmware's GOP on a UEFI boot; `vesafb` means
-`vga=791` on a BIOS boot. **Pass** requires a framebuffer to exist *and* `stty size` to report at
-least 43 rows and 85 columns, which is the fixed size of the QR display — a console smaller than that
-cannot draw a QR code at all.
+**Record all three verbatim.** The name is one of three, and **it does not follow from the firmware
+path**: `efifb` is the GOP on a UEFI boot, `simplefb` is a `simple-framebuffer` device — a coreboot
+machine registers one from the coreboot table — and `vesafb` is a VESA linear mode on a BIOS boot.
+`docs/boot-pipeline.md` has the ordering; first registrar takes the aperture.
+
+**Pass** requires a framebuffer to exist *and* `stty size` to report at least **43 rows and 100
+columns**, which is the floor `aobs/ui/geometry.py` enforces. Below it the appliance refuses to
+start, by design — so a `deviated` verdict here is a machine that cannot run the appliance, not a
+checklist that needs adjusting.
 
 This is one half of the graphics decision in `build/modules.allow`, and the half it answers is the
-firmware path you booted. **The other path stays unobserved and the run record must say so** rather
-than let a reader infer both from one.
+firmware path you booted. **The other paths stay unobserved and the run record must say so** rather
+than let a reader infer them from one.
+
+### `I-7b` — Which framebuffer devices were offered, and which driver lost
+
+```
+ls /sys/devices/platform/ | grep -i framebuffer
+dmesg | grep -iE 'simple-?fb|vesafb|efifb|aperture|coreboot'
+```
+
+**Record both verbatim.** `I-7` names the driver that won; this names the field it won on, and the
+two are not the same question. The kernel can register more than one framebuffer device and only
+one of them gets the memory: `devm_aperture_acquire` refuses an overlapping range with `-EBUSY`,
+first come, so the second driver to probe fails and never appears in `/proc/fb`. Which driver that
+was, and whether it was offered a device at all, is visible only here.
+
+Expect one or two entries, and **the name of the `sysfb` one is a readout of whether the firmware
+gave the kernel a linear framebuffer**: `vesa-framebuffer` means it did (`sysfb.c:157`),
+`efi-framebuffer` means a UEFI GOP, and `vga-framebuffer` means plain text mode — the firmware
+offered nothing, and whatever is drawing the console came from somewhere else. A coreboot machine
+also has `framebuffer-coreboot` registering a `simple-framebuffer` as a child of the coreboot
+device, so it does not appear directly in this listing; look for it in the `dmesg` line instead.
+
+**There is no pass or fail here.** The run record carries what was seen. On the 2026-09-12 run this
+check is what showed `vga=791` had never set a mode — `vga-framebuffer.0`, no `vesafb`, no aperture
+conflict — and `vga=` was removed from the image as a result.
 
 ### `I-8` — Which controller the keyboard is on
 

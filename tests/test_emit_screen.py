@@ -30,7 +30,7 @@ from aobs.core.urcodec import PSBT_UR_TYPE, PsbtStream, decode_psbt_parts
 from aobs.core.wallet import Network, Wallet
 from aobs.ui import qrcodes
 from aobs.ui.app import SignerApp
-from aobs.ui.geometry import MAX_COLUMNS
+from aobs.ui.geometry import MAX_COLUMNS, MIN_COLUMNS, MIN_ROWS
 from aobs.ui.screens.emit import KEYS, LAST_RUNG, STEP_DOWN_KEY, EmitScreen
 
 from conftest import CORPUS, VECTOR_MNEMONIC
@@ -83,6 +83,28 @@ def test_a_version_15_code_fits_the_console_as_half_blocks() -> None:
     assert {len(line) for line in lines} == {85}
     assert code.modules <= MAX_COLUMNS - 4, "inside the column budget"
     assert len(lines) == math.ceil(code.modules / 2)
+
+
+def test_the_startup_floor_admits_no_console_the_qr_cannot_be_drawn_on() -> None:
+    """The floor must cover the appliance's only path out, and for a long time it did not.
+
+    `MIN_ROWS` was 30 against a QR that needs 43, so a 100×30 console passed the startup check in
+    `aobs/ui/app.py` and then clipped the emit screen — on the one screen a wallet has to read back
+    off the glass. `tests/screentext.py` recorded the clipping in a comment and drove 128×48 to
+    avoid picturing it, which sidesteps the geometry instead of rejecting it.
+
+    This is the assertion that would have caught it, and it is written against the rendered code
+    rather than against the numbers, so a larger QR version moves the floor rather than silently
+    outgrowing it.
+    """
+    code = qrcodes.render("A" * 700)
+    assert MIN_ROWS >= code.rows, (
+        f"the startup floor admits {MIN_ROWS} rows and the QR needs {code.rows}; "
+        "a console the appliance starts on must be one it can emit from"
+    )
+    assert MIN_COLUMNS >= code.modules, (
+        f"the startup floor admits {MIN_COLUMNS} columns and the QR needs {code.modules}"
+    )
 
 
 def test_the_half_block_text_is_a_faithful_encoding_of_the_matrix() -> None:
