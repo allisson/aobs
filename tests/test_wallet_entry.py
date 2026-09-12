@@ -17,6 +17,7 @@ from textual.widgets import Static
 
 from aobs.adapters.fake import (
     FixedEntropySource,
+    FixedUsbBus,
     ImageFileFrameSource,
     RecordingKeymap,
     RecordingPower,
@@ -68,6 +69,7 @@ def build(**overrides: object) -> SignerApp:
         "entropy": FixedEntropySource(),
         "power": RecordingPower(),
         "keymap": RecordingKeymap(),
+        "usb": FixedUsbBus(),
         "scan_frame_interval": None,
     }
     ports.update(overrides)

@@ -160,6 +160,21 @@ def test_there_is_no_screen_port() -> None:
     assert "| `Keymap` |" in port_table
 
 
+def test_the_port_table_names_every_port() -> None:
+    """Same rule as above, in the direction that catches the next port added quietly.
+
+    A port whose two adapters are never written down is a seam nobody argued for, and this repo has
+    already deleted one of those. `Frame`, `LateArrival`, `CameraError` and `CameraReason` are
+    vocabulary the ports carry rather than ports, so the table owes them no row.
+    """
+    from aobs import ports
+
+    vocabulary = {"DEFAULT_LAYOUT", "CameraError", "CameraReason", "Frame", "LateArrival"}
+    port_table = (ROOT / "docs" / "test-harness.md").read_text(encoding="utf-8")
+    for name in set(ports.__all__) - vocabulary:
+        assert f"| `{name}` |" in port_table, name
+
+
 def _function_keys_bound_but_not_printed(source: str) -> list[str]:
     """Function keys a screen module binds and never puts on screen, given its source.
 

@@ -5,7 +5,7 @@ handler is installed **before anything is constructed**, so there is no window i
 exception could reach Python's default traceback printer. Everything after that point fails into
 `describe()`: the exception type and one fixed sentence, never locals and never a stack.
 
-`aobs/ui/` knows only the four ports. This module is where the real halves are chosen, which is
+`aobs/ui/` knows only the five ports. This module is where the real halves are chosen, which is
 what lets the whole application be driven headless with the fakes and no conditional anywhere
 inside it.
 """
@@ -18,7 +18,7 @@ from aobs.adapters import failure_handler
 
 
 def real_adapters() -> dict:
-    """The appliance's own halves of the four ports, and the single place they are named.
+    """The appliance's own halves of the five ports, and the single place they are named.
 
     Nothing here is conditional and nothing here is a fake. That is the point: a fake `Power` does
     not power off and a fake `EntropySource` returns a deterministic counter, so an appliance
@@ -35,6 +35,7 @@ def real_adapters() -> dict:
         ForcedPowerOff,
         KernelEntropySource,
         LoadkeysKeymap,
+        SysfsUsbBus,
         V4L2FrameSource,
     )
 
@@ -43,6 +44,7 @@ def real_adapters() -> dict:
         "entropy": KernelEntropySource(),
         "power": ForcedPowerOff(),
         "keymap": LoadkeysKeymap(),
+        "usb": SysfsUsbBus(),
     }
 
 

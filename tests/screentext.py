@@ -25,6 +25,7 @@ from conftest import VECTOR_MNEMONIC, render_qrs
 
 from aobs.adapters.fake import (
     FixedEntropySource,
+    FixedUsbBus,
     ImageFileFrameSource,
     RecordingKeymap,
     RecordingPower,
@@ -131,6 +132,7 @@ def _app(
         entropy=FixedEntropySource(),
         power=RecordingPower(),
         keymap=RecordingKeymap(),
+        usb=FixedUsbBus(),
         network=network,
         scan_frame_interval=None,
         emit_animated=False,

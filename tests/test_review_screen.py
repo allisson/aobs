@@ -18,6 +18,7 @@ from textual.widgets import Button, Static
 
 from aobs.adapters.fake import (
     FixedEntropySource,
+    FixedUsbBus,
     ImageFileFrameSource,
     RecordingKeymap,
     RecordingPower,
@@ -61,6 +62,7 @@ def build(name: str, *, paths: list | None = None) -> SignerApp:
         entropy=FixedEntropySource(),
         power=RecordingPower(),
         keymap=RecordingKeymap(),
+        usb=FixedUsbBus(),
         network=network_of(name),
         scan_frame_interval=None,
         emit_animated=False,
