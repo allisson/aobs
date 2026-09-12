@@ -660,7 +660,7 @@ them are claims the repository makes that this run did not support.
       `python3` form prints the literal `█` and `░`, which cannot be typed on the console under
       test; `█` / `░` is what actually ran.
 
-- [ ] **Post-gate: make the checklist capture the image digest when the medium is written.** The
+- [x] **Post-gate: make the checklist capture the image digest when the medium is written.** The
       run record has to name the image that booted, and this one could only name it by the
       operator's recollection: two builds of `460b475` existed, `51c7d664…04aab` in the M3 handoff
       and `3aa115ad…0a2c1` in `out/`, and nothing recorded which went on the stick. That two builds
@@ -669,6 +669,23 @@ them are claims the repository makes that this run did not support.
       for a digest but never tells the operator to take it at the only moment it can come from the
       thing that actually boots. A digest recovered afterwards from a build directory is a guess
       about history.
+
+      *Closed 2026-09-12 by issue #22. `docs/boot-checklist.md` gains a* **Write the medium**
+      *section before the first boot — verify against the manifest, write, read the medium back,
+      record both digests, in that order and without leaving the terminal. It carries no verdict
+      and is not a row: no boot answers it, and what it produces is the record's `## Image` block.
+      The `dd` and read-back commands are given for Linux and macOS, because the node spelling is
+      where a wrong guess destroys a disk.*
+
+      *The template's `## Image` block now asks* when *the ISO digest was captured, which is the
+      whole fix: an after-the-fact digest has to say so rather than look identical to one taken at
+      the write. The medium read-back is a second, separate field, and its strength is stated —*
+      **best-effort**, *evidence that the writing host read those bytes back, never evidence about
+      what the firmware reads. `not taken` is a legal value; an invented digest is not.
+      `build/mkiso.sh` now prints the ISO's sha256 the way `mkiso-docker.sh` already did.*
+
+      *`docs/boot-runs/2026-09-11-cb514-1h.md` is left as written. It already states that its
+      digest was attested after the fact, and that is the honest record of what happened.*
 
 **Exit**: one PSBT signed on real hardware and broadcast, and a run record with every row answered.
 
