@@ -38,6 +38,57 @@ reason is not a verdict.** Neither is a `pass` on a row that was not actually pe
 
 ---
 
+## Write the medium
+
+**Before the first boot, and not at any other time.** This section has no `pass`/`fail` — no boot
+answers it, and it is not a row. What it produces is the run record's `## Image` block, which every
+verdict below is evidence *about*: a verdict that cannot name the image it was observed on is a
+verdict about nothing.
+
+The digest has to be taken in the same breath as the write. A digest recovered afterwards from a
+build directory is a guess about history — the directory may hold a later build of the same commit,
+and two builds of one commit are expected to differ until the reproducibility contract exists
+(`docs/threat-model.md`, claim (ix)). The 2026-09-11 run is what that costs:
+`docs/boot-runs/2026-09-11-cb514-1h.md` could name its image only by the operator's recollection.
+
+**1. Verify the ISO against the signed manifest**, before it touches the stick — the manifest is
+what a signature covers and the ISO is not (`CONTEXT.md`, *Manifest*). An unsigned local build says
+so in the record instead; it is not a failure, it is a different claim.
+
+**2. Write it, and hash it, without leaving the terminal.** Identify the device node first and read
+it back before typing it into `of=`: on a wrong node `dd` destroys the disk it names, without asking
+and without a way back. `lsblk` on Linux, `diskutil list` on macOS. The node is the whole disk
+(`/dev/sdb`, `/dev/disk4`), never a partition (`/dev/sdb1`, `/dev/disk4s1`).
+
+```
+# Linux
+sha256sum out/bitcoin-signer-amd64.iso
+sudo dd if=out/bitcoin-signer-amd64.iso of=/dev/sdX bs=4M oflag=direct status=progress conv=fsync
+sudo head -c "$(stat -c%s out/bitcoin-signer-amd64.iso)" /dev/sdX | sha256sum
+```
+
+```
+# macOS — /dev/rdiskN is the raw node and is ~20x faster than /dev/diskN
+shasum -a 256 out/bitcoin-signer-amd64.iso
+diskutil unmountDisk /dev/diskN
+sudo dd if=out/bitcoin-signer-amd64.iso of=/dev/rdiskN bs=4m
+sudo head -c "$(stat -f%z out/bitcoin-signer-amd64.iso)" /dev/rdiskN | shasum -a 256
+```
+
+**3. Record both digests before booting anything**, into the `## Image` block of the run record.
+
+The two digests carry different weight and the record must not merge them. The **ISO digest** is
+what ties this run to a build and, for a release, to a manifest. The **medium read-back digest** is
+**best-effort**: it is evidence that the host which wrote the stick read those same bytes back off
+it, nothing more. It is not evidence about what the firmware reads at boot — a medium can be
+rewritten after the read-back, and the appliance cannot check its own medium
+(`docs/overview.md`). Write it up as the first and never as the second.
+
+A read-back that cannot be taken — a host that will not read the raw node — is recorded as `not
+taken`. That is an honest run. A digest invented afterwards is not.
+
+---
+
 ## Inspection boot
 
 You get a shell as PID 1. `build/init` has **not** run: no filesystems beyond what the kernel
@@ -441,8 +492,9 @@ Checklist: `docs/boot-checklist.md` at commit <sha>.
 
 ## Image
 
-- ISO: <filename>
-- sha256: <digest>
+- ISO: <filename>, <size>
+- sha256 (ISO): <digest> — captured <at the moment the medium was written | after the fact, and how>
+- sha256 (medium read-back): <digest, or "not taken">
 - Verified against: <signed manifest, or "unsigned local build">
 - Built from: <commit sha>, `<clean|dirty>`
 

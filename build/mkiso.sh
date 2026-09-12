@@ -443,9 +443,19 @@ records=$(xorriso -indev "$ISO" -report_el_torito plain 2>/dev/null | grep -c '^
 }
 
 say "done"
+# The digest, in front of the operator at the one moment the artefact certainly exists. The boot
+# checklist asks for it at the moment the medium is written, and a build directory searched
+# afterwards may hold a later build of the same commit — `docs/boot-checklist.md`, *Write the
+# medium*. `mkiso-docker.sh` prints the same number for the same reason.
+if command -v sha256sum >/dev/null 2>&1; then
+    iso_sha=$(sha256sum "$ISO" | cut -d' ' -f1)
+else
+    iso_sha=$(shasum -a 256 "$ISO" | cut -d' ' -f1)
+fi
 cat <<EOF
 
   $ISO
+  sha256: $iso_sha
 
   | unpacked rootfs | ${unpacked_mib} MiB (${paths_count} paths) |
   | initramfs.zst   | ${initramfs_mib} MiB |
