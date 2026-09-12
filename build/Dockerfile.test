@@ -25,7 +25,18 @@
 # repository measured the same thing at 1.73 ms per `ec_pubkey_create` and a 22-minute suite. A
 # tier that is 50-80x slower, testing differently-resolved libraries, is not a dev loop and is not
 # a signal. `CLAUDE.md` states the rule.
-FROM debian:trixie-slim
+# `--platform` IS LOAD-BEARING AND IS NOT A HOST PREFERENCE. `build/fetch-inputs.sh` fetches an
+# amd64 closure — it pins `--platform=linux/amd64` on its own two `docker run` calls and
+# `manylinux_2_28_x86_64` on the wheels — because the appliance is built for one architecture and
+# `aobs/adapters/real/v4l2.py` derives its `ioctl` numbers for that one. So this line is the same
+# pin, in the one place in the chain that was missing it.
+#
+# Without it the command printed above fails on an arm64 host with `dpkg:arm64 Conflicts
+# dpkg:amd64` — the base image resolves to the host's architecture and the `.deb`s do not. The
+# failure is at least loud. The one worth pinning against is not: a host that silently produced an
+# arm64 tier would be judging the appliance's code against a different libc and a different
+# `libsecp256k1`, and reporting it green.
+FROM --platform=linux/amd64 debian:trixie-slim
 
 SHELL ["/bin/sh", "-euxc"]
 
