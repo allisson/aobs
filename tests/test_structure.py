@@ -145,6 +145,87 @@ def test_the_application_cannot_be_started_with_a_fake_wired_in() -> None:
     assert not read & {"environ", "getenv", "argv"}
 
 
+#: The module a harness distribution is imported as, where the two names differ. A distribution
+#: with no entry here FAILS rather than being skipped: a new name in the `test` group is exactly
+#: the case where someone has to decide whether the appliance may import it, and a quiet skip
+#: would decide it for them. Same device as `_KEY_IN_THE_INVENTORY` below.
+_MODULE_OF_DISTRIBUTION = {
+    "hypothesis": "hypothesis",
+    "pillow": "PIL",
+    "pytest": "pytest",
+    "pytest-asyncio": "pytest_asyncio",
+    "urtypes": "urtypes",
+}
+
+#: The one part of `aobs/` that `build/mkiso.sh` does not copy into the image (#24). The fakes are
+#: the harness half of every port, so they are held to the harness's rules, not the appliance's.
+_NOT_SHIPPED = ("aobs", "adapters", "fake")
+
+
+def _test_group() -> list[str]:
+    import tomllib
+
+    manifest = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    return manifest["project"]["optional-dependencies"]["test"]
+
+
+def _harness_modules(group: list[str]) -> set[str]:
+    names = {re.split(r"[<>=!~\[ ]", spec, maxsplit=1)[0].lower() for spec in group}
+    unknown = sorted(names - set(_MODULE_OF_DISTRIBUTION))
+    assert not unknown, (
+        f"{unknown} joined the test group and this map does not know what it is imported as. "
+        "Add it — and while adding it, decide whether an appliance module may import it"
+    )
+    return {_MODULE_OF_DISTRIBUTION[name] for name in names}
+
+
+def test_no_module_that_ships_imports_a_harness_only_package() -> None:
+    """`pyproject.toml` calls its two groups load-bearing. This is where that is checked cheaply.
+
+    The image checks it too — `build/verify.py`'s `no_harness_package_in_rootfs`, against the
+    installed set — but that is late: it catches a harness *wheel* in the rootfs and cannot see an
+    appliance module importing one whose wheel was correctly left out. `pillow` was exactly that
+    shape (#24), and the failure would have been an `ImportError` on the appliance, in front of a
+    user, on the one screen that reads the camera.
+    """
+    harness = _harness_modules(_test_group())
+    assert "PIL" in harness, "pillow left the test group; this rule is checking nothing about it"
+    offenders = {
+        path.relative_to(ROOT): sorted(
+            name for name in _imports(path) if name.split(".")[0] in harness
+        )
+        for path in sorted((ROOT / "aobs").rglob("*.py"))
+        if "vendor" not in path.parts and not path.is_relative_to(ROOT.joinpath(*_NOT_SHIPPED))
+    }
+    assert not {path: names for path, names in offenders.items() if names}
+
+
+def test_a_new_harness_package_fails_rather_than_being_skipped() -> None:
+    """A distribution the map does not know is the whole point of the map.
+
+    Skipping it would leave the next harness package silently importable from an appliance
+    module — the same shape as `docs/failure-states.md`'s key inventory going quiet, which it did
+    twice before a check stopped it.
+    """
+    with pytest.raises(AssertionError, match="numpy"):
+        _harness_modules(["pytest>=8", "numpy>=2"])
+    assert _harness_modules(["pytest>=8", "pillow>=10"]) == {"pytest", "PIL"}
+
+
+def test_the_module_that_does_not_ship_is_the_one_the_image_build_excludes() -> None:
+    """Two spellings of one exclusion, kept equal.
+
+    The rule above exempts `aobs/adapters/fake/` from the harness-import ban because
+    `build/mkiso.sh` does not copy it. If the `tar` flag were dropped, the fakes would ship again
+    and this suite would go on exempting them — a hole with a comment over it.
+    """
+    mkiso = (ROOT / "build" / "mkiso.sh").read_text(encoding="utf-8")
+    assert f"--exclude='{'/'.join(_NOT_SHIPPED)}'" in mkiso, (
+        "build/mkiso.sh no longer excludes the fake adapters from the app tree, so they ship "
+        "again and the harness-import rule above is exempting a module that is in the image"
+    )
+
+
 def test_there_is_no_screen_port() -> None:
     """The tree and `docs/test-harness.md` say the same thing, or neither is trustworthy.
 
