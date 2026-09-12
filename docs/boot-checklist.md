@@ -411,6 +411,30 @@ no prompt: everything below is observed on the screen, in order, in one Session.
 moves off it. The screen where `esc` has nowhere to go is the one screen whose keys must be printed,
 and it once was not — a boot reached it and could go no further.
 
+### `S-1b` — What the home screen says about the camera, recorded verbatim
+
+The one row whose answer is most often *nothing*, and *nothing* is an answer. This is the only
+reading a Session boot can give about USB authorization — `R-2` is read from source precisely
+because an inspection boot has replaced the PID 1 that would have written it.
+
+**Copy the camera note off the screen exactly**, or write *no camera note shown* if there is none.
+There are six things it can be, and they are not interchangeable:
+
+| what is on screen | what it means |
+|---|---|
+| no note at all | a camera was found and every scan path is available |
+| *No camera was found …* alone | no capture node, and nothing arrived late — consistent with a machine that has no webcam |
+| *No camera was found …* **plus** *One USB device arrived after the bus was closed …* | a Late arrival exists. **This is the row `docs/roadmap.md` is waiting on.** Record the `idVendor:idProduct` and the device name |
+| *The camera offers no image format …* | a node existed and negotiation failed — not a timing fault |
+| *The camera granted no capture buffers …* | as above |
+| *The camera was found but produced no frames …* | as above |
+
+**Pass**: whatever is on screen is written down, including its absence. This row cannot fail; it can
+only be unanswered, and an unanswered row is an incomplete record. A run that shows the third line
+is the first observation that separates the two causes `docs/failure-states.md` says V4L2 cannot,
+and it is what a diagnosis of the intermittent camera would be built from — it is still not, by
+itself, that diagnosis.
+
 ### `S-2` — Half-bright renders on this panel
 
 **Pass**: on the home screen, the rows that need a wallet are visibly greyer than the rows that do
@@ -561,6 +585,7 @@ to match.
 | `R-1` one userspace process | | |
 | `R-2` authorized_default | | |
 | `S-1` keymap picker | | |
+| `S-1b` camera note, verbatim | | |
 | `S-2` half-bright | | |
 | `S-3` wallet generated | | |
 | `S-4` xpub out by QR | | |

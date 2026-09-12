@@ -143,6 +143,24 @@ The `modprobe` blacklist beside it is a second line and is **never** the claim: 
 policy, and the allowlist is a fact about what is in the image. Say "the module is not present",
 never "the module is blocked".
 
+## Late arrival
+
+A USB device that enumerated after PID 1 set `authorized_default=0`, and therefore binds no driver
+for the rest of the Session. The kernel still gives it a `/sys/bus/usb/devices/` directory and still
+reads its device descriptor — `usb_new_device()` adds the device unconditionally — but
+`usb_generic_driver_probe()` declines to set a configuration, so no interface is ever registered and
+nothing the device could have been is knowable from sysfs. It has a power rail and nothing else.
+
+Never call it an *unauthorised device*: that reads as a verdict the appliance passed on something
+suspicious, and the truth is the opposite — the door closed on schedule and the device was slow.
+Nor a *rejected* or *blocked* device, for the same reason. What happened is a matter of timing, and
+the term says so.
+
+The appliance may report that a late arrival exists and may name its `idVendor:idProduct` and
+descriptor string. It may **not** say which device it is: the class lives in the interface
+descriptor, which is exactly what is never read. So *a camera was deauthorised* is a claim the
+appliance cannot make, however strongly the circumstances suggest it.
+
 ## QR channel
 
 The only data path in or out of the appliance. Inbound is a webcam reading QR codes; outbound is
