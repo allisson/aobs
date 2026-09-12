@@ -115,6 +115,29 @@ the user is choosing what to look at rather than presenting something to check.
 four for positional comparison. Here the human genuinely is doing the comparing, so the formatting
 built for that is the right formatting.
 
+### What the script-type label states
+
+**`BIP84 · tb1q` — the standard, and what every address under it begins with on *this* session's
+network.** The label is rendered in two places: the header above this list, and under the QR on the
+descriptor export screen. It says the same thing in both, from one function.
+
+**The prefix half is a statement about the addresses, so it is derived from the network, never
+fixed.** It was a constant keyed on script type alone, and it printed `bc1q` on a testnet4 wallet
+whose every address begins `tb1q` (#20, found on the 2026-09-11 boot run). Both halves are now
+derived — the standard from the purpose, the prefix from the HRP and the witness version, the same
+two facts the addresses themselves are built from — so there is no second copy of the answer left
+to drift. `bcrt1q` on regtest follows for free.
+
+**"The prefix already says which" above is not an argument that the label is redundant.** That
+section is about a *scanned* address disambiguating its own script type, which is why the scan path
+needs no toggle. This label is on the two screens where the user is choosing what to look at, and on
+the descriptor screen it is the only thing said about the network at all — which is exactly why a
+wrong one costs something on an appliance whose claim is that the user can check what it tells them.
+
+**Checked against a real address, not against a second constant.** The suite derives address 0 for
+every network and script type and asserts the label's prefix is a prefix of it, so a change to
+either derivation fails rather than diverges.
+
 ## One consistency rule with #11
 
 When an address has been **proven** by the scan flow, the appliance **leads with the path and

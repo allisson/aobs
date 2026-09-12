@@ -19,7 +19,7 @@ be the one an attacker's vanity prefix has to beat.
 from __future__ import annotations
 
 from aobs.core.address import AddressCheck, ListedAddress, Verdict
-from aobs.core.wallet import Network, ScriptType, Wallet
+from aobs.core.wallet import Network, ScriptType, Wallet, address_prefix
 from aobs.ui.reviewtext import grouped
 from aobs.ui.widgets.failure import Failure
 
@@ -149,12 +149,21 @@ LIST_KEYS = (
     "esc done  ·  F12 power off"
 )
 
-SCRIPT_TYPE_NAMES = {ScriptType.P2WPKH: "BIP84 · bc1q", ScriptType.P2TR: "BIP86 · bc1p"}
+def script_type_name(network: Network, script_type: ScriptType) -> str:
+    """Which of the two script types this is, and what its addresses begin with on this network.
+
+    Both halves are derived — `ScriptType.purpose` and `address_prefix` — because both used to be
+    a constant and the prefix half of that constant said `bc1q` on a testnet4 wallet whose every
+    address begins `tb1q` (#20). The prefix is a statement about the addresses, so it is written
+    from the same two facts the addresses are, and cannot drift from them.
+    """
+    return f"BIP{script_type.purpose} · {address_prefix(network, script_type)}"
 
 
 def list_header(wallet: Wallet, script_type: ScriptType, *, chain: int) -> str:
     """The path all the rows below share, written once so the rows can be addresses alone."""
-    return f"{wallet.account_path(script_type)}/{chain}/*    {SCRIPT_TYPE_NAMES[script_type]}"
+    name = script_type_name(wallet.network, script_type)
+    return f"{wallet.account_path(script_type)}/{chain}/*    {name}"
 
 
 def list_row(listed: ListedAddress) -> str:
