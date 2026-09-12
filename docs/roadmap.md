@@ -702,7 +702,7 @@ them are claims the repository makes that this run did not support.
       with. No GitHub issue: unlike #20 and #31 there was no open decision to close first, only a
       document that did not match the code.
 
-- [ ] **Post-gate: observe `I-9`'s corrected shell fallback on a panel.** The row offered
+- [x] **Post-gate: observe `I-9`'s corrected shell fallback on a panel.** The row offered
       `printf 'U+2588 [\0342\0226\0210] …'` and it tested no glyph: dash's `printf` consumed
       `\0` plus two octal digits and printed the leftover digit, so the screen showed `260` and
       `261`. `\0ddd` with three digits is the form for a `%b` argument, not for the format string;
@@ -716,9 +716,12 @@ them are claims the repository makes that this run did not support.
       restored in `docs/boot-runs/2026-09-11-cb514-1h.md`, which said the escaped form was what ran
       and then printed the literal glyph — the identical defect, inside the document correcting it.*
 
-      **What is still open is the observation, and only that.** No corrected shell form has been run
-      on a panel; the 2026-09-11 run answered `I-9` with the `python3` form. The row says so, and
-      this entry is struck when a run record shows the `\ddd` form drawing both blocks.
+      *Observed 2026-09-12 on the same machine —* `docs/boot-runs/2026-09-11-cb514-1h.md`,
+      *Addendum. The* `\ddd` *form drew both blocks; the codepoint-escape spelling of the* `python3`
+      *form was photographed drawing all four characters. The image was a different build —*
+      `8dc1b52`*, the documentation commits on top of* `460b475` *— and no read-back digest was
+      taken at the write, so the addendum names an ISO and claims nothing about the medium. The
+      checklist's "not observed on a panel" caveat is removed.*
 
 - [x] **Post-gate: make the checklist capture the image digest when the medium is written.** The
       run record has to name the image that booted, and this one could only name it by the
