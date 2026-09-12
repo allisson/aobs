@@ -197,7 +197,7 @@ checklist that needs adjusting.
 
 This is one half of the graphics decision in `build/modules.allow`, and the half it answers is the
 firmware path you booted. **The other paths stay unobserved and the run record must say so** rather
-than let a reader infer them from one.
+than let a reader infer them from one — `I-7c` is where the UEFI path says it.
 
 ### `I-7b` — Which framebuffer devices were offered, and which driver lost
 
@@ -222,6 +222,32 @@ device, so it does not appear directly in this listing; look for it in the `dmes
 **There is no pass or fail here.** The run record carries what was seen. On the 2026-09-12 run this
 check is what showed `vga=791` had never set a mode — `vga-framebuffer.0`, no `vesafb`, no aperture
 conflict — and `vga=` was removed from the image as a result.
+
+### `I-7c` — The UEFI framebuffer path
+
+```
+cat /sys/class/graphics/fb0/name
+ls /sys/devices/platform/ | grep -i framebuffer
+stty size
+```
+
+**This row exists to be `deviated` on a machine that has no UEFI path**, and that is every machine
+this project has recorded. It is the second half of the graphics decision in `build/modules.allow`:
+that decision covers two firmware paths, `I-7` answers whichever one you booted, and without this
+row the other one has no place to be recorded and is read as a path nobody considered.
+
+**Pass** requires all three: `fb0/name` reads `efifb`, the platform listing shows
+`efi-framebuffer`, and `stty size` reports at least **43 rows and 100 columns**. The middle readout
+is the one that discriminates — per `I-7b`, `efi-framebuffer` is `sysfb` reporting a GOP
+framebuffer from the firmware, so a UEFI boot whose console came from somewhere else does not pass
+by having drawn something.
+
+**`fail`** is a UEFI boot that draws nothing, comes up under the floor, or reaches the console
+through a driver this image does not ship. **`deviated`** is a machine with no UEFI path at all —
+the target machine's `RW_LEGACY` SeaBIOS is a BIOS path and reaching `efifb` would mean flashing a
+full ROM. **The reason is written in the row, and a `pass` is never inferred from `I-7` passing on
+the other path.** Closing this needs a UEFI boot; `docs/roadmap.md`'s Secure Boot row is where that
+is planned.
 
 ### `I-8` — Which controller the keyboard is on
 
@@ -399,8 +425,6 @@ a booted appliance can answer:
 - **Mnemonic entry and passphrase entry** (`docs/seed-entry.md`) — `S-3` generates a wallet rather
   than restoring one, so the twelve/twenty-four-word entry path and hold-to-reveal are unexercised.
 - **The encrypted wallet QR** (`docs/encrypted-wallet-qr.md`) and its export password.
-- **The UEFI boot path.** `I-7` records whichever firmware path you booted. `build/grub.cfg` ships a
-  UEFI path; if you did not boot it, it stays unobserved and the run record says so.
 
 ---
 
@@ -463,6 +487,8 @@ to match.
 | `I-5` USB classes | | |
 | `I-6` HID and camera only | | |
 | `I-7` framebuffer and console size | | |
+| `I-7b` framebuffer devices offered | | |
+| `I-7c` UEFI framebuffer path | | |
 | `I-8` keyboard controller | | |
 | `I-9` glyph — `█` received | | |
 | `I-9` glyph — `░` missing | | |
