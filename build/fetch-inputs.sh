@@ -10,22 +10,28 @@
 #     sh build/fetch-inputs.sh              # populate build/inputs/, verify against inputs.sha256
 #     sh build/fetch-inputs.sh --refresh    # populate, then REWRITE inputs.sha256 (pin change)
 #
-# TWO ROLES, TWO SOURCES, and the difference is which one decides what the hashes ARE.
+# TWO ROLES, ONE ARCHIVE. `--refresh` decides what the hashes are; every other run is judged
+# against them. Both read snapshot.debian.org at the instant in `build/snapshot.env`, and #41 is
+# why that is not a preference.
 #
-# `--refresh` is run by a human when a pin changes, and it fetches from snapshot.debian.org. That
-# archive is what will still serve these exact versions in a year, which is the whole reason a
-# release stays rebuildable after the live mirror has moved on. It is slow and it rate-limits;
-# both are acceptable for a step that runs on a pin change and produces a diff someone reads.
+# It used to read the live mirror on the verify path, on an assumption written into the comment
+# below `fetch_debs`: for a stable suite eight days on, the two archives are the same bytes. They
+# are not. `build/apt-versions.txt` pins 19 names and apt resolves the closure, so what the
+# closure IS depends on the archive it is resolved against — and trixie took a point release
+# eleven days after `DEBIAN_SNAPSHOT=20260901T000000Z`. 27 transitive packages moved: `base-files`
+# to deb13u7, `bash` to +b10, `gzip` to +deb13u1, `python3.13` to deb13u5, `tzdata` to 2026c. The
+# gate then rejected a pool that `--refresh` reproduces byte for byte.
 #
-# Every other run — CI, a fresh clone — fetches from the live mirror and verifies the result
-# against the committed `build/inputs.sha256`. Same bytes or the gate fails. Reproducibility does
-# not depend on which host served a byte; it depends on the hash file, exactly as this script s
-# integrity does not depend on TLS. Anything the live mirror no longer carries falls back to
-# snapshot automatically.
+# The fallback did not catch it and could not: it handles a version the live mirror no longer
+# CARRIES, and a point release is the mirror carrying something NEWER. What pins the closure is the
+# instant, so the instant is what both paths have to read. There is nothing left to fall back to.
 #
 # Measured 2026-09-07: snapshot.debian.org from a GitHub runner hung past ten minutes in apt s
 # retry loop ("Tried to start delayed item ... but failed"), while all 17 pinned versions were
-# present on deb.debian.org. Runner address ranges are throttled far harder than a laptop.
+# present on deb.debian.org. That cost is now paid on every cold run rather than only on a pin
+# change, and it is the right trade: `Acquire::Retries 8` turns a throttled fetch into a slow one,
+# and CI's cache means only a cold run pays it at all. A flake a retry fixes beats a green build
+# that resolved against an archive nobody pinned.
 #
 # WHY THIS EXISTS RATHER THAN APT-FROM-SNAPSHOT IN THE DOCKERFILE. snapshot.debian.org is a
 # low-capacity archive service that rate-limits: measured on 2026-09-07, five consecutive
@@ -113,36 +119,25 @@ fetch_debs() {
     # $1: output subdirectory; $2: space-separated pins
     out=$1
     pins=$2
-    echo "==> resolving and downloading the $(basename "$out") closure (source: $SOURCE)"
+    echo "==> resolving and downloading the $(basename "$out") closure (source: snapshot @ $DEBIAN_SNAPSHOT)"
     docker run --rm --platform=linux/amd64 \
         -e DEBIAN_SNAPSHOT="$DEBIAN_SNAPSHOT" -e DEBIAN_SUITE="$DEBIAN_SUITE" \
-        -e PINS="$pins" -e SOURCE="$SOURCE" \
+        -e PINS="$pins" \
         -v "$PWD/$out:/out" \
         debian:trixie-slim sh -euc '
             # http, and the reason is in this script s header: no ca-certificates in slim, and
             # apt s integrity is the signed InRelease, not the transport.
             #
-            # snapshot serves the archive as it stood; the live mirror serves it as it stands, and
-            # for a stable suite eight days on those are the same bytes. Which host is used is
-            # decided by SOURCE and never changes what is accepted: build/inputs.sha256 does that.
-            if [ "$SOURCE" = "snapshot" ]; then
-                printf "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s/ %s main\n" \
-                    "$DEBIAN_SNAPSHOT" "$DEBIAN_SUITE" > /etc/apt/sources.list.d/pinned.list
-                printf "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s/ %s-security main\n" \
-                    "$DEBIAN_SNAPSHOT" "$DEBIAN_SUITE" >> /etc/apt/sources.list.d/pinned.list
-                # Retries are not optional against snapshot.debian.org; see the header.
-                printf "Acquire::Retries \"8\";\nAcquire::http::Timeout \"60\";\n" \
-                    > /etc/apt/apt.conf.d/99retries
-            else
-                printf "deb http://deb.debian.org/debian %s main\n" "$DEBIAN_SUITE" \
-                    > /etc/apt/sources.list.d/pinned.list
-                printf "deb http://deb.debian.org/debian-security %s-security main\n" "$DEBIAN_SUITE" \
-                    >> /etc/apt/sources.list.d/pinned.list
-                # Short and few: if the mirror has moved past a pin, failing fast into the
-                # snapshot fallback beats grinding through eight retries per file.
-                printf "Acquire::Retries \"2\";\nAcquire::http::Timeout \"30\";\n" \
-                    > /etc/apt/apt.conf.d/99retries
-            fi
+            # The pinned instant, on every path. What the closure IS depends on the archive it is
+            # resolved against, so resolving against a moving one made the hash file a statement
+            # about the day it ran (#41).
+            printf "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s/ %s main\n" \
+                "$DEBIAN_SNAPSHOT" "$DEBIAN_SUITE" > /etc/apt/sources.list.d/pinned.list
+            printf "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s/ %s-security main\n" \
+                "$DEBIAN_SNAPSHOT" "$DEBIAN_SUITE" >> /etc/apt/sources.list.d/pinned.list
+            # Retries are not optional against snapshot.debian.org; see the header.
+            printf "Acquire::Retries \"8\";\nAcquire::http::Timeout \"60\";\n" \
+                > /etc/apt/apt.conf.d/99retries
             rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources
 
             apt-get update
@@ -201,27 +196,19 @@ fetch_kernel() {
     # $1: output subdirectory; $2: space-separated pins
     out=$1
     pins=$2
-    echo "==> downloading the kernel packages, unresolved (source: $SOURCE)"
+    echo "==> downloading the kernel packages, unresolved (source: snapshot @ $DEBIAN_SNAPSHOT)"
     docker run --rm --platform=linux/amd64 \
         -e DEBIAN_SNAPSHOT="$DEBIAN_SNAPSHOT" -e DEBIAN_SUITE="$DEBIAN_SUITE" \
-        -e PINS="$pins" -e SOURCE="$SOURCE" \
+        -e PINS="$pins" \
         -v "$PWD/$out:/out" \
         debian:trixie-slim sh -euc '
-            if [ "$SOURCE" = "snapshot" ]; then
-                printf "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s/ %s main\n" \
-                    "$DEBIAN_SNAPSHOT" "$DEBIAN_SUITE" > /etc/apt/sources.list.d/pinned.list
-                printf "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s/ %s-security main\n" \
-                    "$DEBIAN_SNAPSHOT" "$DEBIAN_SUITE" >> /etc/apt/sources.list.d/pinned.list
-                printf "Acquire::Retries \"8\";\nAcquire::http::Timeout \"60\";\n" \
-                    > /etc/apt/apt.conf.d/99retries
-            else
-                printf "deb http://deb.debian.org/debian %s main\n" "$DEBIAN_SUITE" \
-                    > /etc/apt/sources.list.d/pinned.list
-                printf "deb http://deb.debian.org/debian-security %s-security main\n" "$DEBIAN_SUITE" \
-                    >> /etc/apt/sources.list.d/pinned.list
-                printf "Acquire::Retries \"2\";\nAcquire::http::Timeout \"30\";\n" \
-                    > /etc/apt/apt.conf.d/99retries
-            fi
+            printf "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s/ %s main\n" \
+                "$DEBIAN_SNAPSHOT" "$DEBIAN_SUITE" > /etc/apt/sources.list.d/pinned.list
+            printf "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s/ %s-security main\n" \
+                "$DEBIAN_SNAPSHOT" "$DEBIAN_SUITE" >> /etc/apt/sources.list.d/pinned.list
+            # Retries are not optional against snapshot.debian.org; see the header.
+            printf "Acquire::Retries \"8\";\nAcquire::http::Timeout \"60\";\n" \
+                > /etc/apt/apt.conf.d/99retries
             rm -f /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources
 
             apt-get update
@@ -248,35 +235,12 @@ fetch_kernel() {
         '
 }
 
-# --refresh decides what the hashes are, so it comes from the archive that will still have these
-# versions in a year. Everything else takes the fast path and is judged by the hash file.
-if [ "$REFRESH" -eq 1 ]; then
-    SOURCE=snapshot
-else
-    SOURCE=${AOBS_DEB_SOURCE:-mirror}
-fi
-
+# There is no source to choose and no fallback to arrange: both paths read the pinned instant, and
+# `AOBS_DEB_SOURCE` is gone with them (#41). An escape hatch back to the live mirror is the thing
+# that broke, and a knob nobody sets is a knob that is wrong when someone does.
 fetch_group() {
-    # $1 output dir; $2 pins; $3 fetcher (fetch_debs | fetch_kernel). Try $SOURCE; on failure fall
-    # back to snapshot, which is the only host guaranteed to still carry a version the live mirror
-    # has moved past.
-    _fetch=${3:-fetch_debs}
-    if "$_fetch" "$1" "$2"; then
-        return 0
-    fi
-    if [ "$SOURCE" = "snapshot" ]; then
-        echo "==> snapshot.debian.org failed and there is no further fallback" >&2
-        return 1
-    fi
-    echo "==> the live mirror could not satisfy every pin; falling back to snapshot" >&2
-    rm -f "$1"/*.deb
-    # A prefix assignment does not scope to a shell function in POSIX sh, so set and restore.
-    _prev=$SOURCE
-    SOURCE=snapshot
-    "$_fetch" "$1" "$2"
-    _rc=$?
-    SOURCE=$_prev
-    return $_rc
+    # $1 output dir; $2 pins; $3 fetcher (fetch_debs | fetch_kernel).
+    "${3:-fetch_debs}" "$1" "$2"
 }
 
 # The kernel pins are split out of the appliance group before resolution. They stay in the
