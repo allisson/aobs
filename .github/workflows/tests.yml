@@ -87,11 +87,14 @@ jobs:
       # construction — never a stale pool silently reused.
       #
       # The cache is a speed optimisation and nothing more. On a miss, `fetch-inputs.sh` fetches
-      # from deb.debian.org and verifies the result against the committed `build/inputs.sha256` —
-      # hashes that were produced from snapshot.debian.org by a human running `--refresh`. Measured
-      # 2026-09-07: the mirror served all 169 MB in 6 s and the pool matched the snapshot-derived
-      # hashes byte for byte, while snapshot itself hung this job past ten minutes from a runner.
-      # Which host served a byte is not what makes the build reproducible; the hash file is.
+      # from snapshot.debian.org at the instant in `build/snapshot.env` and verifies the result
+      # against the committed `build/inputs.sha256` — the same archive that produced those hashes.
+      #
+      # It fetched from deb.debian.org until #41. Measured 2026-09-07, that served all 169 MB in
+      # 6 s and matched byte for byte, while snapshot hung this job past ten minutes; measured
+      # 2026-09-12, it matched nothing, because trixie had taken a point release and 27 transitive
+      # packages resolved newer than the pinned instant. The mirror is fast and it is not the
+      # archive the hashes describe, so a cold run is slower now and says something true.
       - name: Cache build/inputs
         id: inputs
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
