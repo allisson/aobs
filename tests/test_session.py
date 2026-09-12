@@ -34,6 +34,7 @@ from textual.widgets import Static
 
 from aobs.adapters.fake import (
     FixedEntropySource,
+    FixedUsbBus,
     ImageFileFrameSource,
     RecordingKeymap,
     RecordingPower,
@@ -121,6 +122,7 @@ def build(**overrides: object) -> SignerApp:
         "entropy": FixedEntropySource(),
         "power": RecordingPower(),
         "keymap": RecordingKeymap(),
+        "usb": FixedUsbBus(),
         # The walks pull the scan screen's frames themselves, one call per frame: pacing
         # twenty-seven frames at 5 fps would cost the suite seven seconds to assert something
         # that is not Textual's clock.

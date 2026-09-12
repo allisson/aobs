@@ -25,6 +25,7 @@ from textual.widgets import Button, Static
 
 from aobs.adapters.fake import (
     FixedEntropySource,
+    FixedUsbBus,
     ImageFileFrameSource,
     RecordingKeymap,
     RecordingPower,
@@ -56,6 +57,7 @@ def build(paths: list[Path], *, wallet: Wallet | None = None) -> SignerApp:
         entropy=FixedEntropySource(),
         power=RecordingPower(),
         keymap=RecordingKeymap(),
+        usb=FixedUsbBus(),
         # No interval: this suite pulls the frames itself, one call per frame, so what a test
         # asserts never depends on how fast the machine running it happens to be.
         scan_frame_interval=None,
@@ -99,6 +101,7 @@ def test_the_appliance_itself_pulls_frames_five_times_a_second() -> None:
         entropy=FixedEntropySource(),
         power=RecordingPower(),
         keymap=RecordingKeymap(),
+        usb=FixedUsbBus(),
     )
     assert INBOUND_FRAME_RATE == 5
     assert app.scan_frame_interval == 1 / INBOUND_FRAME_RATE

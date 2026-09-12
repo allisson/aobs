@@ -17,6 +17,7 @@ import pytest
 
 from aobs.adapters.fake import (
     FixedEntropySource,
+    FixedUsbBus,
     ImageFileFrameSource,
     RecordingKeymap,
     RecordingPower,
@@ -74,6 +75,7 @@ async def test_a_fault_inside_the_running_app_never_puts_the_sentinel_on_the_dis
         entropy=FixedEntropySource(),
         power=RecordingPower(),
         keymap=RecordingKeymap(),
+        usb=FixedUsbBus(),
     )
     with pytest.raises(ValueError):
         async with app.run_test(size=(128, 48)) as pilot:
@@ -272,6 +274,7 @@ async def test_the_passphrase_field_retains_nothing_after_it_is_torn_down() -> N
         entropy=FixedEntropySource(),
         power=RecordingPower(),
         keymap=RecordingKeymap(),
+        usb=FixedUsbBus(),
     )
     async with app.run_test(size=(128, 48)) as pilot:
         await pilot.press("f10")  # the keymap picker, on to home
@@ -306,6 +309,7 @@ async def test_a_seed_grid_retains_nothing_after_it_is_torn_down() -> None:
         entropy=FixedEntropySource(),
         power=RecordingPower(),
         keymap=RecordingKeymap(),
+        usb=FixedUsbBus(),
     )
     async with app.run_test(size=(128, 48)) as pilot:
         await pilot.press("f10")  # to home

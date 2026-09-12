@@ -21,7 +21,7 @@ from textual.widgets import Button, Static
 
 from aobs.adapters.fake import (
     FixedEntropySource,
-    ImageFileFrameSource,
+    FixedUsbBus,
     RecordingKeymap,
     RecordingPower,
 )
@@ -29,7 +29,8 @@ from aobs.core.failure import FAILURE_MESSAGE
 from aobs.core.release import ADVISORIES_URL, Release
 from aobs.core.wallet import Network, Wallet
 from aobs.core.wallet_qr import export_wallet
-from aobs.ports.frame_source import Frame
+from aobs.ports.frame_source import CameraError, CameraReason, Frame
+from aobs.ports.usb_bus import LateArrival
 from aobs.ui.app import SignerApp
 from aobs.ui.geometry import MAX_COLUMNS, MIN_COLUMNS, MIN_ROWS
 from aobs.ui.screens.address_list import AddressListScreen
@@ -49,7 +50,14 @@ from aobs.ui.screens.seed_entry import SeedEntryScreen
 from aobs.ui.screens.word_count import WordCountScreen
 from aobs.ui.screens.refusal import RefusalScreen
 from aobs.ui.screens.review import ReviewScreen
-from aobs.ui.screens.home import NO_CAMERA, PATHS, HomeScreen
+from aobs.ui.screens.home import (
+    CAMERA_CONDITIONS,
+    LATE_ARRIVAL,
+    LATE_ARRIVALS,
+    NO_CAMERA,
+    PATHS,
+    HomeScreen,
+)
 from aobs.ui.screens.keymap import KEYS as KEYMAP_KEYS
 from aobs.ui.screens.keymap import KeymapScreen
 from aobs.ui.screens.network import NetworkScreen
@@ -103,12 +111,29 @@ class _UnpluggedMidSession:
         self.closed = True
 
 
+class _NoCaptureDevice:
+    """A machine with no webcam, spelled the way the appliance spells it.
+
+    `ImageFileFrameSource([])` stood here and it staged a different failure: an empty iterator is a
+    device that answered every call and produced nothing, which `CameraReason` calls `NO_FRAMES`.
+    The real adapter never does that — with no video node it raises `NO_CAPTURE_DEVICE` before
+    opening anything — and a harness that fails differently from the appliance is the one thing
+    `aobs/ports/frame_source.py` says a harness may not be.
+    """
+
+    def frames(self) -> Iterator[Frame]:
+        raise CameraError(CameraReason.NO_CAPTURE_DEVICE, "no capture device")
+
+    def close(self) -> None: ...
+
+
 def build(*, camera: bool = True, **overrides: object) -> SignerApp:
     ports = {
-        "frames": _OneFrameSource() if camera else ImageFileFrameSource([]),
+        "frames": _OneFrameSource() if camera else _NoCaptureDevice(),
         "entropy": FixedEntropySource(),
         "power": RecordingPower(),
         "keymap": RecordingKeymap(),
+        "usb": FixedUsbBus(),
         # The scan screen's frames are pulled by the tests, never by a timer: see
         # `tests/test_scan_screen.py`.
         "scan_frame_interval": None,
@@ -557,6 +582,145 @@ async def test_a_camera_that_is_present_leaves_every_scan_path_available() -> No
             assert ("path-unavailable" in widget.classes) == path.needs_wallet, path.name
 
 
+# --- Which of the four conditions, and what arrived too late ---------------------------------------
+#
+# `docs/failure-states.md` tables the four sentences and settles that a late arrival is reported and
+# never interpreted. These hold the screen to both.
+
+
+def _failing(reason: CameraReason) -> object:
+    """A `FrameSource` that raises `reason` the moment it is asked for a frame."""
+
+    class _Source:
+        def frames(self):
+            raise CameraError(reason, f"staged: {reason.value}")
+
+        def close(self) -> None: ...
+
+    return _Source()
+
+
+WEBCAM = LateArrival("04f2", "b64f", "Chicony HD WebCam")
+BLUETOOTH = LateArrival("8087", "0aaa", None)
+
+
+@pytest.mark.parametrize("reason", list(CameraReason))
+async def test_each_condition_gets_its_own_sentence_and_only_its_own(
+    reason: CameraReason,
+) -> None:
+    """Parameterised over `CameraReason` itself, so a fifth condition fails here until it says
+    what it shows. Three of these four mean a camera was found and then failed, and printing
+    `NO_CAMERA` for them was a claim the user could not check and that was false."""
+    app = build(frames=_failing(reason))
+    async with app.run_test(size=CONSOLE) as pilot:
+        await reach_home(app, pilot)
+        assert app.camera_condition is reason
+        assert app.camera_available is False
+        rendered = texts(app)
+        assert CAMERA_CONDITIONS[reason] in rendered
+        for other, sentence in CAMERA_CONDITIONS.items():
+            if other is not reason:
+                assert sentence not in rendered, other
+
+
+async def test_no_camera_and_a_late_arrival_names_the_device_without_interpreting_it() -> None:
+    """The whole point of #19: an operator who would otherwise read *No camera was found* and
+    believe the machine has none learns that something arrived too late to be authorised, and
+    recognises the name. The appliance never says it was the camera."""
+    app = build(camera=False, usb=FixedUsbBus([WEBCAM]))
+    async with app.run_test(size=CONSOLE) as pilot:
+        await reach_home(app, pilot)
+        rendered = texts(app)
+        assert NO_CAMERA in rendered
+        assert LATE_ARRIVAL in rendered
+        assert "04f2:b64f Chicony HD WebCam" in rendered
+        # Reported, never interpreted. The class lives in an interface descriptor that is never
+        # read for an unauthorised device, so this is a claim the appliance cannot make.
+        assert "deauthorised" not in rendered
+        assert "the camera was" not in rendered.lower()
+
+
+async def test_no_camera_and_nothing_late_says_exactly_what_it_said_before() -> None:
+    """A machine that genuinely has no webcam. The new line is absent, not empty."""
+    app = build(camera=False, usb=FixedUsbBus())
+    async with app.run_test(size=CONSOLE) as pilot:
+        await reach_home(app, pilot)
+        rendered = texts(app)
+        assert NO_CAMERA in rendered
+        assert LATE_ARRIVAL not in rendered
+        assert not app.screen.query("#late-arrival-0")
+
+
+async def test_a_working_camera_says_nothing_about_a_late_arrival() -> None:
+    """With the scan paths working there is no disabled path for the line to be a reason for, and
+    this screen is not a notification area."""
+    app = build(camera=True, usb=FixedUsbBus([WEBCAM]))
+    async with app.run_test(size=CONSOLE) as pilot:
+        await reach_home(app, pilot)
+        rendered = texts(app)
+        assert LATE_ARRIVAL not in rendered
+        assert "04f2:b64f" not in rendered
+
+
+async def test_more_than_one_late_arrival_is_plural_and_one_line_each() -> None:
+    app = build(camera=False, usb=FixedUsbBus([WEBCAM, BLUETOOTH]))
+    async with app.run_test(size=CONSOLE) as pilot:
+        await reach_home(app, pilot)
+        rendered = texts(app)
+        assert LATE_ARRIVALS.format(count=2) in rendered
+        assert "04f2:b64f Chicony HD WebCam" in rendered
+        # No product string: the identifiers stand alone rather than gaining an invented name.
+        assert "8087:0aaa" in rendered
+
+
+async def test_the_bus_is_read_again_on_the_way_back_to_the_home_screen() -> None:
+    """The fault being chased is a device that enumerated late, so a single reading taken at
+    startup can be taken before it arrived — which would leave the appliance silent in exactly the
+    case the reading exists for. Walked rather than recomposed by hand: `on_screen_resume` is the
+    thing that has to hold, and calling `refresh()` directly would pass even if it did not.
+    """
+    bus = FixedUsbBus()
+    app = build(camera=False, usb=bus)
+    async with app.run_test(size=CONSOLE) as pilot:
+        await reach_home(app, pilot)
+        first = bus.reads
+        assert first >= 1
+        assert LATE_ARRIVAL not in texts(app)
+
+        # Away from the home screen, and the device arrives while the user is on the network screen.
+        await pilot.press("up")
+        await pilot.press("f10")
+        await pilot.pause()
+        assert isinstance(app.screen, NetworkScreen)
+        bus.arrivals = (WEBCAM,)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, HomeScreen)
+        assert bus.reads > first
+        assert LATE_ARRIVAL in texts(app)
+        assert "04f2:b64f Chicony HD WebCam" in texts(app)
+
+
+async def test_the_home_screen_still_fits_the_console_floor_with_three_late_arrivals() -> None:
+    """No cap on how many are listed: the bound is proved rather than invented. A machine with six
+    late arrivals has a problem this line is not going to be the worst of."""
+    arrivals = [
+        LateArrival("04f2", "b64f", "Chicony HD WebCam"),
+        LateArrival("8087", "0aaa", "Intel Bluetooth"),
+        LateArrival("0bda", "0129", "Realtek USB2.0-CRW"),
+    ]
+    app = build(camera=False, usb=FixedUsbBus(arrivals))
+    async with app.run_test(size=(MIN_COLUMNS, MIN_ROWS)) as pilot:
+        await reach_home(app, pilot)
+        frame = app.screen.query_one("#frame")
+        assert frame.outer_size.height <= MIN_ROWS
+        for index in range(len(arrivals) + 1):
+            widget = app.screen.query_one(f"#late-arrival-{index}", Static)
+            assert len(str(widget.content)) <= MAX_COLUMNS
+            assert widget.region.width <= MAX_COLUMNS
+
+
 # --- Choosing a path -----------------------------------------------------------------------------
 
 
@@ -689,14 +853,16 @@ def test_the_entry_point_wires_the_real_adapters_and_only_those() -> None:
     every claim it makes. `real_adapters()` is the one place the halves are chosen, and every one
     of them is real — the dangerous configuration is unreachable rather than merely discouraged.
 
-    Constructing them is free of hardware on purpose: none of the four touches a device until it
-    is used, which is what lets this run in a container with no camera and no keymap tree.
+    Constructing them is free of hardware on purpose: none of the five touches a device until it
+    is used, which is what lets this run in a container with no camera, no keymap tree and no
+    `/sys/bus/usb`.
     """
     import aobs.__main__ as entry
     from aobs.adapters.real import (
         ForcedPowerOff,
         KernelEntropySource,
         LoadkeysKeymap,
+        SysfsUsbBus,
         V4L2FrameSource,
     )
 
@@ -706,6 +872,7 @@ def test_the_entry_point_wires_the_real_adapters_and_only_those() -> None:
         "entropy": KernelEntropySource,
         "power": ForcedPowerOff,
         "keymap": LoadkeysKeymap,
+        "usb": SysfsUsbBus,
     }
 
 

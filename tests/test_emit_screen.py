@@ -15,6 +15,7 @@ import math
 
 from aobs.adapters.fake import (
     FixedEntropySource,
+    FixedUsbBus,
     ImageFileFrameSource,
     RecordingKeymap,
     RecordingPower,
@@ -50,6 +51,7 @@ def build() -> SignerApp:
         entropy=FixedEntropySource(),
         power=RecordingPower(),
         keymap=RecordingKeymap(),
+        usb=FixedUsbBus(),
         network=Network.SIGNET,
         scan_frame_interval=None,
         # The suite steps the animation itself: 47 frames at 2 fps would cost 23 seconds to
@@ -379,6 +381,7 @@ def test_the_appliance_itself_paces_the_animation_from_the_ladder() -> None:
         entropy=FixedEntropySource(),
         power=RecordingPower(),
         keymap=RecordingKeymap(),
+        usb=FixedUsbBus(),
     )
     assert app.emit_animated is True
     assert UR_FRAME_RATE_LADDER[0] == 2

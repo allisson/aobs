@@ -100,6 +100,17 @@ worthless in every claim it makes.
 real `zxing-cpp` against real pixels — the fake is the *source*, never the decoder, because a fake
 decoder would test the harness's idea of a QR code rather than a QR code.
 
+**The USB bus** is a list of late arrivals fed through `UsbBus`, and the fake counts how many times
+it was asked. That count is the point: the home screen's contract is that it re-reads on every
+composition, and a test that recomposed by hand would pass even if `on_screen_resume` had stopped
+firing.
+
+**A camera that is absent** is staged the way the appliance fails, not the way the harness finds
+convenient. An empty `FrameSource` is a device that answered and produced nothing — `NO_FRAMES` —
+while a machine with no video node raises `NO_CAPTURE_DEVICE` before anything is opened. The two
+reach different sentences, so staging one while meaning the other tests a screen the appliance
+never shows.
+
 **The display** is asserted through Textual's `run_test()`, against the geometry the appliance
 actually has: 85 columns × 43 rows, which is the QR display and the floor `aobs/ui/geometry.py`
 enforces. Nothing in the boot path fixes a console size — see

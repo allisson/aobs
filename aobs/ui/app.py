@@ -6,8 +6,9 @@ implementations of an interface. So the app is the seam: tests drive this object
 `run_test()`, pressing real keys against real screens, and the console adapter will run the very
 same object. `docs/test-harness.md`'s port table says so.
 
-The four ports it is handed are the things that genuinely do have two implementations. The app
-never reaches for a camera, for randomness, for a power-off or for the console's keymap by itself.
+The five ports it is handed are the things that genuinely do have two implementations. The app
+never reaches for a camera, for randomness, for a power-off, for the console's keymap or for the
+USB bus by itself.
 """
 
 from __future__ import annotations
@@ -24,9 +25,10 @@ from aobs.core.release import UNKNOWN, Release
 from aobs.core.wallet import Network, Wallet
 from aobs.core.wallet_qr import ExportedWallet
 from aobs.ports.entropy_source import EntropySource
-from aobs.ports.frame_source import FrameSource
+from aobs.ports.frame_source import CameraError, CameraReason, FrameSource
 from aobs.ports.keymap import Keymap
 from aobs.ports.power import Power
+from aobs.ports.usb_bus import UsbBus
 from aobs.ui.geometry import MAX_COLUMNS, fits
 from aobs.ui.scanning import ScanTarget
 from aobs.ui.screens.camera_lost import CameraLostScreen
@@ -111,6 +113,7 @@ class SignerApp(App[None]):
         entropy: EntropySource,
         power: Power,
         keymap: Keymap,
+        usb: UsbBus,
         network: Network = Network.MAINNET,
         release: Release = UNKNOWN,
         scan_frame_interval: float | None = 1 / INBOUND_FRAME_RATE,
@@ -122,6 +125,11 @@ class SignerApp(App[None]):
         self.entropy = entropy
         self.power = power
         self.keymap = keymap
+        #: Asked again on every home-screen composition rather than read once here, and that is
+        #: the whole reason it is a port. The fault it exists to catch is a device that enumerated
+        #: late; a reading taken at startup can be taken before the device it is looking for has
+        #: arrived, which would make the probe silent in exactly the case it was built for.
+        self.usb = usb
         #: What the image says about itself, read once by `aobs/__main__.py` and never again. It is
         #: **not** a fifth port: reading one file has one implementation, and the seam the tests
         #: need is this value being passed in. The default is the development build a source tree
@@ -159,7 +167,11 @@ class SignerApp(App[None]):
         #: onto a different chain with only the header changing. The rule the session actually has
         #: is *fixed for the rest of the session*, so it is the rule that is written down.
         self.network_fixed = False
-        self.camera_available = False
+        #: Which of `CameraReason`'s four conditions the probe hit, or `None` for a camera that
+        #: works. It is the state and `camera_available` is derived from it, rather than the two
+        #: being kept in step by hand: nothing would catch a path that set one and not the other,
+        #: and the pair disagreeing means a screen offering a scan this session cannot do.
+        self.camera_condition: CameraReason | None = CameraReason.NO_CAPTURE_DEVICE
         #: What an unrecoverable fault said, for a test to read. Never a traceback.
         self.fatal_message: str | None = None
         #: The bytes the last completed scan produced. This is where the inbound spec ends: what
@@ -197,17 +209,42 @@ class SignerApp(App[None]):
             # truncated address goes unnoticed. Nothing else in the session starts.
             self.push_screen(ConsoleTooSmallScreen(columns, rows))
             return
-        self.camera_available = self._camera_present()
+        self.camera_condition = self._probe_camera()
         self.push_screen(KeymapScreen())
 
-    def _camera_present(self) -> bool:
+    @property
+    def camera_available(self) -> bool:
+        """Whether any path that scans a QR code can run this session."""
+        return self.camera_condition is None
+
+    def _probe_camera(self) -> CameraReason | None:
         """Ask the `FrameSource` for one frame, once, before any secret exists.
 
-        A source that yields nothing is a machine with no webcam, and that disables the scan paths
-        and nothing else — generating a wallet and exporting its descriptor are both outbound and
-        need no camera at all.
+        `None` is a working camera. Anything else disables the scan paths and nothing else —
+        generating a wallet and exporting its descriptor are both outbound and need no camera at
+        all.
+
+        **This keeps the condition where `_pull_frames` throws it away**, and the two callers want
+        opposite things from the same failure, which is why they are not one method. The mixer
+        wants silence: a camera that contributes nothing blocks nothing. This wants the name, so
+        that three conditions meaning *a camera was found and then failed* stop being reported as
+        *no camera was found*.
+
+        A source that yields no frames without raising is the fourth condition by another route —
+        the device answered every call and produced nothing — so it lands on `NO_FRAMES` rather
+        than on a fifth name for the same thing.
         """
-        return bool(self._pull_frames(1))
+        try:
+            frames = self._pull_frames(1, swallow=False)
+        except CameraError as error:
+            return error.reason
+        except OSError:
+            # An `OSError` the adapter did not name — a failure to open the node, say. The
+            # appliance may not invent which of the four it was, and the scan paths are gone
+            # either way, so it falls back on the sentence that claims the least about what
+            # happened next: no camera was found.
+            return CameraReason.NO_CAPTURE_DEVICE
+        return None if frames else CameraReason.NO_FRAMES
 
     # --- the global keys ---------------------------------------------------------------------
 
@@ -322,7 +359,7 @@ class SignerApp(App[None]):
         """
         return self._pull_frames(ENTROPY_CAMERA_FRAMES)
 
-    def _pull_frames(self, count: int) -> tuple[bytes, ...]:
+    def _pull_frames(self, count: int, *, swallow: bool = True) -> tuple[bytes, ...]:
         """At most `count` frames, and whatever the camera managed if it managed fewer.
 
         The one place the app opens a frame stream of its own — the scan screen runs its own, with
@@ -330,6 +367,12 @@ class SignerApp(App[None]):
         the next stream of the session opens fresh ones, so a leak here is a camera that works
         once per session. The port promises an `Iterator`, not a generator, so `close()` is not
         guaranteed and is called only if it is there.
+
+        `swallow` is the one thing the two callers disagree about. The mixer wants a failure gone —
+        there is nothing the user can do and nothing about their seed that got worse — and the
+        probe wants the reason, to say which of four conditions the camera hit. The release of the
+        device is identical either way, which is why this is a flag here rather than two methods
+        that would each have to remember to close.
         """
         collected: list[bytes] = []
         stream = self.frames.frames()
@@ -339,7 +382,8 @@ class SignerApp(App[None]):
                 if len(collected) == count:
                     break
         except OSError:
-            pass
+            if not swallow:
+                raise
         finally:
             close = getattr(stream, "close", None)
             if close is not None:
@@ -488,8 +532,12 @@ class SignerApp(App[None]):
         `authorized_default=0` is set before the first secret exists, so an unplugged and
         replugged camera is not re-authorized. Backing out of the message lands on a home screen
         with the scan paths disabled, which is the honest remainder of the session.
+
+        The condition is `NO_FRAMES` and not `NO_CAPTURE_DEVICE`, which is the same correction #19
+        makes everywhere else: a camera that worked and then stopped is not a camera that was never
+        found, and the home screen this lands on must not say it was.
         """
-        self.camera_available = False
+        self.camera_condition = CameraReason.NO_FRAMES
         self.switch_screen(CameraLostScreen())
 
     def action_power_off(self) -> None:

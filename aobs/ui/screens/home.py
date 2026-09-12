@@ -6,10 +6,18 @@ settled about a missing camera:
 > Refusing to boot without a camera is the obvious move and it is wrong: **generating a wallet and
 > exporting its descriptor need no camera at all** — both are outbound.
 
-So a missing camera disables the paths that scan and **nothing else**, with one sentence saying
-why. The same reasoning applies to a session that has no wallet yet: a path that needs one is shown
-as unavailable rather than hidden, because a user who cannot find *sign a transaction* concludes
-the appliance cannot sign.
+So a missing camera disables the paths that scan and **nothing else**, with a sentence saying why.
+The same reasoning applies to a session that has no wallet yet: a path that needs one is shown as
+unavailable rather than hidden, because a user who cannot find *sign a transaction* concludes the
+appliance cannot sign.
+
+**Which sentence is four sentences, not one.** `CameraReason` names the four ways the probe can
+fail and three of them mean a camera was found and then failed, which *No camera was found* denies.
+And when no capture node was found at all, this screen adds what the USB bus says: any **late
+arrival** is named by `idVendor:idProduct` and its descriptor string, and never interpreted. The
+appliance cannot know that the late device was the camera — the class lives in an interface
+descriptor that is never read for an unauthorised one — so it reports and stops, and the operator
+recognises their own webcam. `docs/failure-states.md` fixes all of it.
 
 Each path is opened by the spec that builds its screen. The three that scan all lead to the one
 scan screen, which is what `docs/scan-feedback.md` settled — the user is doing the same physical
@@ -36,6 +44,7 @@ wallet has been constructed. """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from textual.app import ComposeResult
@@ -44,6 +53,8 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Static
 
+from aobs.ports.frame_source import CameraReason
+from aobs.ports.usb_bus import LateArrival
 from aobs.ui.geometry import MAX_COLUMNS
 from aobs.ui.scanning import ScanTarget
 
@@ -107,9 +118,57 @@ PATHS: tuple[Path, ...] = (
     ),
 )
 
-#: One sentence, and it says what happened rather than what to do: a camera authorised after
-#: `authorized_default=0` cannot be authorised later, so there is no retry to offer.
+#: One sentence per condition, and each says what happened rather than what to do: a camera
+#: authorised after `authorized_default=0` cannot be authorised later, so there is no retry to
+#: offer whichever way it failed.
+#:
+#: The trailing clause is identical in all four deliberately — the consequence is the same session
+#: with the same paths disabled, and only the cause differs. Three of the four used to print
+#: `NO_CAMERA`, which was false: a camera that answered and then failed is not one that is absent.
+#: `docs/failure-states.md` tables these.
 NO_CAMERA = "No camera was found, so the paths that scan a QR code are unavailable this session."
+
+_UNAVAILABLE = "so the paths that scan a QR code are unavailable this session."
+
+CAMERA_CONDITIONS: dict[CameraReason, str] = {
+    CameraReason.NO_CAPTURE_DEVICE: NO_CAMERA,
+    CameraReason.NO_USABLE_FORMAT: (
+        f"The camera offers no image format this appliance can read, {_UNAVAILABLE}"
+    ),
+    CameraReason.NO_BUFFERS: f"The camera granted no capture buffers, {_UNAVAILABLE}",
+    CameraReason.NO_FRAMES: f"The camera was found but produced no frames, {_UNAVAILABLE}",
+}
+
+#: The lead line above the late arrivals, singular and plural. It reports and stops: naming the
+#: device as the camera is a claim the appliance cannot make, because the class of a UVC camera
+#: lives in an interface descriptor that is never read for an unauthorised device. `CONTEXT.md`
+#: holds the term and that limit together.
+LATE_ARRIVAL = "One USB device arrived after the bus was closed and was not authorised:"
+LATE_ARRIVALS = "{count} USB devices arrived after the bus was closed and were not authorised:"
+
+
+def camera_note(condition: CameraReason | None) -> str | None:
+    """The sentence for a camera condition, or `None` when the camera works."""
+    return None if condition is None else CAMERA_CONDITIONS[condition]
+
+
+def late_arrival_lines(arrivals: Sequence[LateArrival]) -> tuple[str, ...]:
+    """The lead line and one line per device, or nothing at all when none arrived late.
+
+    One line each rather than one sentence listing them: at `aobs/ui/geometry.py`'s `MAX_COLUMNS`
+    the single-sentence form does not fit even one device, and per-device lines are also what lets
+    an operator match a name against the sticker on their own machine.
+    """
+    if not arrivals:
+        return ()
+    lead = LATE_ARRIVAL if len(arrivals) == 1 else LATE_ARRIVALS.format(count=len(arrivals))
+    return (lead, *(f"  {_describe(arrival)}" for arrival in arrivals))
+
+
+def _describe(arrival: LateArrival) -> str:
+    identity = f"{arrival.vendor_id}:{arrival.product_id}"
+    return identity if arrival.name is None else f"{identity} {arrival.name}"
+
 
 NO_WALLET = "No wallet is loaded yet, so the paths that need one are unavailable."
 
@@ -242,7 +301,17 @@ class HomeScreen(Screen):
 
     def compose(self) -> ComposeResult:
         app = self.app
-        camera = app.camera_available  # type: ignore[attr-defined]
+        condition = app.camera_condition  # type: ignore[attr-defined]
+        camera = condition is None
+        # Read on every composition rather than once at startup, and `on_screen_resume` recomposes,
+        # so this is re-read on the way back from every path. The fault it exists to catch is a
+        # device that enumerated late: a single reading taken at startup can be taken before the
+        # device arrived, which would leave the appliance silent in exactly the case that matters.
+        #
+        # Only when the camera is unavailable. With the scan paths working there is no disabled
+        # path for the line to be a reason for, and this screen is not a notification area —
+        # `docs/failure-states.md` fixes the availability model it belongs to.
+        arrivals = () if camera else app.usb.late_arrivals()  # type: ignore[attr-defined]
         wallet = app.wallet is not None  # type: ignore[attr-defined]
         network = app.network  # type: ignore[attr-defined]
         network_fixed = app.network_fixed  # type: ignore[attr-defined]
@@ -275,8 +344,11 @@ class HomeScreen(Screen):
                     )
             with Vertical(id="notes"):
                 yield Static(NETWORK_FIXED if network_fixed else CHOOSE_NETWORK, id="network")
-                if not camera:
-                    yield Static(NO_CAMERA, id="no-camera")
+                note = camera_note(condition)
+                if note is not None:
+                    yield Static(note, id="no-camera")
+                for index, line in enumerate(late_arrival_lines(arrivals)):
+                    yield Static(line, id=f"late-arrival-{index}")
                 yield Static(NO_WALLET if not wallet else HAVE_WALLET, id="no-wallet")
                 if notice:
                     yield Static(notice, id="notice")
