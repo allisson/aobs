@@ -444,23 +444,30 @@ the same shape — read what the repository already says, and check the artefact
       inspection boot, `S-n` session boot, `R-n` read the repository. The run-record template is its
       last section rather than a separate file — a template that lives away from its procedure
       drifts from it, which is this milestone's recurring fault in miniature.*
-- [ ] Run it. Boot the stick, walk the keymap picker, generate a wallet, export the xpub by QR, build
+- [x] Run it. Boot the stick, walk the keymap picker, generate a wallet, export the xpub by QR, build
       an unsigned PSBT in a watch-only wallet, scan it, review it, sign it, scan the signature back,
-      broadcast on a non-mainnet network. *Done on testnet4 — see the signing run above. The row
-      stays open because it is the run **record** that closes it, not the run: no verdict per step
-      has been written down. The checklist now exists — `S-1` through `S-11` — so the row is
-      runnable, and the inspection boot comes first because `I-9` is where a rebuild is discovered.*
+      broadcast on a non-mainnet network. *Walked on 2026-09-11 with a verdict written per step —
+      `docs/boot-runs/2026-09-11-cb514-1h.md`. The earlier signing run is not what closed this: it
+      is the **record** that closes it, and that run had none. Inspection boot first, as planned,
+      because `I-9` is where a rebuild would have been discovered; it did not need one.*
       **The network is deliberately not pinned in the procedure**: `docs/network-selection.md`
       treats testnet4 and signet as peers, faucets and explorers come and go, and naming one would
       manufacture a `deviated` verdict for something the check never cared about. The run record
       names the network and the txid.
-- [ ] With the wallet loaded, confirm the three ways in read as unavailable — *one wallet per
+- [x] With the wallet loaded, confirm the three ways in read as unavailable — *one wallet per
       session* beside each row and the note under the list — and that `F10` on one does nothing.
       Photographed with the console check below, which is the boot that can answer whether the
       right-aligned reason and the dimmed row survive on the panel.
-- [ ] Pull the boot medium out mid-session and keep signing. That is the cheapest check of the
+      *`S-5`, all four parts. The three rows dimmed with their right-aligned reason, the note
+      present, and `F10` on a dimmed way in did nothing — no screen change, no failure screen. The
+      reason and the dimming both survive on the panel.*
+- [x] Pull the boot medium out mid-session and keep signing. That is the cheapest check of the
       amnesia claim, and it is only a claim until someone has done it.
-- [ ] **Check what the console can actually draw**, on one screen showing all of it. Both halves
+      *`S-10`. The stick came out of the running machine and a second PSBT was scanned, reviewed
+      and signed with nothing in the port, then broadcast —
+      `37cdd405959cdc92b65759d09bf07d11817ee44fd509982bc0d72c65ab4bdb44`. Claim (vi) is now done
+      rather than argued.*
+- [x] **Check what the console can actually draw**, on one screen showing all of it. Both halves
       are fixed by `docs/console-appearance.md`. **Half-bright is already answered — it renders**,
       seen on the home screen on the target machine's BIOS path, where the six rows that need a
       wallet are visibly greyer than the four that do not. One panel and one framebuffer driver, so
@@ -491,7 +498,14 @@ the same shape — read what the repository already says, and check the artefact
       because the four README blocks are not every screen: the NOT PROVEN warning is deliberately
       not among them, which is exactly how `⚠` sat unchecked. `I-9` on hardware is now
       *confirmation of a derivation* rather than the only way to know.
-- [ ] Check each claim in the image, **and say which boot each check belongs to** — the row as
+
+      *Confirmed on the panel, 2026-09-11. All four substitutes render — `█` solid and `░` visibly
+      distinct from it on the same line, `!` and `-`. The distinction is the evidence: an unmapped
+      codepoint draws the vt's fallback, so two different glyphs mean two map entries and neither is
+      the fallback. Half-bright confirmed the same session (`S-2`). The derivation held; what the
+      row did not predict was that its own shell command could not test it — see the `I-9` fallback
+      row below.*
+- [x] Check each claim in the image, **and say which boot each check belongs to** — the row as
       written was not runnable, because a session has no prompt and the checks were listed as if it
       did. `docs/overview.md` now carries the split; the checklist has to repeat it per row.
       - In an `rdinit=/bin/sh` boot: `cat /proc/mounts`, `ls /sys/block`, `command -v ip`,
@@ -502,7 +516,11 @@ the same shape — read what the repository already says, and check the artefact
         `build/verify.py`, and the run record says so rather than printing a number that looks like
         evidence and is not.
       - In an ordinary session: pull the boot medium out and keep signing.
-- [ ] Record the answers as a **boot-checklist run record** — the checklist is the procedure, the run
+      *All of it answered on 2026-09-11. `I-0`–`I-9` in the inspection boot, `S-1`–`S-11` in the
+      session boots, and `R-1`/`R-2` from source — `build/init:163` is the only `exec`, and
+      `:108`–`:113` closes the hubs after enumeration. The split was right: `R-2` read from a boot
+      that had replaced PID 1 would have reported the kernel's default and looked like evidence.*
+- [x] Record the answers as a **boot-checklist run record** — the checklist is the procedure, the run
       record is the evidence, and only the second is something a stranger can check. Verdicts are
       *pass*, *fail* and *deviated*; the third is load-bearing, and a *deviated* with no written
       reason is not a verdict. *This one goes in `docs/boot-runs/`, unsigned: the gate's exit is a
@@ -511,6 +529,11 @@ the same shape — read what the repository already says, and check the artefact
       attestation for an ISO with no release identity is ceremony without a referent, so M5 signs
       the release's record. `CONTEXT.md`'s* Boot-checklist run record *entry now distinguishes the
       two, and the machine is identified by class and never by serial number.*
+      *Written: `docs/boot-runs/2026-09-11-cb514-1h.md`. 24 `pass`, 2 `deviated`, 0 `fail`. Both
+      `deviated` rows are deviated because the run could not exercise what they check and say so —
+      `S-6` had a single-part PSBT and so no slot map to watch fill, `S-7` had no unprovable output
+      and so no occasion to draw the NOT PROVEN marker. Neither borrows a verdict from a sibling,
+      which is what the row means by calling the third verdict load-bearing.*
 - [x] Write `docs/threat-model.md`. **Deferred here from M2 and scheduled nowhere until now**, which
       in this repository means it was not going to happen. M3 is where it belongs: it is the first
       milestone with a real machine to be specific about, and the claims it has to state at their
@@ -534,6 +557,17 @@ the same shape — read what the repository already says, and check the artefact
       **`deviated`** verdict with a written reason, never a `pass` inferred from its sibling, and
       the README says so in plain words.
 
+      **Half of this row is answered and half is now blocked on a finding.** The network half is
+      done: `I-4` found no module under `kernel/net` or `kernel/drivers/net` and no `ip`,
+      `ifconfig`, `wpa_supplicant`, `curl`, `wget` or `ssh` on PID 1's `PATH`. The UEFI half is
+      unobserved and unobservable here, as this row already said. What changed is the BIOS half:
+      it met a screen and the console cleared 85×43 at 128×48, but `I-7` recorded the driver as
+      **`simple`, not `vesafb`** — so the two sentences above naming `vesafb` are among the ten
+      statements this run left unsupported. **The row stays open deliberately.** Ticking it would
+      record the graphics decision as confirmed on the strength of a driver that did not appear,
+      and correcting the sentences before the diagnosis would be guessing at which way. It closes
+      when the `simple` finding below does.
+
 - [ ] **Post-gate: add `cros_ec_keyb` and `cros_ec_lpc`, or record that Chromebooks with an EC
       keyboard are unsupported.** Deliberately not done alongside the finding above: no machine of
       that kind has been booted, and adding a driver for an untested machine class is the exact
@@ -545,6 +579,69 @@ the same shape — read what the repository already says, and check the artefact
       pruning does not touch the kernel image's signature — and names it the best candidate for the
       first post-v0.1 milestone. It now has a second reason: it is what would close the `efifb` half
       of the row above.
+
+The five rows below come from walking the checklist on 2026-09-11 —
+`docs/boot-runs/2026-09-11-cb514-1h.md`, Findings. None of them is a `fail` and none blocks the
+gate; all five are things the run learned that the repository did not already state, and two of
+them are claims the repository makes that this run did not support.
+
+- [ ] **Post-gate: diagnose the intermittent camera, then decide whether step 4 may sleep a
+      constant.** One session boot reported `No camera was found`; a power-cycle off the same
+      medium found it normally. Same image, same PID 1, same machine — which rules out anything
+      static and leaves timing. The only candidate anybody has is `build/init`'s fixed `sleep 2`
+      before `authorized_default=0`: a camera that enumerates after that line is deauthorised and
+      never binds. **Not diagnosed, and the candidate must not be written up as the cause until
+      somebody catches it in the act.** What makes this worth a row rather than a footnote is the
+      failure mode: the appliance says a camera was not found, which is exactly what it would say
+      on a machine that has none, so an operator loses the scan paths for a session and never
+      learns the camera was there. If the fix is to wait for expected devices instead of sleeping,
+      that is a change to a load-bearing ordering and belongs in `docs/boot-pipeline.md` first.
+
+- [ ] **Post-gate: find out why the BIOS console is `simple` and not `vesafb`, then fix whichever
+      is wrong — the ten statements or the image.** `I-7` recorded `/proc/fb` as `0 simple` and
+      `fb0/name` as `simple`, which is `simplefb`'s identity; `vesafb` reports `VESA VGA`. The
+      console size was 128×48, exactly what `vga=791` predicts, so the mode is right and no screen
+      is affected. But the pinned kernel's own config has `# CONFIG_SYSFB_SIMPLEFB is not set`, and
+      `docs/boot-pipeline.md:466` cites that unset symbol as the reason the BIOS path lands on
+      `vesafb`. With it unset, `simplefb` should never bind. It bound. Until that is explained,
+      these are unsupported rather than wrong and none has been edited:
+      `docs/console-appearance.md:29` (which marks the chain **observed** on this machine, and this
+      run is that observation), `docs/boot-pipeline.md:457`, `:466`–`:467`, `:480`,
+      `build/modules.allow:25`–`26`, `docs/roadmap.md:353`, `:529`, `:531`, `docs/overview.md:153`,
+      `README.md:493`. `build/verify.py`'s `FB_VESA` assertion is untouched by this: `FB_VESA=y` is
+      still true of the image.
+
+- [ ] **Post-gate: decide what the descriptor screen's prefix label is for, then make it say
+      something true.** `S-4` exported a testnet4 wallet under the footer `BIP84 · bc1q`, while
+      every address that wallet produces begins `tb1q`. The label is a constant keyed on script
+      type with no network in scope — `aobs/ui/addresstext.py:152`. It is not a signing defect and
+      the descriptor bytes are not in question; it is a wrong statement on screen, on an appliance
+      whose claim is that the user can check what it tells them. The two fixes are not equivalent:
+      deriving the prefix from the session's network keeps the mnemonic, dropping the prefix admits
+      the addresses already carry it. `aobs/ui/screens/address_list.py:10` and
+      `docs/address-verification.md:54` both rest on *the prefix already says which*, so this is an
+      `docs/address-verification.md` decision before it is a code change.
+
+- [ ] **Post-gate: correct `I-9`'s shell fallback in `docs/boot-checklist.md`, and keep the
+      warning.** The row offers `printf 'U+2588 [\0342\0226\0210] …'` and it tests no glyph: dash's
+      `printf` consumed `\0` plus two octal digits and printed the leftover digit, so the screen
+      showed `260` and `261`. `\0ddd` with three digits is the form for a `%b` argument, not for
+      the format string; in the format string it is `\ddd`. The row already carries a "do not fix
+      this back" note written after `\xHH` failed the same way — that note is right about `\xHH`
+      and wrong about what replaces it, so the correction keeps the warning and changes the form.
+      Reverting to `\xHH` would be the third wrong answer. Also worth fixing in the same pass: the
+      `python3` form prints the literal `█` and `░`, which cannot be typed on the console under
+      test; `█` / `░` is what actually ran.
+
+- [ ] **Post-gate: make the checklist capture the image digest when the medium is written.** The
+      run record has to name the image that booted, and this one could only name it by the
+      operator's recollection: two builds of `460b475` existed, `51c7d664…04aab` in the M3 handoff
+      and `3aa115ad…0a2c1` in `out/`, and nothing recorded which went on the stick. That two builds
+      of one commit differ is expected — the reproducibility contract is M4 and claim (ix) says so
+      — and it is not what is missing. What is missing is procedural: the checklist asks the record
+      for a digest but never tells the operator to take it at the only moment it can come from the
+      thing that actually boots. A digest recovered afterwards from a build directory is a guess
+      about history.
 
 **Exit**: one PSBT signed on real hardware and broadcast, and a run record with every row answered.
 
