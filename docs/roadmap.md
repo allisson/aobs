@@ -660,6 +660,16 @@ them are claims the repository makes that this run did not support.
       prefix of it, so a divergence fails rather than ships — which is the check the constant never
       had, and why nothing caught it before a hardware boot did.
 
+- [ ] **Post-gate: the emit screen has no way back to the home screen.** *Reported 2026-09-12
+      from use.* After signing, `esc` is the only way off the emit screen and it walks the stack
+      one screen at a time — emit → review → scan → home. `SignerApp.return_home()` already
+      exists (`aobs/ui/app.py:480`) and the screen does not reach it. The key cannot be `F10`:
+      `aobs/ui/screens/emit.py:31-35` chose `F9` for step-down precisely because `F10` is inert
+      there, and a slip that abandons a scan costs a re-scan of the PSBT. `F5` has the same edge
+      property. `esc` keeps its meaning and loses the word *done*, which moves to `F5` —
+      `docs/qr-emit-parameters.md:99` and the key inventory in `docs/failure-states.md:196` both
+      have to say so.
+
 - [ ] **Post-gate: correct `I-9`'s shell fallback in `docs/boot-checklist.md`, and keep the
       warning.** The row offers `printf 'U+2588 [\0342\0226\0210] …'` and it tests no glyph: dash's
       `printf` consumed `\0` plus two octal digits and printed the leftover digit, so the screen
