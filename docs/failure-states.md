@@ -195,9 +195,9 @@ one of three kinds:
 
 | kind | keys | screens |
 |---|---|---|
-| **Confirm** | `F10`, and `y` on the confirm | keymap, home, review, confirm |
-| **Navigation** | `↑` `↓` `PgUp` `PgDn` — move a selection or a viewport, act on nothing; and `F5` — *end the path, back to the home screen* (`docs/qr-emit-parameters.md`) | keymap, home, review; `F5` on emit |
-| **Its own** | `F9` — *step the QR down one rung of the density ladder* (`docs/qr-emit-parameters.md`) | emit |
+| **Confirm** | `F10`, and `y` on the confirm | keymap, home, network, word count, seed grid, passphrase, dice, fingerprint, recovery words, review, address list (*jump to the typed index*), wallet export and its password read-back; `y` on the confirm |
+| **Navigation** | `↑` `↓` `PgUp` `PgDn` — move a selection or a viewport, act on nothing; and `F5` — *end the path, back to the home screen* (`docs/qr-emit-parameters.md`) | keymap, home, network, word count, review, address list; `←` `→` on the seed grid; `F5` on emit |
+| **Its own** | `F9` — four meanings, one per screen, each settled in that screen's document; and `F2` — *show the passphrase until the next key* (`docs/seed-entry.md`) | `F9`: emit (*step the QR down a rung*), descriptor and address list (*toggle script type*), verify (*search further*), export done (*show the words again*); `F2`: passphrase |
 
 **`F5` is navigation and nothing more**, which is why it is in the second kind rather than the
 third: it acts on nothing, commits nothing and ends no session — it is `esc` without the walk, on
@@ -206,9 +206,21 @@ reachable from the emit screen because that is where the money path ends; a *hom
 screen would leave from anywhere with no per-screen word naming what leaving costs, which is the
 property `esc` has and a global would not.
 
-**Only the third kind is new ground**, and there is one key in it: `F9` is the only key in the
-appliance that changes state without confirming anything and without being navigation. That is why
-it needed a ticket of its own, and why the next one will too.
+**The third kind is the new ground, and it holds two keys and five meanings** — every one of them a
+state change that confirms nothing and moves nothing. That is why each needed a ticket of its own,
+and why the next one will too.
+
+**`F9` means something different on each screen that binds it, and that is the rule working rather
+than breaking it.** A per-screen key is a fact about its screen; what is reserved is `esc`, `F12`
+and the confirm, and none of those is `F9`. Every screen prints its own key line, so the meaning in
+force is the one on screen. What would break the rule is `F9` meaning two things on *one* screen,
+or a reserved key meaning something local — neither exists.
+
+**This table is checked, not asserted.** It claimed to be complete for as long as it was prose, and
+it was wrong twice over: `F2` was never in it, and `F9` grew from one meaning to four without the
+table moving. `tests/test_structure.py` now reads every `Binding` in `aobs/ui` and fails if a key is
+bound that this table does not name, which is the only version of "not silently incomplete" worth
+writing down.
 
 It chooses a **function key** for the same reason `F12` does: the keymap is whatever the user picked
 on the first screen, so a letter key is not in a known place and a function key is. A per-screen key
