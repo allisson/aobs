@@ -358,6 +358,14 @@ would have survived to fail on some later frame. `readelf` and not `ldd` because
 needs a chroot and this build has no privilege to make one; reading the tables is a file read, and
 the resolution is then a pure function.
 
+**Since #24, two of those three objects are no longer in the image.** `pillow` is a harness-only
+dependency now — `aobs/ui/qrdecode.py` hands zxing-cpp the frame's own buffer — so `PIL/_avif` and
+the bundled `libavif` are gone and `zxingcpp.abi3.so` is the one object left linking the C++
+runtime. The account above is left as it happened, because the reasoning is what justifies two
+assertions that are both still in the build: the lazily-loaded format plugin is *why* the import
+check is not sufficient on its own, and that argument does not depend on `_avif` still being
+there to make it.
+
 **And the fault screen now names an `ImportError`.** It showed the type and nothing else, which is
 why this took an unpacked initramfs and a chroot to identify. `docs/secret-hygiene.md` carries the
 carve-out and its bounds: one exception type, chosen because the import machinery writes that

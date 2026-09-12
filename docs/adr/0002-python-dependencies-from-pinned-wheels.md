@@ -11,7 +11,7 @@ layer behind what this application declares** — in two places below the declar
 | `cryptography` | 50.0.0, floor `>=44` | 43.0.0 | **below the declared floor** |
 | `argon2-cffi` | 25.1.0, floor `>=23.1` | 21.1.0 | **below the declared floor** |
 | `zxing-cpp` | 3.1.1 | 2.3.0 | one major back |
-| `pillow` | 12.3.0 | 11.1.0 | one major back |
+| `pillow` | 12.3.0 | 11.1.0 | one major back — harness-only since #24 |
 | `rich` | 15.0.0 | 13.9.4 | two majors back |
 | `pytest` | 9.1.1 | 8.3.5 | one major back |
 | `pytest-asyncio` | 1.4.0, floor `>=1.3` | 0.25.1 | **below the declared floor** |
@@ -72,7 +72,9 @@ said out loud.
 
 Three of these wheels carry prebuilt binaries — `cryptography` most of all, since it bundles its own
 Rust and OpenSSL build, plus `pillow` and `zxing-cpp` — and `cffi` and `argon2-cffi-bindings` compile
-against `libffi`. That is in visible tension with the predecessor's decision to vendor `embit` from
+against `libffi`. Two of the three are in the appliance; `pillow` has been harness-only since #24,
+which removed the wheel and, with it, an AVIF decoder and a bundled `libavif` that the camera could
+reach. That is in visible tension with the predecessor's decision to vendor `embit` from
 source *specifically to keep the prebuilt `libsecp256k1` binaries in its PyPI sdist out of the
 repository*.
 
