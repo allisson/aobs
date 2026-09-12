@@ -338,10 +338,9 @@ ran. That is what this row's second attempt did, on 2026-09-11 — `docs/boot-ru
 The `\u2588` escape in the `python3` form is there for the same reason: neither `█` nor `░` can be
 typed on the console under test.
 
-**The shell form above has not been observed on a panel.** The 2026-09-11 run answered this row
-with the `python3` form. The `\ddd` spelling is derived — from dash's documented behaviour and from
-the digits the broken form put on screen — not run. Until a run record says otherwise, answer the
-row with the `python3` form and treat the shell form as the fallback it is named for.
+**Both forms have been observed on a panel.** The `\ddd` form drew both blocks on 2026-09-12 —
+`docs/boot-runs/2026-09-11-cb514-1h.md`, Addendum. It is the third spelling this row has published:
+`\xHH` and `\0ddd` each printed something that was not a glyph, and each looked like a row that ran.
 
 `python3` is the appliance's own interpreter, is in the image by construction, and draws to the
 same console through the same font — either form is representative.
