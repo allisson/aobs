@@ -96,25 +96,38 @@ and review screens, where they move a selection or a viewport and act on nothing
 state change on one screen breaks that, and a user pressing `↓` here to check whether there is more
 content below would step the ladder without meaning to.
 
-### `esc` on this screen says *done*
+### Two ways off this screen: `F5 done` and `esc back to the review`
 
-The emit screen is the only one where backing out means *the wallet has read it*, so the word beside
-`esc` is **`done`** rather than `back` or `discard`.
+**They lead somewhere different, which is why there are two.** `F5` ends the path at the home
+screen. `esc` backs out one screen, onto the review this transaction was signed from.
 
-**The key is what is invariant, not the word.** The review says `esc discard` and the confirm says
-`esc back to the review`; each names what leaving *that* screen costs, which is the honest thing to
-print. `docs/failure-states.md` reserves the key's *meaning* — back out without acting — and `done`
-is that meaning on a screen where there is nothing left to undo.
+**`esc` reaching the review is the recovery path, and it is the reason `esc` is not the way to say
+*done*.** The confirm reaches this screen with `switch_screen`, so emit replaces the confirm and
+sits on the review — which still holds its scroll position and its open lock. A user whose wallet
+would not read the code presses `esc`, then `F10`, `y`, and the same bytes are signed and emitted
+again. Nothing is lost and the screen is re-reachable. **The whole of that walk is asserted**, in
+`tests/test_emit_screen.py`, down to the second emission being byte-identical to the first — so the
+claim is checked rather than reasoned about, including the signature determinism it depends on.
 
-**And leaving is reversible**, which is what keeps `done` from being a commit in disguise. The
-confirm reaches this screen with `switch_screen`, so emit replaces the confirm and sits on the
-review — which still holds its scroll position and its open lock. A user who presses `esc` before
-the wallet has finished reading lands back on the review, and `F10` then `y` signs the same bytes
-again and emits again. Nothing is lost and the screen is re-reachable.
+**What `esc` did not have was an end.** Backing out one screen at a time from emit is three presses
+to reach home — emit, review, scan — and the middle two are screens the user is finished with (#31).
+`SignerApp.return_home()` already existed for the fingerprint screen; this screen now reaches it.
 
-**The whole of that walk is asserted**, in `tests/test_emit_screen.py`, down to the second emission
-being byte-identical to the first — so the claim is checked rather than reasoned about, including the
-signature determinism it depends on.
+**Not `F10`.** The `F9` argument above is bought with `F10`'s inertness on this screen, and a key
+that abandons a scan in progress is the wrong thing to put one slip away from the step-down; the
+recovery from that slip is re-scanning the PSBT. **`F5`** is the left edge of its own group — `F4`
+is across the keyboard gap, `F6` is unbound here — so it is inert in both slip directions for the
+same reason `F9` is, and it is bound on no other screen. Not `F11`, for the reason given above: a
+slip one key right ends the session.
+
+**The word *done* goes with the key that ends the path.** `docs/failure-states.md` reserves `esc`'s
+*meaning* — back out without acting — and lets each screen name what leaving *that* screen costs;
+the review says `esc discard`, the confirm says `esc back to the review`, and so does this screen
+now. Printing `esc done` beside an `F5 done` would be one word for two destinations, which is the
+one thing that per-screen wording may not do.
+
+**`F5` ends the path, not the session.** The wallet stays loaded and home is where every path
+starts. `F12` is still the only key that ends a session, from anywhere, always.
 
 ## Frame rate: 2 fps
 
