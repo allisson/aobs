@@ -588,11 +588,19 @@ the same shape — read what the repository already says, and check the artefact
       `FB_SIMPLE` is now asserted alongside `FB_EFI` and `FB_VESA` so the driver that actually draws
       is one the build watches.
 
-- [ ] **Post-gate: add `cros_ec_keyb` and `cros_ec_lpc`, or record that Chromebooks with an EC
+- [x] **Post-gate: add `cros_ec_keyb` and `cros_ec_lpcs`, or record that Chromebooks with an EC
       keyboard are unsupported.** Deliberately not done alongside the finding above: no machine of
       that kind has been booted, and adding a driver for an untested machine class is the exact
       pattern of all four faults this milestone found. The honest position until then is the one
       `build/modules.allow` now states — such a machine boots to a screen with no keys.
+
+      *Closed 2026-09-12 by issue #25, taking the second ending: the class is **unsupported**, and
+      the README says so where it names the hardware rather than leaving "it ran on a Chromebook" to
+      imply otherwise. No machine of the class is available to boot, so the first ending could not
+      be taken at a strength this project accepts. `build/modules.allow` now carries the decision and the
+      three steps that reverse it. This row named `cros_ec_lpc`, and no such module is in the pinned
+      tree — it is `cros_ec_lpcs`, and it is a separate branch of the module graph from
+      `cros_ec_keyb`, so the add-ending needs both named and neither dependency.*
 
 - [ ] **Post-gate: Secure Boot, and with it the first UEFI boot.** `build/grub.cfg` already argues
       it is achievable — Debian's signed shim, grub and kernel survive a module-tree prune, since

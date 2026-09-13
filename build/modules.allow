@@ -74,8 +74,24 @@ uhci_hcd
 # `cros_ec_keyb` is DELIBERATELY ABSENT. A Chromebook that routes its keyboard through the embedded
 # controller rather than i8042 would boot this image and have no keys at all. Adding the driver for
 # a machine class nobody has booted is the pattern behind all three faults `docs/roadmap.md` M3
-# records — a claim the repository stated and never checked — so it is a post-gate row there, not a
-# line here.
+# records — a claim the repository stated and never checked.
+#
+# THAT IS NOW A DECISION AND NOT A DEFERRAL: Chromebooks with an EC keyboard are unsupported, and
+# the README says so where it names the hardware. The one machine this image has booted on is a
+# Chromebook, but its keyboard arrives over the built-in i8042 controller a coreboot `RW_LEGACY`
+# SeaBIOS presents — `I-8` recorded a single input device, `AT Translated Set 2 keyboard` at
+# `/devices/platform/i8042/serio0` — so owning it says nothing about the EC path.
+#
+# Reversing the decision takes three things, in this order, and the first two without the third are
+# the untested-driver pattern again:
+#   1. name `cros_ec_lpcs` AND `cros_ec_keyb` here. The module is `cros_ec_lpcs`, not `cros_ec_lpc`
+#      — the name `docs/roadmap.md` and issue #25 both carried, and no such module exists in the
+#      pinned tree. Both have to be named for the same reason the USB host controllers do: they are
+#      unrelated branches of the module graph, `cros_ec_keyb` depending only on `matrix_keymap` and
+#      `cros_ec_lpcs` only on `cros_ec`. Neither dependency belongs in this file; `depmod` resolves
+#      them.
+#   2. boot a machine of that class off the image and type on it.
+#   3. write the in-repo run record in `docs/boot-runs/` that makes it a checked claim.
 usbhid
 hid_generic
 
