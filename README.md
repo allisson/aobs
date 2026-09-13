@@ -18,7 +18,7 @@ one Python program running as **PID 1**, in an image the dangerous parts were re
 
 | | |
 |---|---|
-| ✅ **Demonstrated** | The image boots on real hardware and signs. One transaction was built in Sparrow, scanned in, reviewed, signed, scanned back out and broadcast on **testnet4** from an appliance booted off a live USB stick on a Chromebook: [`dcdfc90e…6b3a07`](https://mempool.space/testnet4/tx/dcdfc90e38d7299caa00c5c7fb4c01ab73e9d093adee823745d9dbc6466b3a07) |
+| ✅ **Demonstrated** | The image boots on real hardware and signs. One transaction was built in Sparrow, scanned in, reviewed, signed, scanned back out and broadcast on **testnet4** from an appliance booted off a live USB stick on a laptop: [`dcdfc90e…6b3a07`](https://mempool.space/testnet4/tx/dcdfc90e38d7299caa00c5c7fb4c01ab73e9d093adee823745d9dbc6466b3a07) |
 | ✅ **Demonstrated** | The ISO builds unprivileged in CI, from packages pinned to a `snapshot.debian.org` timestamp, with every build-time assertion passing |
 | 🚧 **Not yet** | **No release.** No tag, no signed ISO, no manifest. There is nothing to download — you build it yourself or you don't run it |
 | ✅ **Published** | **A threat model**, with every claim at its stated strength and every adversary in a numbered tier: [`docs/threat-model.md`](docs/threat-model.md) |
@@ -486,7 +486,12 @@ ls /lib/modules/*/kernel/drivers/usb              # common, core, host — no st
 like for each one and which of the two boots answers it.
 
 **On hardware.** This appliance has been booted and has signed on exactly one machine — an Acer
-Chromebook 514, on a BIOS firmware path, with the run written up in `docs/boot-runs/`. **One machine
+Chromebook 514, on a BIOS firmware path, with the run written up in `docs/boot-runs/`. That
+machine's keyboard reaches the kernel over a built-in i8042 controller, which is what a coreboot
+`RW_LEGACY` SeaBIOS presents; **a Chromebook that routes its keyboard through the embedded
+controller instead is not supported** — `cros_ec_keyb` is not in the image, and such a machine boots
+to a screen with no keys. [`build/modules.allow`](build/modules.allow) records the decision and what
+reversing it would take. **One machine
 that boots is not a hardware-compatibility claim, and this is not one:** nothing here says the image
 will boot on yours, and the module allowlist is deliberately generic rather than narrowed to that
 machine. In particular the **UEFI boot path has never drawn a screen** — `build/grub.cfg` ships it,

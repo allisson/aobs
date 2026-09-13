@@ -139,6 +139,11 @@ controller are `=y` in the pinned kernel: they are in the image whatever this fi
 cannot be removed by editing it, and the reasons they are wanted are recorded where the
 allowlist's are.
 
+What it does decide is **which machine classes can type**: a machine whose keyboard driver is a
+module that is not named here boots to a screen with no keys, and that is a hardware-support
+statement rather than a *Claim strength* one — the three security words do not apply to it and must
+not be borrowed for it.
+
 The `modprobe` blacklist beside it is a second line and is **never** the claim: a blacklist is a
 policy, and the allowlist is a fact about what is in the image. Say "the module is not present",
 never "the module is blocked".
