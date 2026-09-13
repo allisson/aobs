@@ -113,6 +113,30 @@ HARNESS_PINS=$(group harness)
 [ -n "$APPLIANCE_PINS" ] || { echo "no appliance packages parsed" >&2; exit 1; }
 [ -n "$HARNESS_PINS" ] || { echo "no harness packages parsed" >&2; exit 1; }
 
+# THE POOLS ARE DELETED FIRST, ON EVERY RUN. Nothing else in this script removes a file from
+# `build/inputs/`: both fetchers only add (`cp /var/cache/apt/archives/*.deb /out/`, `pip download
+# --dest`). The gate below is set equality over whatever is on disk, so a file that is no longer
+# fetched but is still there is hashed into the manifest as if it were an input — written into
+# `build/inputs.sha256` on `--refresh` and committed as if reviewed, or failing a verify run
+# against a hash file that was correct.
+#
+# Both halves happened, on 2026-09-12 (#43). Moving `DEBIAN_SNAPSHOT` past a trixie point release
+# left 27 superseded `.deb`s beside their replacements, and `--refresh` would have described a pool
+# no clean clone can produce. #40 moved `pillow` from the appliance group to the harness group, and
+# the abandoned `wheels/appliance/pillow-12.3.0-*.whl` failed the local gate at 302 files against a
+# correct 301-line hash file. The one `rm` that ever touched these directories was `fetch_group`'s
+# `rm -f "$1"/*.deb` before the snapshot fallback, and #42 removed the fallback with it.
+#
+# UNCONDITIONAL, not `--refresh` only, because a populated pool saves no fetching. `fetch_debs` and
+# `fetch_kernel` each run a fresh container with no apt cache mounted: the closure is downloaded
+# from snapshot on every run and the pool is only ever the destination of a `cp`. `fetch_wheels` is
+# the one fetcher that reuses what is there, and PyPI is not the archive that rate-limits. CI pays
+# nothing either way — it runs this script only on a cache miss, which starts from an empty pool.
+#
+# The whole tree, not the five pools, because `manifest` is `find "$INPUTS" -type f`: it hashes
+# anything anywhere beneath `build/inputs/`, so pruning per pool would leave a stray file one
+# directory up doing exactly what this prevents.
+rm -rf "$INPUTS"
 mkdir -p "$INPUTS/deb/appliance" "$INPUTS/deb/kernel" "$INPUTS/deb/harness" "$INPUTS/wheels/appliance" "$INPUTS/wheels/test"
 
 fetch_debs() {
@@ -312,6 +336,11 @@ if manifest | diff -u "$HASHES" - > /tmp/inputs.diff 2>&1; then
 else
     echo "==> build/inputs/ DOES NOT match $HASHES:" >&2
     cat /tmp/inputs.diff >&2
-    echo "If a pin changed, rerun with --refresh and review the diff." >&2
+    # The pool was deleted at the top of this run, so nothing here is a local leftover: every line
+    # of that diff is a disagreement between the archive and the committed hash file. Only one of
+    # the two causes is a refresh.
+    echo "If a pin or build/snapshot.env changed, rerun with --refresh and review the diff." >&2
+    echo "Otherwise the archive served different bytes for the same pinned instant, which is not" >&2
+    echo "a refresh." >&2
     exit 1
 fi
