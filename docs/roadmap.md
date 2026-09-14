@@ -602,12 +602,62 @@ the same shape — read what the repository already says, and check the artefact
       tree — it is `cros_ec_lpcs`, and it is a separate branch of the module graph from
       `cros_ec_keyb`, so the add-ending needs both named and neither dependency.*
 
-- [ ] **Post-gate: Secure Boot, and with it the first UEFI boot.** `build/grub.cfg` already argues
-      it is achievable — Debian's signed shim, grub and kernel survive a module-tree prune, since
-      pruning does not touch the kernel image's signature — and names it the best candidate for the
-      first post-v0.1 milestone. It now has a second reason: it is what would close the `efifb` half
-      of the row above. Concretely, a UEFI boot is the only thing that can turn `I-7c` from a
-      `deviated` into a verdict.
+- [ ] **Post-gate: the first UEFI boot (#26).** `build/grub.cfg` ships the same two entries as the
+      BIOS path and no machine has ever booted them, so the UEFI path is entirely unexercised — not
+      only its graphics. A UEFI boot is the only thing that can turn `I-7c` from a `deviated` into a
+      verdict, which is what would close the `efifb` half of the row above.
+
+      **This row was split out of the Secure Boot row below on 2026-09-13**, and the split is the
+      point: the two have different evidence and different completion conditions. This one closes
+      with a run record in `docs/boot-runs/`; that one closes with a build change and a rewording of
+      `docs/threat-model.md` claim (x). One row carrying both could not be ticked honestly, which is
+      the objection issue #23 raises about its own row.
+
+      Scope is the **inspection family** — `I-0` through `I-9` — and not the `S-*` Session boot. The
+      `S-*` rows exercise the appliance, which M3 already proved on the Chromebook; the `I-*` rows
+      are what the boot path produced, and every one of them is a published claim. Walking `S-*` on
+      a second machine is a larger row and is not this one.
+
+      The machine is a **Samsung Galaxy Book4 Pro**. The named risk is the keyboard: this file's own
+      `cros_ec_keyb` row and `build/modules.allow` both say where a laptop's keys come from, and
+      `CONFIG_SERIO_I8042=y` is the Chromebook's answer, not necessarily a 2024 machine's — those
+      commonly route the internal keyboard over HID-over-I2C, and neither `i2c_hid_acpi` nor
+      `intel_lpss_pci` is in the image. **The run brings a USB keyboard**, which `usbhid`,
+      `hid_generic` and the four host controllers already make work by construction, so `I-8` records
+      whatever the internal keyboard does instead of the run being blocked by it. Adding the I2C HID
+      modules ahead of that observation is the untested-driver pattern, and the answer is the same
+      one `build/modules.allow` gives for `cros_ec_keyb`: the observation earns the modules, in its
+      own row, with a run record behind it.
+
+- [ ] **Post-gate: Secure Boot (#46).** Depends on the row above: a signed chain cannot be debugged
+      on a path that has never booted unsigned. `build/grub.cfg` argues it is achievable — Debian's
+      signed shim, grub and kernel survive a module-tree prune, since pruning does not touch the
+      kernel image's signature — and names it the best candidate for the first post-v0.1 milestone.
+
+      **What the row costs is not in that argument, and is the reason it is a decision rather than a
+      task.** `build/mkiso.sh` stage 5 builds `bootx64.efi` with `grub-mkstandalone` and the config
+      baked in, which is why `build/grub.cfg`'s header can say GRUB reads nothing from the medium and
+      call that the amnesia claim's cheapest check. A locally assembled binary is unsigned and Secure
+      Boot rejects it. The two endings:
+
+      1. **`shim` + Debian's signed `grubx64.efi`.** Works on stock firmware with no key enrollment.
+         The signed grub is a fixed monolith and reads `grub.cfg` off the ESP, so the baked-in
+         config — and with it the cheapest check — is gone. The claim survives literally, since the
+         read happens before the kernel is in memory, but it is no longer the thing a stranger can
+         check by pulling the stick.
+      2. **Own keys, signing the current `grub-mkstandalone` output.** Keeps the property exactly.
+         Costs every host enrolling the key in its firmware db, which most users will not do and
+         some firmware will not allow.
+
+      **Neither is chosen here**, and choosing before the first UEFI boot would be choosing without
+      the one fact that informs it — how the firmware on a real machine actually reaches `grub.cfg`.
+      When it is chosen it is an ADR: hard to reverse, surprising without context, and a genuine
+      trade-off.
+
+      `docs/threat-model.md` claim (x) — *nothing verifies the boot medium before the kernel runs* —
+      is stated as a deliberate absence, and v0.1 supports Secure Boot on no host. This row is where
+      that changes, so the claim's wording changes with it, and it must change at the strength the
+      chosen ending actually earns.
 
 The five rows below come from walking the checklist on 2026-09-11 —
 `docs/boot-runs/2026-09-11-cb514-1h.md`, Findings. None of them is a `fail` and none blocks the
