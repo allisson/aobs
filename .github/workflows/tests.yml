@@ -183,18 +183,19 @@ jobs:
         if: steps.inputs.outputs.cache-hit != 'true'
         run: sh build/fetch-inputs.sh
 
-      # The build tools, and the one place in this repository where a version is not pinned. Every
-      # byte of the ROOTFS comes from `build/inputs/`, and `sha256sum -c` in stage 0 is what says
-      # so. The ISO is not the rootfs: its bootloaders — `isolinux.bin`, `ldlinux.c32`,
-      # `isohdpfx.bin`, and the GRUB modules in `bootx64.efi` — are copied from the packages this
-      # step installs, and every tool here arranges bytes. `docs/reproducible-build.md`, *Not
-      # claimed* item 1, is where that is stated, and `docs/roadmap.md` M4 is where it is decided.
+      # The build tools, and the one place in this repository where a version is not pinned. They
+      # ARRANGE bytes and supply none: the rootfs comes from `build/inputs/` behind stage 0's
+      # `sha256sum -c`, and so does the boot chain — stage 5 extracts `isolinux`,
+      # `syslinux-common` and `grub-efi-amd64-bin` from the pinned pool, which is why none of the
+      # three is installed here and `grub-common` is, for the `grub-mkstandalone` binary alone.
+      # The build prints every arranging tool's version beside the ISO's digest;
+      # `docs/reproducible-build.md` names them as an input to the contract.
       - name: The build tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
             mmdebstrap uidmap dpkg-dev kmod zstd xorriso mtools \
-            grub-efi-amd64-bin isolinux syslinux-common binutils
+            grub-common binutils
           mmdebstrap --version
 
       # No `sudo` on this line and no `--privileged` anywhere in the job. That is the claim.

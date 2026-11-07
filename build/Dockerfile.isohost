@@ -9,10 +9,10 @@
 #
 # The tool versions here are deliberately NOT pinned, and that is the same decision CI's
 # `The build tools` step already carries, for the same reason: these are the host's tools, not the
-# image's — for the rootfs, whose every byte comes from `build/inputs/` behind stage 0's
-# `sha256sum -c`. Not for the ISO: its bootloaders are copied out of the packages installed below,
-# and every tool here arranges bytes. `docs/reproducible-build.md`, *Not claimed* item 1, states
-# it, and `docs/roadmap.md` M4 is where it is decided.
+# image's. They arrange bytes and supply none: the rootfs and the boot chain both come from
+# `build/inputs/`, and stage 5 extracts the loaders from the pinned pool, so no loader package is
+# installed below — only `grub-common`, for the `grub-mkstandalone` binary.
+# `docs/reproducible-build.md` names the arranging tools' versions as an input to the contract.
 #
 # The image's own user is `builder`, uid 1001, with the `subuid`/`subgid` ranges
 # `mmdebstrap --mode=unshare` maps into — the runner's shape, kept deliberately. It is **not** what
@@ -24,7 +24,7 @@ FROM ubuntu:24.04
 
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
         mmdebstrap uidmap dpkg-dev kmod zstd xorriso mtools \
-        grub-efi-amd64-bin isolinux syslinux-common binutils \
+        grub-common binutils \
         python3 python3-pip ca-certificates rsync git \
     && rm -rf /var/lib/apt/lists/*
 

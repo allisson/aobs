@@ -901,12 +901,28 @@ exit criterion. They stay in this milestone because their evidence is the same k
       available after v0.1 without reversing anything here. Not yet implemented — the next row
       does the extraction, and `docs/reproducible-build.md` keeps it under* Not claimed *until it
       lands.*
-- [ ] **Take the boot-chain bytes from the pinned pool.** Pin `syslinux-common` (it ships
+- [x] **Take the boot-chain bytes from the pinned pool.** Pin `syslinux-common` (it ships
       `ldlinux.c32`) and `mtools`; extract `isolinux`, `syslinux-common` and `grub-efi-amd64-bin`
       in stage 5 with `dpkg-deb -x`, as stage 3 does the kernel; run `grub-mkstandalone` against the
       extracted module directory; and have the build print every arranging tool's version beside
       the ISO's sha256. `build/verify.py` gains an assertion that no loader file is read from a host
       path, fed a broken input like every other.
+
+      *Done, with two departures from the row.* **`mtools` is not pinned**: under the decision it is
+      an arranging tool and stays the host's, so a pin nobody reads would be the same unused pin the
+      row above found for `xorriso`. **The assertion is a source check**, `no_loader_read_from_the_host`
+      run by the suite against `build/mkiso.sh`, rather than a build-time comparison — a host whose
+      package carries the same bytes produces the same ISO, so the fallback is invisible in the
+      output and only the script shows it. `inputs.sha256` gained exactly one file,
+      `syslinux-common`; CI and `build/Dockerfile.isohost` no longer install any loader package.
+
+      *Evidence, from one local build of this change via `build/mkiso-docker.sh`*: the host image
+      has no `/usr/lib/ISOLINUX`, no `/usr/lib/syslinux` and no `/usr/lib/grub/x86_64-efi`, and the
+      ISO built with both El Torito records — so every loader byte came from the pool.
+      `isolinux.bin` and `ldlinux.c32` in the ISO tree match the extracted files by sha256.
+      `bootx64.efi` is now Debian's 2.12-9 modules assembled by Ubuntu's `grub-mkstandalone`
+      2.12-1ubuntu7.3, and **has not been booted** — a UEFI path no machine has ever booted (#26)
+      is now also a different binary from the one that was never booted.
 - [ ] CI builds twice under deliberately hostile variation and fails on any differing byte.
 - [ ] Fix every divergence source found. `SOURCE_DATE_EPOCH` throughout; deterministic `cpio` ordering,
       ownership and timestamps; deterministic `mmdebstrap` output; no build-host paths in the image.

@@ -804,6 +804,40 @@ def release_agrees_with_git(text: str, *, tag: str, commit: str, dirty: bool) ->
         raise PinFileError(f"/etc/aobs-release says release {release!r} and the tag is {tag!r}")
 
 
+#: Where a build host keeps the loaders `build/mkiso.sh` used to copy into the ISO. Every one of them
+#: must now be read under `$LOADERS`, the stage-5 extraction of the pinned pool.
+HOST_LOADER_PATH = re.compile(r"(?<!\$LOADERS)(?<!\$\{LOADERS\})/usr/lib/(?:ISOLINUX|syslinux|grub)\b")
+#: `grub-mkstandalone` with no `--directory` builds `bootx64.efi` from the HOST's `/usr/lib/grub`
+#: without ever naming that path, so the path check above cannot see it.
+_GRUB_FROM_POOL = re.compile(r'--directory[ =]"?\$\{?LOADERS\}?/')
+_GRUB_BUILDS = re.compile(r"(?:^|[\s;|&(])grub-mkstandalone\s+(?:-O|--format)")
+
+
+def no_loader_read_from_the_host(script: str) -> None:
+    """`build/mkiso.sh` copies no boot-chain code off the build host.
+
+    The ISO's first code — `isolinux.bin`, `ldlinux.c32`, `isohdpfx.bin`, GRUB's `kernel.img` and
+    modules — came from the host's unpinned packages until M4, while two comments said every byte of
+    the ISO came from `build/inputs/` (`docs/reproducible-build.md`, *Not claimed* item 1). A source
+    check, because a host path is not visible in the output: on a host whose package happens to
+    carry the same bytes, the ISO is identical and the fallback is silent. Comment lines are
+    skipped, since the file explains what it used to do.
+    """
+    code = re.sub(r"\\\n", " ", script)
+    offending = []
+    for line in code.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        if HOST_LOADER_PATH.search(line):
+            offending.append(f"reads a host loader path: {line.strip()}")
+        # Only an invocation that builds an image, which is one that names a format with `-O`;
+        # the preflight's `command -v` list and the closing `--version` assemble nothing.
+        if _GRUB_BUILDS.search(line) and not _GRUB_FROM_POOL.search(line):
+            offending.append(f"grub-mkstandalone without --directory under $LOADERS: {line.strip()}")
+    if offending:
+        raise PinFileError("build/mkiso.sh takes boot-chain code from the build host:\n  " + "\n  ".join(offending))
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="build-time assertions")
     parser.add_argument("--closure", type=Path, help="the fetched appliance pool")

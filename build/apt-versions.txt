@@ -121,11 +121,18 @@ gnupg=2.4.7-21+deb13u1
 # have made the parser contract answer a different question than the one that matters.
 python3-pip=25.1.1+dfsg-1
 
-# The builder's own tools. Not installed into either tier's Python environment — listed
-# here so Dockerfile.iso reads one pinned file rather than resolving `latest`.
+# The builder's own tools. Not installed into either tier's Python environment. Three of
+# them are LOAD-BEARING for the ISO's bytes: build/mkiso.sh stage 5 extracts `isolinux`,
+# `syslinux-common` and `grub-efi-amd64-bin` from this pool with `dpkg-deb -x`, so the
+# boot chain's code comes from the snapshot and not from the build host. The rest are
+# pinned for a host image that does not exist; the build uses the host's own, and
+# docs/reproducible-build.md, *Not claimed* item 1, says so.
 mmdebstrap=1.5.7-1+deb13u1
 xorriso=1.5.6-1.2+b1
 isolinux=3:6.04~git20190206.bf6db5b4+dfsg1-3.1
+# `ldlinux.c32`, which `isolinux.bin` loads and which the `isolinux` package does not ship.
+# Extracted into the ISO from this pool by build/mkiso.sh stage 5, never read off the host.
+syslinux-common=3:6.04~git20190206.bf6db5b4+dfsg1-3.1
 grub-efi-amd64-bin=2.12-9+deb13u2
 zstd=1.5.7+dfsg-1
 cpio=2.15+dfsg-2

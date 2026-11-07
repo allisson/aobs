@@ -881,3 +881,34 @@ def test_a_file_that_is_not_a_kernel_config_is_refused_rather_than_passed(tmp_pa
     with pytest.raises(verify.PinFileError) as raised:
         verify.main(["--kernel-config", str(empty)])
     assert "not a kernel config" in str(raised.value)
+
+
+# --- The boot chain comes from the pool -----------------------------------------------------------
+
+
+def test_mkiso_reads_no_boot_chain_code_off_the_host() -> None:
+    verify.no_loader_read_from_the_host((ROOT / "build" / "mkiso.sh").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'src=$(find /usr/lib/ISOLINUX /usr/lib/syslinux -name "$f" | head -1)',
+        "isohdpfx=/usr/lib/ISOLINUX/isohdpfx.bin",
+        'cp "/usr/lib/syslinux/modules/bios/ldlinux.c32" "$ISO_TREE/isolinux/"',
+        'grub-mkstandalone -O x86_64-efi -o "$WORK/bootx64.efi" "boot/grub/grub.cfg=x"',
+        'grub-mkstandalone -O x86_64-efi \\\n    --directory /usr/lib/grub/x86_64-efi \\\n    -o x',
+    ],
+)
+def test_a_host_loader_path_fails(line: str) -> None:
+    """The rule bites: each of the forms stage 5 used before M4, and the one it could regress to."""
+    with pytest.raises(verify.PinFileError, match="from the build host"):
+        verify.no_loader_read_from_the_host(f"set -eu\n{line}\n")
+
+
+def test_the_pool_paths_and_comments_about_the_host_pass() -> None:
+    verify.no_loader_read_from_the_host(
+        "# it used to read /usr/lib/ISOLINUX off the host\n"
+        'cp "$LOADERS/usr/lib/ISOLINUX/isolinux.bin" x\n'
+        'grub-mkstandalone -O x86_64-efi \\\n    --directory "$LOADERS/usr/lib/grub/x86_64-efi" \\\n    -o y\n'
+    )
