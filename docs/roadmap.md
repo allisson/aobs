@@ -924,6 +924,15 @@ exit criterion. They stay in this milestone because their evidence is the same k
       2.12-1ubuntu7.3, and **has not been booted** — a UEFI path no machine has ever booted (#26)
       is now also a different binary from the one that was never booted.
 - [ ] CI builds twice under deliberately hostile variation and fails on any differing byte.
+
+      *Implemented as two more steps in the `image` job* (`.github/workflows/tests.yml`), so the guard
+      shares its pool cache and its tools and runs wherever that job runs. Build B varies, against
+      build A: user and uid, path, filesystem (tmpfs), hostname, the caller's umask (077), timezone,
+      locale, clock, and an exported `SOURCE_DATE_EPOCH=1` the script must ignore. It cannot vary
+      the host kernel, the CPU count or the arranging tools; fact 8 is answered instead by measuring
+      zstd alone (`docs/reproducible-build.md`). Two runners in parallel would also vary the machine,
+      and were not chosen: every runner of one label is the same image, so they would add a second
+      cache restore and no fact the contract lists.
 - [ ] Fix every divergence source found. `SOURCE_DATE_EPOCH` throughout; deterministic `cpio` ordering,
       ownership and timestamps; deterministic `mmdebstrap` output; no build-host paths in the image.
 

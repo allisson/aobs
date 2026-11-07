@@ -72,7 +72,7 @@ that it varies.
 | 5 | Locale | unknown | below |
 | 6 | Timezone | unknown | below |
 | 7 | umask | closed | below |
-| 8 | CPU count | unknown | below |
+| 8 | CPU count | held, measured on zstd alone | below |
 | 9 | Host kernel | unknown | below |
 | 10 | Host architecture | refused | below |
 | 11 | Host filesystem | closed | below |
@@ -150,12 +150,17 @@ restores (`--no-same-permissions` is GNU tar's default for non-root). The rootfs
 (`build/mkiso.sh:153-177`), and `mkinitramfs.py` writes each file's `st_mode` into its header. The
 script now sets `umask 022` before anything else (`build/mkiso.sh:23`). Not varied.
 
-### 8. CPU count — unknown
+### 8. CPU count — held, measured on zstd alone
 
 The one CPU-count-dependent flag in the build is `zstd -T0` (`build/mkiso.sh:410`), which sizes the
-worker pool to the host. Whether zstd's output depends on the worker count has not been checked: the
-pair agreed on the initramfs, but both builds had the same CPUs. The guard answers it, and `-T1`
-removes the question if the answer is yes.
+worker pool to the host. Measured 2026-11-07 on zstd 1.5.5, the host tool, against one initramfs
+(6068 members, 128 MiB): `-T0` on an 8-CPU host and `-T1`, `-T2`, `-T3`, `-T4`, `-T8` and `-T16`
+wrote the same bytes. Only `--single-thread`, which the build does not use, wrote different ones.
+So a host with any number of CPUs writes the same initramfs.
+
+This is *held* without a guard run that varied it, the one exception in this table, because no guard
+can: every runner the guard has gets the same CPU count, and the measurement varies the one place the
+count is read. It is a property of zstd 1.5.5 — another version is input 4, not this fact.
 
 ### 9. Host kernel — unknown
 
@@ -212,7 +217,7 @@ which no filesystem changes. Not varied.
 ## What changes this document
 
 A fact moves to *held* only with the change that holds it out **and** a guard run that varied it;
-until then a fact with the change and no such run is *closed*. A fact may be added; none may be
+until then a fact with the change and no such run is *closed*. Fact 8 is the stated exception. A fact may be added; none may be
 removed without saying here why it no longer applies. When the open question in *Not claimed* is
 closed, item 1 moves into the contract or stays out of it by decision, and the README's *On
 reproducibility* paragraph changes with it.
