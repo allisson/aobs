@@ -178,7 +178,9 @@ unrounded figure PID 1 compares against will not.
    *Why it is open*: the obvious fix — build inside an image made from the pinned harness pool — is a
    container, and on the hosts measured so far a container can only reach stage 1 `--privileged`
    (`build/mkiso-docker.sh`). The build's unprivileged claim is measured on a bare `ubuntu-24.04`
-   runner. The two endings, and the recommendation, are in `docs/roadmap.md` M4.
+   runner. **Decided 2026-11-07** (`docs/roadmap.md` M4): the boot-chain bytes will be extracted from
+   the pinned pool, and the arranging tools stay the host's, with their versions named by the
+   contract as a stated input. Until that change lands, this item stays here.
 
 2. **That the input archive is reproducible.** A separate M4 row. This contract takes
    `build/inputs/` as given, checked by hash.

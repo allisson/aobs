@@ -871,7 +871,7 @@ exit criterion. They stay in this milestone because their evidence is the same k
       and the GRUB modules in `bootx64.efi` — are copied from the build host's unpinned packages.
       Both comments are corrected and point at the row below.
 
-- [ ] **Decide where the build tools come from, before the guard is written.** The guard's exit is
+- [x] **Decide where the build tools come from, before the guard is written.** The guard's exit is
       "on deliberately different hosts", and today a different host is a different set of tool
       versions, some of which write boot-chain code into the ISO. The harness group already pins
       `mmdebstrap`, `xorriso`, `isolinux`, `grub-efi-amd64-bin` and `zstd` at the snapshot "so
@@ -895,6 +895,18 @@ exit criterion. They stay in this milestone because their evidence is the same k
       before v0.1.** The first closes the trust half — boot-chain code from an unpinned archive — at
       no cost to a claim already measured. It is a decision about what the contract promises, so it
       is recorded here or in an ADR before the guard is built on it.
+
+      ***Decided 2026-11-07: the first ending.*** *The contract names the arranging tools' versions
+      as a stated input rather than a fact that must not matter, and the second ending stays
+      available after v0.1 without reversing anything here. Not yet implemented — the next row
+      does the extraction, and `docs/reproducible-build.md` keeps it under* Not claimed *until it
+      lands.*
+- [ ] **Take the boot-chain bytes from the pinned pool.** Pin `syslinux-common` (it ships
+      `ldlinux.c32`) and `mtools`; extract `isolinux`, `syslinux-common` and `grub-efi-amd64-bin`
+      in stage 5 with `dpkg-deb -x`, as stage 3 does the kernel; run `grub-mkstandalone` against the
+      extracted module directory; and have the build print every arranging tool's version beside
+      the ISO's sha256. `build/verify.py` gains an assertion that no loader file is read from a host
+      path, fed a broken input like every other.
 - [ ] CI builds twice under deliberately hostile variation and fails on any differing byte.
 - [ ] Fix every divergence source found. `SOURCE_DATE_EPOCH` throughout; deterministic `cpio` ordering,
       ownership and timestamps; deterministic `mmdebstrap` output; no build-host paths in the image.
