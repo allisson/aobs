@@ -9,10 +9,10 @@
 #
 # The tool versions here are deliberately NOT pinned, and that is the same decision CI's
 # `The build tools` step already carries, for the same reason: these are the host's tools, not the
-# image's. Every byte that lands in the ISO comes from `build/inputs/` and stage 0's `sha256sum -c`
-# says so. What a differently-versioned `mmdebstrap` or `xorriso` can still change is the
-# ARRANGEMENT of those bytes, which is `docs/reproducible-build.md`'s question at M4 and not this
-# file's.
+# image's — for the rootfs, whose every byte comes from `build/inputs/` behind stage 0's
+# `sha256sum -c`. Not for the ISO: its bootloaders are copied out of the packages installed below,
+# and every tool here arranges bytes. `docs/reproducible-build.md`, *Not claimed* item 1, states
+# it, and `docs/roadmap.md` M4 is where it is decided.
 #
 # The image's own user is `builder`, uid 1001, with the `subuid`/`subgid` ranges
 # `mmdebstrap --mode=unshare` maps into — the runner's shape, kept deliberately. It is **not** what

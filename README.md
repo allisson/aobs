@@ -549,8 +549,9 @@ as the change it authorises.
 - [`docs/entropy-mixing.md`](docs/entropy-mixing.md), [`docs/psbt-review-model.md`](docs/psbt-review-model.md), [`docs/seed-entry.md`](docs/seed-entry.md), [`docs/secret-hygiene.md`](docs/secret-hygiene.md), [`docs/address-verification.md`](docs/address-verification.md)
 - [`docs/boot-pipeline.md`](docs/boot-pipeline.md), [`docs/test-harness.md`](docs/test-harness.md), [`docs/adr/`](docs/adr/)
 - [`docs/threat-model.md`](docs/threat-model.md), [`docs/boot-checklist.md`](docs/boot-checklist.md)
-- Not yet written, and named here rather than quietly omitted: `docs/reproducible-build.md` (M4),
-  `docs/release.md` (M5)
+- [`docs/reproducible-build.md`](docs/reproducible-build.md) — the reproducibility contract, not yet
+  demonstrated
+- Not yet written, and named here rather than quietly omitted: `docs/release.md` (M5)
 
 ---
 

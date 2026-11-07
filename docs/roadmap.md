@@ -851,9 +851,62 @@ exit criterion. They stay in this milestone because their evidence is the same k
 
 ## M4 — The reproducibility guard
 
-- [ ] `docs/reproducible-build.md`: the contract as a numbered list of environment facts that must not
+- [x] `docs/reproducible-build.md`: the contract as a numbered list of environment facts that must not
       reach the bytes of the ISO — build path, hostname, user, uid, clock, locale, timezone, umask, CPU
       count, host kernel, host architecture — and an explicit list of what is *not* claimed.
+
+      *Written, with a status per fact, and **nothing in it demonstrated** — no two builds have been
+      compared.* Reading the code and inspecting one local build of `9124dd9` found three facts
+      already reaching the ISO, observed: the **uid**, in xorriso's Rock Ridge records
+      (`uid 1001`); the **clock**, in the volume descriptor's dates and in 338 `.pyc` files the
+      signing check writes into `/opt` carrying the checkout's mtimes; and, by reading, the
+      **umask**, through an unprivileged `tar -x` into modes the cpio header records. One fact the
+      list did not have was added: the **host filesystem**, because the RAM floor is derived from
+      `du -sk`, which counts allocated blocks, and the result is substituted into `/init`.
+      `SOURCE_DATE_EPOCH` is set and never exported, so only `mkinitramfs.py` sees it.
+
+      **And the comment that said otherwise was wrong in two places.** `.github/workflows/tests.yml`
+      and `build/Dockerfile.isohost` both said every byte of the ISO comes from `build/inputs/`.
+      The rootfs's does. The ISO's bootloaders — `isolinux.bin`, `ldlinux.c32`, `isohdpfx.bin`,
+      and the GRUB modules in `bootx64.efi` — are copied from the build host's unpinned packages.
+      Both comments are corrected and point at the row below.
+
+- [x] **Decide where the build tools come from, before the guard is written.** The guard's exit is
+      "on deliberately different hosts", and today a different host is a different set of tool
+      versions, some of which write boot-chain code into the ISO. The harness group already pins
+      `mmdebstrap`, `xorriso`, `isolinux`, `grub-efi-amd64-bin` and `zstd` at the snapshot "so
+      Dockerfile.iso reads one pinned file" — a Dockerfile that was never written. `syslinux-common`
+      and `mtools` are not pinned at all. Two endings:
+
+      1. **Take the boot-chain bytes from the pinned pool, and declare the rest.** Extract
+         `isolinux`, `syslinux-common` and `grub-efi-amd64-bin` with `dpkg-deb -x` — the way stage 3
+         already treats the kernel — and point `grub-mkstandalone` at the extracted modules. Every
+         byte of the ISO that is code then comes from `build/inputs/`. The arranging tools stay the
+         host's, their versions are printed by the build and named by the contract, and "different
+         hosts" in the exit means different machines, users, paths and clocks on the same runner
+         image. Leaves the unprivileged claim untouched.
+      2. **Build inside a host image made from the pinned harness pool.** Pins everything. But it is
+         a container, and on every host measured so far a container reaches stage 1 only
+         `--privileged` (`build/mkiso-docker.sh`), while the unprivileged claim is measured on a bare
+         `ubuntu-24.04` runner. Taking this ending means re-measuring that claim inside the
+         container, or giving it up.
+
+      **Recommended: the first, now; the second only if a rebuild on another distribution is wanted
+      before v0.1.** The first closes the trust half — boot-chain code from an unpinned archive — at
+      no cost to a claim already measured. It is a decision about what the contract promises, so it
+      is recorded here or in an ADR before the guard is built on it.
+
+      ***Decided 2026-11-07: the first ending.*** *The contract names the arranging tools' versions
+      as a stated input rather than a fact that must not matter, and the second ending stays
+      available after v0.1 without reversing anything here. Not yet implemented — the next row
+      does the extraction, and `docs/reproducible-build.md` keeps it under* Not claimed *until it
+      lands.*
+- [ ] **Take the boot-chain bytes from the pinned pool.** Pin `syslinux-common` (it ships
+      `ldlinux.c32`) and `mtools`; extract `isolinux`, `syslinux-common` and `grub-efi-amd64-bin`
+      in stage 5 with `dpkg-deb -x`, as stage 3 does the kernel; run `grub-mkstandalone` against the
+      extracted module directory; and have the build print every arranging tool's version beside
+      the ISO's sha256. `build/verify.py` gains an assertion that no loader file is read from a host
+      path, fed a broken input like every other.
 - [ ] CI builds twice under deliberately hostile variation and fails on any differing byte.
 - [ ] Fix every divergence source found. `SOURCE_DATE_EPOCH` throughout; deterministic `cpio` ordering,
       ownership and timestamps; deterministic `mmdebstrap` output; no build-host paths in the image.
