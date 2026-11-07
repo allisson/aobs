@@ -65,6 +65,8 @@ INPUTS=build/inputs
 HASHES=build/inputs.sha256
 
 . ./build/snapshot.env
+# The same digest `build/Dockerfile.test` starts FROM, and moved with it — see the comment there.
+BASE_IMAGE=debian:trixie-20260824-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
 
 # --- The apt closures ---------------------------------------------------------------------------
 #
@@ -148,7 +150,7 @@ fetch_debs() {
         -e DEBIAN_SNAPSHOT="$DEBIAN_SNAPSHOT" -e DEBIAN_SUITE="$DEBIAN_SUITE" \
         -e PINS="$pins" \
         -v "$PWD/$out:/out" \
-        debian:trixie-slim sh -euc '
+        "$BASE_IMAGE" sh -euc '
             # http, and the reason is in this script s header: no ca-certificates in slim, and
             # apt s integrity is the signed InRelease, not the transport.
             #
@@ -225,7 +227,7 @@ fetch_kernel() {
         -e DEBIAN_SNAPSHOT="$DEBIAN_SNAPSHOT" -e DEBIAN_SUITE="$DEBIAN_SUITE" \
         -e PINS="$pins" \
         -v "$PWD/$out:/out" \
-        debian:trixie-slim sh -euc '
+        "$BASE_IMAGE" sh -euc '
             printf "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s/ %s main\n" \
                 "$DEBIAN_SNAPSHOT" "$DEBIAN_SUITE" > /etc/apt/sources.list.d/pinned.list
             printf "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/%s/ %s-security main\n" \
