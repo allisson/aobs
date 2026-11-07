@@ -272,8 +272,12 @@ which no filesystem changes. Varied by the guard: build B runs on tmpfs.
    same extraction was not tried for the tools above; none of them has yet differed between two
    hosts.
 
-2. **That the input archive is reproducible.** A separate M4 row. This contract takes
-   `build/inputs/` as given, checked by hash.
+2. **That fetching the input archive is reproducible.** This contract takes `build/inputs/` as
+   given, checked by hash. *Packing* it is reproducible and guarded: `build/pack-inputs.sh` writes
+   one tar whose bytes depend only on the files `build/inputs.sha256` names, and CI packs it twice
+   under varied user, umask, timezone, locale and file mtimes and fails on a differing byte. Whether
+   a fresh `build/fetch-inputs.sh` reproduces those files is what `inputs.sha256` gates, not this
+   document.
 
 3. **Anything about the written medium.** The contract ends at the ISO file. What reaches a stick,
    and what the firmware reads from it, is `docs/boot-checklist.md`'s *Write the medium*, at its

@@ -974,10 +974,28 @@ exit criterion. They stay in this milestone because their evidence is the same k
       fails the suite if a bare `zstd` compresses again, fed three broken forms. Neither CI nor
       `build/Dockerfile.isohost` installs zstd any more, and the preflight no longer asks for it.
       Fact 8 is re-measured on the pool's 1.5.7 in `docs/reproducible-build.md`.
-- [ ] The **input archive**: every byte the build consumes that the build did not write, fetched,
+- [x] The **input archive**: every byte the build consumes that the build did not write, fetched,
       verified and published as one thing, so a release stays rebuildable after upstream stops serving
       those bytes. Every member must be a function of the package set, or two fetches of the same set
       produce two different archives.
+
+      ***Decided 2026-11-07.*** *What goes in: every file `build/inputs.sha256` names, all 302
+      (246 MiB) — stage 0's set-equality gate makes the whole set what the build consumes, so a
+      smaller archive would fail the build's own check. The form: one uncompressed tar, packed
+      deterministically by `build/pack-inputs.sh` (members in `inputs.sha256` order, files only,
+      owner 0, mtime 0, fixed modes), named by its own sha256. Uncompressed because every member is
+      already a compressed `.deb` or `.whl`, and a compressor would be one more tool whose version is
+      an input. The way back is `tar -xf` at the repository root, after which stage 0 judges it as it
+      judges a fetch. Proven in M4 by packing twice under varied conditions in CI; publishing it as
+      a release asset is M5's, beside the manifest that names it.*
+
+      *Done.* `build/pack-inputs.sh`, and a step in CI's `image` job that packs it a second time
+      from build B's copy — as `rebuilder`, umask 077, another TZ and locale, every input's mtime
+      moved — fails on a differing byte, then unpacks it and verifies all of `inputs.sha256`.
+      *Evidence, local*: the same variation in a container packed
+      `3492cf24b8d0c28d816b3ba9219474b2bff3d8b6779153c35011b01ace35f5b3` twice, and the round trip
+      verified all 302 files; with `--mtime=@0` removed and one mtime changed, the digest moved to
+      `ce374fa6…0e83e`, so the guard bites.
 - [ ] The **source archive**: corresponding source for every copyleft-touched package the input archive
       redistributes. An accompaniment, not an input — no build reads a byte of it. Debian's source
       packages and `snapshot.debian.org` make the pinning exact; this is easier here than it was on
