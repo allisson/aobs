@@ -33,6 +33,24 @@ of arranging tools — none of those was varied, and the roadmap's M4 exit, two 
 *deliberately different hosts*, is not met by it. What it shows is that, on one host, none of the
 facts in the table above it reaches the bytes.
 
+**One cross-host pair**, 2026-11-07, at `244ec69`. CI run
+[42406573050](https://github.com/allisson/aobs/actions/runs/42406573050) built
+`651c90b65f16318e9a5c0fb0ec487e5f74f659cff051f7515d89cfaed9977ab1` twice. The same commit, built by
+`build/mkiso-docker.sh` on an arm64 Mac, wrote `04a28662a0b4954830c824ddf1adf979cf3c642b1553d53983773ff9be89382a`.
+The two builds printed identical arranging-tool lines except one: zstd 1.5.5 there, 1.5.7 on the
+runner. That is input 4, and the local `initramfs.zst` was 33.2 MiB against CI's 33.1 MiB. Rebuilt
+in the same container with zstd 1.5.7 taken from the pinned harness pool
+(`build/inputs/deb/harness/zstd_1.5.7+dfsg-1_amd64.deb`, put first on `PATH`, no tracked file
+changed), it wrote `651c90b6…7ab1` — CI's digest.
+
+So the two hosts differed in kernel (the runner's against OrbStack's `7.2.12-orbstack`, 8 CPUs),
+architecture under the container (amd64 emulated on arm64), filesystem (the runner's against a bind
+mount from macOS) and privilege (unprivileged against `--privileged`), and agreed once their
+arranging tools agreed. The runner's kernel version and CPU count were not recorded, so whether the
+CPU count differed is not known. One pair, both builds started by the maintainer:
+corroboration of facts 9 and 10, not a guard run, so neither moves to *held*, and not the
+independent rebuild `docs/threat-model.md` claim (ix) asks for.
+
 Before the guard, a pair of local `build/mkiso-docker.sh` builds varied only the clock and agreed
 (`824e0124…5f7d`); the pair before that, without `--set_all_file_dates`, differed in 114 bytes of ISO
 9660 and Rock Ridge record dates.
@@ -199,13 +217,16 @@ guard's runner has zstd 1.5.7, on which this was not measured.
 
 The host kernel decides whether `--mode=unshare` works at all — `docs/boot-pipeline.md` records
 where it does and where it does not — but nothing read so far writes a host-kernel fact into the
-image.
+image. Observed once: the cross-host pair above, CI's runner kernel against OrbStack's, wrote
+the same ISO. One pair is not a guard run, so the status stays.
 
 ### 10. Host architecture — refused
 
 Stage 0 stops on anything but `x86_64` (`build/mkiso.sh:72-77`). That refuses a native foreign host;
 it does not cover an amd64 container under emulation, which reports `x86_64` and is what
-`build/mkiso-docker.sh` uses on an arm64 machine. Whether emulation changes a byte is unmeasured.
+`build/mkiso-docker.sh` uses on an arm64 machine. Observed once: the cross-host pair above, amd64
+emulated on an arm64 Mac, wrote the same ISO as a native amd64 runner once zstd matched. That is one
+pair on one emulator, not a measurement of emulation in general.
 
 ### 11. Host filesystem — held
 
@@ -245,7 +266,7 @@ which no filesystem changes. Varied by the guard: build B runs on tmpfs.
 5. **The privileged local build as evidence of anything.** `build/mkiso-docker.sh` is a different
    host from CI's — a container, privileged, under emulation on an arm64 machine. If it and CI
    agree, that is corroboration; the guard is what the claim will rest on. The identical pair above
-   is that kind of corroboration and no more.
+   and the cross-host pair at `244ec69` are that kind of corroboration and no more.
 
 ## What changes this document
 

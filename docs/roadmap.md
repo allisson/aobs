@@ -975,6 +975,15 @@ exit criterion. They stay in this milestone because their evidence is the same k
 
 **Exit**: two builds from a clean tree, on deliberately different hosts, produce the same sha256.
 
+*Met once, 2026-11-07, at `244ec69`; the milestone stays open on the two archive rows.* CI's runner
+and `build/mkiso-docker.sh` on an arm64 Mac first disagreed — `651c90b6…7ab1` against
+`04a28662…382a` — and the build's own tool lines named the cause: zstd 1.5.7 against 1.5.5, input 4
+of the contract. With zstd 1.5.7 from the pinned harness pool on the container's `PATH`, the Mac
+wrote `651c90b6…7ab1`. The hosts differed in kernel, filesystem, privilege and native architecture. `docs/reproducible-build.md` records the pair and why it is corroboration, not a guard
+run: one pair, one maintainer, and the tools matched by hand. It also shows input 4 is live — two
+stock `ubuntu-24.04` setups (the runner image and `ubuntu:24.04` in Docker) do not ship the same
+zstd.
+
 ---
 
 ## M5 — Signed v0.1.0
