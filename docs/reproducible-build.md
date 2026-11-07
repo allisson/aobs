@@ -24,11 +24,17 @@ broke.
    M4 row and is not claimed here.
 3. **`SOURCE_DATE_EPOCH`**, which is not a free variable: `build/mkiso.sh:239` derives it from the
    commit's own timestamp.
+4. **The versions of the host's arranging tools**, by decision (`docs/roadmap.md` M4). mmdebstrap,
+   xorriso, mtools, zstd, `grub-mkstandalone`, the host's `depmod` and the host's pip supply no
+   bytes — every byte comes from the input archive — but they decide how those bytes are laid out,
+   and they are the host's and unpinned. The build prints each one's version beside the ISO's
+   digest. A rebuild that disagrees compares those lines first: if they differ, it has found this
+   input, not a defect.
 
-**What is not yet true**: a fourth thing determines it today — the versions of the build host's own
-tools. See *Not claimed*, item 1. Until that is closed, the contract is stated **relative to a host
-with the same tool versions**, and a rebuild on a different distribution that disagrees has found
-the open question below, not a defect.
+**The boot chain is not among them.** `isolinux.bin`, `ldlinux.c32`, `isohdpfx.bin` and the GRUB
+`kernel.img` and modules `bootx64.efi` is assembled from are extracted from the pinned pool in stage
+5 with `dpkg-deb -x`, as stage 3 extracts the kernel. Until M4 they were copied off the build host;
+`build/verify.py`'s `no_loader_read_from_the_host` fails the suite if a host loader path returns.
 
 ## The contract: facts that must not reach the bytes
 
@@ -155,32 +161,19 @@ unrounded figure PID 1 compares against will not.
 
 ## Not claimed
 
-1. **The versions of the host's build tools.** This is the largest hole and it is an open question,
-   not an oversight.
+1. **That a host with different arranging tools reproduces the ISO.** Input 4 above, stated here
+   from the other side. xorriso lays out the ISO, `mformat`/`mcopy` the EFI partition, zstd the
+   initramfs compression, the host's `depmod` writes `modules.dep*` into the rootfs, the host's pip
+   writes each wheel's install metadata, and `grub-mkstandalone` assembles `bootx64.efi` from the
+   pool's modules. A different version of any of them may write different bytes from identical
+   inputs, and the contract does not promise otherwise.
 
-   *Bytes of the ISO come from the host's own packages*, not from `build/inputs/`: `isolinux.bin`,
-   `ldlinux.c32` and `isohdpfx.bin` are copied out of the host's `/usr/lib/ISOLINUX` and
-   `/usr/lib/syslinux` (`build/mkiso.sh:402-406`, `:425`), and `bootx64.efi` is assembled by
-   `grub-mkstandalone` from the host's GRUB modules (`:411-413`). On CI those are `ubuntu-24.04`'s,
-   installed unpinned (`.github/workflows/tests.yml`, *The build tools*). They are the boot chain's
-   first code, so this is a trust question as well as a reproducibility one.
-
-   *Arrangement comes from host tools too*: xorriso lays out the ISO, `mformat`/`mcopy` the EFI
-   partition, zstd the initramfs compression, the host's `depmod` writes `modules.dep*` into the
-   rootfs (`build/mkiso.sh:278`), and the host's pip writes each wheel's install metadata
-   (`:137-144`). A different version of any of them may write different bytes from identical inputs.
-
-   **Half of the answer already exists and is unused.** The harness group pins `mmdebstrap`,
-   `xorriso`, `isolinux`, `grub-efi-amd64-bin`, `zstd` and `cpio` at the snapshot, with a comment
-   saying they are there "so Dockerfile.iso reads one pinned file". No such Dockerfile exists, and
-   `syslinux-common` (which ships `ldlinux.c32`) and `mtools` are not pinned at all.
-
-   *Why it is open*: the obvious fix — build inside an image made from the pinned harness pool — is a
-   container, and on the hosts measured so far a container can only reach stage 1 `--privileged`
-   (`build/mkiso-docker.sh`). The build's unprivileged claim is measured on a bare `ubuntu-24.04`
-   runner. **Decided 2026-11-07** (`docs/roadmap.md` M4): the boot-chain bytes will be extracted from
-   the pinned pool, and the arranging tools stay the host's, with their versions named by the
-   contract as a stated input. Until that change lands, this item stays here.
+   *Why the tools are not pinned too*: the harness group already pins mmdebstrap, xorriso and zstd
+   at the snapshot, but using them means building inside an image made from that pool — a
+   container — and on every host measured so far a container reaches stage 1 only `--privileged`
+   (`build/mkiso-docker.sh`), while the build's unprivileged claim is measured on a bare
+   `ubuntu-24.04` runner. Decided 2026-11-07, `docs/roadmap.md` M4; that ending stays available
+   after v0.1 without reversing anything.
 
 2. **That the input archive is reproducible.** A separate M4 row. This contract takes
    `build/inputs/` as given, checked by hash.

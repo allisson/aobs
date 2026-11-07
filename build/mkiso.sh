@@ -74,7 +74,7 @@ done
 [ -z "$missing" ] || {
     echo "mkiso: the build host is missing:$missing" >&2
     echo "       Debian/Ubuntu: mmdebstrap uidmap dpkg-dev kmod zstd xorriso mtools" >&2
-    echo "       grub-efi-amd64-bin isolinux binutils python3 python3-pip" >&2
+    echo "       grub-common binutils python3 python3-pip" >&2
     exit 1
 }
 
@@ -395,22 +395,39 @@ kernel_mib=$(mib "$ISO_TREE/boot/vmlinuz")
 
 say "stage 5: xorriso, hybrid BIOS + UEFI"
 
-# BIOS: isolinux, from the host's own syslinux files. These are loader bytes and not image content
-# — nothing here ends up in the running system, which is the whole reason the boot medium can be
-# pulled once the kernel and initramfs are in memory. They ARE bytes of the ISO, though, and they
-# come from the host's unpinned packages rather than `build/inputs/`: `docs/reproducible-build.md`,
-# *Not claimed* item 1.
-mkdir -p "$ISO_TREE/isolinux"
-for f in isolinux.bin ldlinux.c32; do
-    src=$(find /usr/lib/ISOLINUX /usr/lib/syslinux -name "$f" 2>/dev/null | head -1)
-    [ -n "$src" ] || { echo "mkiso: cannot find $f (install isolinux and syslinux-common)" >&2; exit 1; }
-    cp "$src" "$ISO_TREE/isolinux/"
+# THE BOOT CHAIN'S CODE COMES FROM THE PINNED POOL, extracted and never installed — the way stage 3
+# treats the kernel. These are loader bytes and not image content: nothing here ends up in the
+# running system, which is why the boot medium can be pulled once the kernel and initramfs are in
+# memory. They are still bytes of the ISO and the first code the firmware runs, and until this stage
+# read them they came from the build host's own unpinned `isolinux`, `syslinux-common` and
+# `grub-efi-amd64-bin`. `docs/reproducible-build.md`, *Not claimed* item 1, has the decision.
+#
+# `build/verify.py`'s `no_loader_read_from_the_host` reads this file and fails the suite if a host
+# loader path comes back. Exactly one `.deb` per package, because a glob that matched two would copy
+# whichever the shell sorted last.
+LOADERS=$WORK/loaders
+mkdir -p "$LOADERS"
+for package in isolinux syslinux-common grub-efi-amd64-bin; do
+    set -- "$INPUTS"/deb/harness/"${package}"_*.deb
+    [ "$#" -eq 1 ] && [ -f "$1" ] || {
+        echo "mkiso: expected one ${package} .deb in build/inputs/deb/harness, found: $*" >&2
+        exit 1
+    }
+    dpkg-deb -x "$1" "$LOADERS"
 done
+
+# BIOS: isolinux.
+mkdir -p "$ISO_TREE/isolinux"
+cp "$LOADERS/usr/lib/ISOLINUX/isolinux.bin" "$LOADERS/usr/lib/syslinux/modules/bios/ldlinux.c32" \
+    "$ISO_TREE/isolinux/"
 cp "$ROOT/build/isolinux.cfg" "$ISO_TREE/isolinux/"
 
 # UEFI: one standalone binary with the config baked in, so GRUB reads nothing from the medium.
+# `--directory` is what makes the modules and `kernel.img` the pool's; without it the host's
+# `grub-mkstandalone` assembles the image from the host's own `/usr/lib/grub`.
 mkdir -p "$WORK/efi/EFI/boot"
 grub-mkstandalone -O x86_64-efi \
+    --directory "$LOADERS/usr/lib/grub/x86_64-efi" \
     -o "$WORK/efi/EFI/boot/bootx64.efi" \
     "boot/grub/grub.cfg=$ROOT/build/grub.cfg"
 
@@ -424,8 +441,7 @@ mmd   -i "$WORK/efiboot.img" ::/EFI ::/EFI/boot
 mcopy -i "$WORK/efiboot.img" "$WORK/efi/EFI/boot/bootx64.efi" ::/EFI/boot/
 cp "$WORK/efiboot.img" "$ISO_TREE/efiboot.img"
 
-isohdpfx=$(find /usr/lib/ISOLINUX /usr/lib/syslinux -name 'isohdpfx.bin' 2>/dev/null | head -1)
-[ -n "$isohdpfx" ] || { echo "mkiso: cannot find isohdpfx.bin" >&2; exit 1; }
+isohdpfx=$LOADERS/usr/lib/ISOLINUX/isohdpfx.bin
 
 rm -f "$ISO"
 xorriso -as mkisofs \
@@ -463,6 +479,18 @@ if command -v sha256sum >/dev/null 2>&1; then
 else
     iso_sha=$(shasum -a 256 "$ISO" | cut -d' ' -f1)
 fi
+# The tools that ARRANGED those bytes are the host's and are not pinned: the contract names their
+# versions as an input rather than a fact that must not matter (`docs/reproducible-build.md`). So
+# they are printed beside the digest, where a rebuild that disagrees can compare them first.
+tools=$( {
+    mmdebstrap --version
+    xorriso -version 2>&1 | head -1
+    mformat --version | head -1
+    zstd --version
+    grub-mkstandalone --version
+    depmod --version | head -1
+    python3 -m pip --version | cut -d' ' -f1-2
+} 2>&1 | sed 's/^/    /')
 cat <<EOF
 
   $ISO
@@ -474,4 +502,7 @@ cat <<EOF
   | ISO             | ${iso_mib} MiB |
 
   RAM: requires ${required_mib} MiB, published floor ${floor_mib} MiB
+
+  arranged by (host tools, not pinned):
+$tools
 EOF

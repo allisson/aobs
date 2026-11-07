@@ -247,6 +247,7 @@ c1388174dc7140e6c19a6dd39f8a0dcb38a835cd66c65644e0dded43d5223cb0  build/inputs/d
 f77e8aa0bf0de618f11cb0b21658a4ed60f177d63b3cf26d7fc3706b6d0eaaa9  build/inputs/deb/harness/readline-common_8.2-6_all.deb
 7071270ed4f6adda55bc4f926347fb847bacaffbdee3dff917bc6006ed7e3775  build/inputs/deb/harness/sed_4.9-2+deb13u1_amd64.deb
 97760aa17acceee0cace13d9edbed781d891b43e0dec0d6ddc4bd5e4c3ac65aa  build/inputs/deb/harness/sqv_1.3.0-3+b2_amd64.deb
+8138b10dfbca473cc078e5184b9ec527e0e097802a0216e092f87bcbdf69e4ad  build/inputs/deb/harness/syslinux-common_3%3a6.04~git20190206.bf6db5b4+dfsg1-3.1_all.deb
 c7e957360dff89675b491e501b00047cf750695178cabab167c92fc260d358ec  build/inputs/deb/harness/sysvinit-utils_3.14-4_amd64.deb
 214c02e1aa291076a3147b8a4c4cae02fadf4c67df629186e3e313726faef1de  build/inputs/deb/harness/tar_1.35+dfsg-3.1_amd64.deb
 306013b77311e875620e89f43c447765a6c72b7b398e0baa8e5721bcbbdf66cf  build/inputs/deb/harness/tzdata_2026b-0+deb13u1_all.deb
