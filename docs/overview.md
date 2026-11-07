@@ -200,7 +200,7 @@ cannot be.
 | `docs/adr/0003-the-console-is-enforced-not-requested.md` | Why the image asks the firmware for no video mode, and enforces the console size itself |
 | `docs/boot-pipeline.md` | The build's stages, PID 1, the module allowlist, the RAM floor |
 | `docs/threat-model.md` | Adversary tiers, and every claim above at its stated strength |
-| `docs/reproducible-build.md` | The reproducibility contract, each fact's status, and what is not claimed — the guard has not run yet |
+| `docs/reproducible-build.md` | The reproducibility contract, each fact's status, and what is not claimed — held on one host by a CI guard, not yet across hosts |
 | `docs/test-harness.md` | The four tiers and what each one is authoritative for |
 | `docs/release.md` — **not yet written**, due in M5 | The release ritual, the manifest, the release-mode refusals |
 | `docs/boot-checklist.md` | The checks only a booted appliance can answer, and which boot answers each |

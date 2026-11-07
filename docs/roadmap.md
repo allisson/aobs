@@ -923,7 +923,10 @@ exit criterion. They stay in this milestone because their evidence is the same k
       `bootx64.efi` is now Debian's 2.12-9 modules assembled by Ubuntu's `grub-mkstandalone`
       2.12-1ubuntu7.3, and **has not been booted** — a UEFI path no machine has ever booted (#26)
       is now also a different binary from the one that was never booted.
-- [ ] CI builds twice under deliberately hostile variation and fails on any differing byte.
+- [x] CI builds twice under deliberately hostile variation and fails on any differing byte.
+
+      *Evidence*: its first run, 42390592651, failed and found fact 6 — the FAT image's dates follow
+      `TZ`. The next, 42391685056 at `68bdd5a`, built `bc55a73f…a3fa37` twice.
 
       *Implemented as two more steps in the `image` job* (`.github/workflows/tests.yml`), so the guard
       shares its pool cache and its tools and runs wherever that job runs. Build B varies, against
@@ -933,7 +936,7 @@ exit criterion. They stay in this milestone because their evidence is the same k
       zstd alone (`docs/reproducible-build.md`). Two runners in parallel would also vary the machine,
       and were not chosen: every runner of one label is the same image, so they would add a second
       cache restore and no fact the contract lists.
-- [ ] Fix every divergence source found. `SOURCE_DATE_EPOCH` throughout; deterministic `cpio` ordering,
+- [x] Fix every divergence source found. `SOURCE_DATE_EPOCH` throughout; deterministic `cpio` ordering,
       ownership and timestamps; deterministic `mmdebstrap` output; no build-host paths in the image.
 
       *The sources the contract had already found are closed, ahead of the guard* — the guard would
@@ -942,17 +945,25 @@ exit criterion. They stay in this milestone because their evidence is the same k
       check runs under `python3 -B`, so no `.pyc` ships; xorriso writes `-uid 0 -gid 0` and
       `--set_all_file_dates`; the FAT serial is fixed with `-N`; the RAM floor and the EFI image are
       sized from file lengths, not `du`. `zstd -T0` is left for the guard to judge.
-      `docs/reproducible-build.md` marks each *closed* — not *held*, because no guard has varied it.
-      The row stays open for whatever the guard finds next.
+      The guard then found one more, the timezone, closed by exporting `TZ=UTC`. Every fact the guard
+      varies is now *held* in `docs/reproducible-build.md`; the host kernel stays *unknown* and the
+      arranging tools stay an input. A source the guard finds later is a red build, not a reopened
+      row.
 
       *Evidence*: two `build/mkiso-docker.sh` builds of one tree, five minutes apart, produced the
       same ISO, `824e0124…5f7d`. That pair varied only the clock. The pair before the
       `--set_all_file_dates` fix differed in 114 bytes, all ISO 9660 and Rock Ridge record dates —
       xorriso 1.5.6 under `-as mkisofs` takes the volume dates from SOURCE_DATE_EPOCH and not the
       file dates, which the contract had assumed it would.
-- [ ] Runs on `build/**` pull requests. Record the measured wall-clock against the timeout, as the
+- [x] Runs on `build/**` pull requests. Record the measured wall-clock against the timeout, as the
       predecessor did (14 m 42 s against a 40-minute threshold — and it no longer carries a 249 s
       kernel compile).
+
+      *Wider than asked*: it runs on every pull request and every push to `main`, because it is part
+      of the `image` job, which already did. *Measured*: the whole `image` job, both builds and the
+      comparison, 2 m 38 s against its 30-minute timeout (run 42391685056, warm `build/inputs`
+      cache). A cold cache adds the snapshot fetch, which `tests.yml` records as once passing ten
+      minutes.
 - [ ] The **input archive**: every byte the build consumes that the build did not write, fetched,
       verified and published as one thing, so a release stays rebuildable after upstream stops serving
       those bytes. Every member must be a function of the package set, or two fetches of the same set
