@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -938,3 +939,95 @@ def test_the_pool_zstd_and_version_lines_pass() -> None:
         'pool_zstd -19 -T0 -q -f -o y x\n'
         "    zstd --version\n"
     )
+
+
+# --- The source archive is complete ---------------------------------------------------------------
+
+DSC = """\
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Format: 3.0 (quilt)
+Source: linux
+Version: 6.12.107-1
+Checksums-Sha1:
+ aaaa 10 linux_6.12.107.orig.tar.xz
+Checksums-Sha256:
+ 1111 10 linux_6.12.107.orig.tar.xz
+ 2222 20 linux_6.12.107-1.debian.tar.xz
+Files:
+ ffff 10 linux_6.12.107.orig.tar.xz
+-----BEGIN PGP SIGNATURE-----
+ 1111 10 not-a-file
+"""
+PRESENT = {
+    "linux_6.12.107-1.dsc": "dddd",
+    "linux_6.12.107.orig.tar.xz": "1111",
+    "linux_6.12.107-1.debian.tar.xz": "2222",
+}
+KERNEL = verify.sources_of_a_binary(
+    "linux-image-6.12.107+deb13-amd64", "6.12.107-1", "linux-signed-amd64 (6.12.107+1)",
+    "linux (= 6.12.107-1)",
+)
+
+
+def test_the_kernel_needs_its_built_using_source() -> None:
+    """The shipped kernel's `Source:` is the signing template; `linux` is only in Built-Using."""
+    assert KERNEL == {("linux-signed-amd64", "6.12.107+1"), ("linux", "6.12.107-1")}
+
+
+def test_source_versions_follow_the_control_fields() -> None:
+    assert verify.sources_of_a_binary("bash", "5.2-1", "", "") == {("bash", "5.2-1")}
+    assert verify.sources_of_a_binary("libfoo1", "1.0-1+b2", "foo (1.0-1)", "") == {("foo", "1.0-1")}
+    with pytest.raises(verify.PinFileError, match="no exact version"):
+        verify.sources_of_a_binary("x", "1", "", "golang (>= 1.22)")
+
+
+def test_a_dsc_parses_only_its_signed_body() -> None:
+    assert verify.parse_dsc(DSC) == (
+        "linux",
+        "6.12.107-1",
+        {"linux_6.12.107.orig.tar.xz": "1111", "linux_6.12.107-1.debian.tar.xz": "2222"},
+    )
+    with pytest.raises(verify.PinFileError, match="not a .dsc"):
+        verify.parse_dsc("Source: linux\nVersion: 1\n")
+
+
+def test_a_complete_archive_passes() -> None:
+    verify.sources_are_complete(
+        {("linux", "6.12.107-1")},
+        [verify.parse_dsc(DSC)],
+        PRESENT,
+        {("zxing_cpp", "3.1.1")},
+        {"zxing-cpp-3.1.1.tar.gz"},
+    )
+
+
+@pytest.mark.parametrize(
+    ("wanted", "present", "wheels", "message"),
+    [
+        (KERNEL, PRESENT, set(), "no .dsc for linux-signed-amd64 6.12.107+1"),
+        ({("linux", "6.12.94-1")}, PRESENT, set(), "no .dsc for linux 6.12.94-1"),
+        (
+            {("linux", "6.12.107-1")},
+            {k: v for k, v in PRESENT.items() if "orig" not in k},
+            set(),
+            "orig.tar.xz is missing",
+        ),
+        (
+            {("linux", "6.12.107-1")},
+            {**PRESENT, "linux_6.12.107-1.debian.tar.xz": "9999"},
+            set(),
+            "does not match its .dsc",
+        ),
+        ({("linux", "6.12.107-1")}, PRESENT, {("textual", "8.2.8")}, "no sdist for wheel textual 8.2.8"),
+        ({("linux", "6.12.107-1")}, PRESENT, {("zxing_cpp", "3.1.0")}, "no sdist for wheel zxing-cpp 3.1.0"),
+    ],
+)
+def test_an_incomplete_archive_fails(wanted, present, wheels, message) -> None:
+    """The rule bites: the signing template alone, a wrong version, a missing or altered tarball,
+    a wheel with no sdist, and a sdist at the wrong version."""
+    with pytest.raises(verify.PinFileError, match=re.escape(message)):
+        verify.sources_are_complete(
+            wanted, [verify.parse_dsc(DSC)], present, wheels, {"zxing-cpp-3.1.1.tar.gz"}
+        )

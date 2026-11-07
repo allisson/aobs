@@ -996,14 +996,47 @@ exit criterion. They stay in this milestone because their evidence is the same k
       `3492cf24b8d0c28d816b3ba9219474b2bff3d8b6779153c35011b01ace35f5b3` twice, and the round trip
       verified all 302 files; with `--mtime=@0` removed and one mtime changed, the digest moved to
       `ce374fa6…0e83e`, so the guard bites.
-- [ ] The **source archive**: corresponding source for every copyleft-touched package the input archive
+- [x] The **source archive**: corresponding source for every copyleft-touched package the input archive
       redistributes. An accompaniment, not an input — no build reads a byte of it. Debian's source
       packages and `snapshot.debian.org` make the pinning exact; this is easier here than it was on
       Alpine.
 
+      ***Decided 2026-11-07.*** *Three choices, each against a named alternative.*
+
+      1. *Which Debian sources: every source package behind every `.deb` in the input archive —
+         123 of them, 114 by `Source:` and 9 more by `Built-Using:` — with no licence filter.* The input archive is published whole, harness pool
+         included, so it redistributes all 259 `.deb`s, not only the 92 of the appliance and kernel pools. And deciding
+         "copyleft-touched" by reading `debian/copyright` is a judgment whose failure is the
+         dangerous direction; a superset cannot fail that way. *The set is `Source:` plus
+         `Built-Using:` over every binary*, because the shipped kernel's own source field names
+         `linux-signed-amd64` — the signing template — while the GPL source the kernel was built
+         from is `linux`, which the signed package names only in `Built-Using`. Following
+         `Source:` alone would publish an archive without the one source that matters most, and
+         nothing would say so.
+      2. *The wheels: each wheel's sdist from PyPI at the pinned version, checked against the
+         sha256 PyPI publishes.* Limit, stated rather than solved: a manylinux wheel can carry
+         native libraries it bundled at build time (pillow, cryptography, zxing-cpp), whose source
+         is not in the sdist.
+      3. *Fetched by a separate `build/fetch-sources.sh`* into `build/sources/`, hashed into a
+         committed `build/sources.sha256` with the same `--refresh` discipline as the inputs, and
+         packed by the same deterministic tar. CI restores it from a cache keyed on that file and
+         runs a completeness check in `build/verify.py`: every required source at its exact
+         version has a `.dsc`, every file a `.dsc` names is present with its sha256, and every
+         wheel has its sdist — a pure function, fed broken inputs like every other.
+
+      *Done, locally measured.* `build/fetch-sources.sh --refresh` wrote 432 files, 805 MiB: 123
+      `.dsc`s with their tarballs (746 MiB, of which `linux_6.12.107.orig.tar.xz` is 144 MiB) and
+      26 sdists (59 MiB). `linux 6.12.107-1` is among them, reached through `Built-Using:` beside
+      `linux-signed-amd64 6.12.107+1`. `build/verify.py --sources` reported 123 source packages for
+      259 `.deb`s and 26 sdists for 26 wheels; with `linux_6.12.107.orig.tar.xz` moved out it
+      failed, naming that file. `build/pack-inputs.sh sources` packed it to
+      `0db812212f32ef3111076d9f7fdbe34fa54725a2045dc36a9881cccd6eb214f2`. CI's new `sources` job
+      fetches on a cache miss and runs the hash gate, the completeness check and the packing on
+      every push. Publishing it is M5's, beside the input archive.
+
 **Exit**: two builds from a clean tree, on deliberately different hosts, produce the same sha256.
 
-*Met once, 2026-11-07, at `244ec69`; the milestone stays open on the two archive rows.* CI's runner
+*Met once, 2026-11-07, at `244ec69`. With the input-archive and source-archive rows closed, every row above is checked and M4 is complete; what it does not include — an independent rebuild, publishing either archive — is M5's.* CI's runner
 and `build/mkiso-docker.sh` on an arm64 Mac first disagreed — `651c90b6…7ab1` against
 `04a28662…382a` — and the build's own tool lines named the cause: zstd 1.5.7 against 1.5.5, input 4
 of the contract. With zstd 1.5.7 from the pinned harness pool on the container's `PATH`, the Mac
