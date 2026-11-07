@@ -22,6 +22,11 @@ set -eu
 # archive. `docs/reproducible-build.md`, fact 7.
 umask 022
 
+# NOR IS THE CALLER'S TIMEZONE. FAT stores local time, so mtools turns SOURCE_DATE_EPOCH into the
+# EFI image's entry dates through `TZ`. Found by the guard's first run: a build under
+# `Pacific/Chatham` wrote an `efiboot.img` 56 bytes away from one under UTC. Fact 6.
+export TZ=UTC
+
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 INPUTS=$ROOT/build/inputs
 OUT=$ROOT/out

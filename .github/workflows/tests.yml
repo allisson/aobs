@@ -206,3 +206,44 @@ jobs:
         run: |
           ls -l out/bitcoin-signer-amd64.iso
           xorriso -indev out/bitcoin-signer-amd64.iso -report_el_torito plain 2>&1 | grep 'El Torito'
+
+      # THE REPRODUCIBILITY GUARD. The same commit built a second time, varying every fact in
+      # `docs/reproducible-build.md` that one runner can vary, and the job fails on any differing
+      # byte. Against build A, build B changes: the user and uid (a fresh account), the path (a copy
+      # of the checkout elsewhere), the filesystem (tmpfs, not the runner's ext4), the hostname, the
+      # caller's umask (077), the timezone, the locale, the clock (it starts minutes later), and an
+      # exported SOURCE_DATE_EPOCH of 1, which the script must ignore.
+      #
+      # `sudo` sets the stage and nothing more: the build itself runs as `rebuilder`, unprivileged,
+      # exactly as build A runs as `runner`. Not varied, because a runner cannot: the host kernel,
+      # the CPU count (fact 8 is answered by measuring zstd alone) and the arranging tools.
+      - name: Build B, under hostile variation
+        run: |
+          set -eu
+          sudo useradd --create-home --shell /bin/sh rebuilder
+          grep '^rebuilder:' /etc/subuid /etc/subgid
+          sudo mkdir -p /mnt/rebuild
+          sudo mount -t tmpfs -o size=6g tmpfs /mnt/rebuild
+          sudo cp -a "$GITHUB_WORKSPACE" /mnt/rebuild/elsewhere
+          sudo rm -rf /mnt/rebuild/elsewhere/out
+          sudo chown -R rebuilder:rebuilder /mnt/rebuild
+          sudo hostname rebuild-b
+          echo rebuild-b | sudo tee /etc/hostname
+          sudo -u rebuilder env -i PATH="$PATH" HOME=/home/rebuilder \
+            TZ=Pacific/Chatham LC_ALL=C SOURCE_DATE_EPOCH=1 \
+            sh -c 'umask 077 && cd /mnt/rebuild/elsewhere && sh build/mkiso.sh'
+
+      # On a difference, say where: which files in the ISO tree differ, and which 2 KiB sectors of
+      # the image. Enough to name the fact that leaked, which is what the contract is for.
+      - name: Both builds, one sha256
+        run: |
+          a=out/bitcoin-signer-amd64.iso
+          b=/mnt/rebuild/elsewhere/out/bitcoin-signer-amd64.iso
+          sudo sha256sum "$a" "$b"
+          if sudo cmp -s "$a" "$b"; then echo "reproduced"; exit 0; fi
+          echo "::error::two builds of one commit differ"
+          (cd out/work/iso && sudo find . -type f -exec sha256sum {} + | sort -k2) > /tmp/a.tree
+          (cd /mnt/rebuild/elsewhere/out/work/iso && sudo find . -type f -exec sha256sum {} + | sort -k2) > /tmp/b.tree
+          diff /tmp/a.tree /tmp/b.tree || true
+          sudo cmp -l "$a" "$b" | awk '{ print int(($1 - 1) / 2048) }' | uniq -c | head -40
+          exit 1
