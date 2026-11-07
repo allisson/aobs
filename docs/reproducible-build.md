@@ -28,9 +28,9 @@ and the pair shows only that the wall clock no longer reaches the bytes. The pai
 
 1. **The commit.** The tree `build/mkiso.sh` reads, which includes every pin file.
 2. **The input archive.** `build/inputs/`, gated by `build/inputs.sha256` on hash and on set
-   equality in stage 0 (`build/mkiso.sh:93-100`). The archive itself being reproducible is a separate
+   equality in stage 0 (`build/mkiso.sh:98-105`). The archive itself being reproducible is a separate
    M4 row and is not claimed here.
-3. **`SOURCE_DATE_EPOCH`**, which is not a free variable: `build/mkiso.sh:111-117` derives it from
+3. **`SOURCE_DATE_EPOCH`**, which is not a free variable: `build/mkiso.sh:116-122` derives it from
    the commit's own timestamp, ignores any value in the caller's environment, refuses a checkout with
    no git metadata, and exports it.
 4. **The versions of the host's arranging tools**, by decision (`docs/roadmap.md` M4). mmdebstrap,
@@ -70,7 +70,7 @@ that it varies.
 | 3 | User name and uid | closed | below |
 | 4 | Clock | closed, varied once locally | below |
 | 5 | Locale | unknown | below |
-| 6 | Timezone | unknown | below |
+| 6 | Timezone | closed — found by the guard | below |
 | 7 | umask | closed | below |
 | 8 | CPU count | held, measured on zstd alone | below |
 | 9 | Host kernel | unknown | below |
@@ -81,15 +81,15 @@ that it varies.
 
 - The initramfs names every member relative to the rootfs (`build/mkinitramfs.py:127`), so the
   checkout's location is not in the archive.
-- The pool is staged at a `mktemp` path (`build/mkiso.sh:179`), and mmdebstrap writes that path into
+- The pool is staged at a `mktemp` path (`build/mkiso.sh:184`), and mmdebstrap writes that path into
   the chroot's apt sources and list filenames. Stage 3b deletes `etc/apt` and `var/lib/apt`
-  (`build/mkiso.sh:316-327`), so the random name does not survive.
+  (`build/mkiso.sh:321-332`), so the random name does not survive.
 - The signing check compiles nothing to disk (fact 4), so no bytecode records a source path.
 
 ### 2. Hostname — held
 
 mmdebstrap copies the host's `etc/hostname` and `etc/resolv.conf` into the chroot; the first
-customize hook deletes both (`build/mkiso.sh:232`).
+customize hook deletes both (`build/mkiso.sh:237`).
 
 ### 3. User name and uid — closed
 
@@ -98,30 +98,31 @@ customize hook deletes both (`build/mkiso.sh:232`).
 - **Closed in the ISO.** xorriso writes Rock Ridge records, and they carried the owner of
   `$ISO_TREE` on the build host — observed `uid 1001 gid 1001` on the root directory, `BOOT` and
   `EFIBOOT.IMG`, the `builder` user of `build/Dockerfile.isohost`. `-uid 0 -gid 0`
-  (`build/mkiso.sh:481`) now writes every record as root; observed on the root directory of the
+  (`build/mkiso.sh:486`) now writes every record as root; observed on the root directory of the
   2026-11-07 build. Not varied: both builds of the pair ran as uid 1001.
 
 ### 4. Clock — closed, varied once locally
 
-`SOURCE_DATE_EPOCH` is the commit's timestamp and is exported (`build/mkiso.sh:111-117`), so every
+`SOURCE_DATE_EPOCH` is the commit's timestamp and is exported (`build/mkiso.sh:116-122`), so every
 tool that reads it sees it. What it reaches:
 
 - **The initramfs mtimes** (`build/mkinitramfs.py:175`) and the date in `/etc/aobs-release`
-  (`build/mkiso.sh:262`), as before.
+  (`build/mkiso.sh:267`), as before.
 - **The ISO volume dates**, which xorriso takes from the environment. They read the wall clock
   (`2026-09-12 17:24:56` against an SDE of `16:58:53`) and now read the commit's time.
 - **The ISO file and directory dates**, which xorriso does *not* take from the environment under
   `-as mkisofs`: measured on 1.5.6, with SOURCE_DATE_EPOCH exported, every record still carried its
-  host mtime. `--set_all_file_dates` (`build/mkiso.sh:482`) pins them.
+  host mtime. `--set_all_file_dates` (`build/mkiso.sh:487`) pins them.
 - **The FAT image.** mtools reads SOURCE_DATE_EPOCH (the string is in `mformat`'s binary); the volume
-  serial is fixed by `-N` regardless (`build/mkiso.sh:463`).
+  serial is fixed by `-N` regardless (`build/mkiso.sh:468`). FAT stores local time, so the entry
+  dates also depend on `TZ` — fact 6.
 - **`bootx64.efi`** does not depend on the clock at all: `grub-mkstandalone` 2.12-1ubuntu7.3 produced
   the same binary from the pool's modules two seconds apart and with the config's mtime moved by
   three years. Measured, not read.
 
 **The bytecode is gone.** The signing check imported the app in the chroot and left **338 `.pyc`
 files in 37 directories** under `/opt`, timestamp-validated and recording the checkout's source
-mtimes. It now runs under `python3 -B` (`build/mkiso.sh:236`); the 2026-11-07 build has no `.pyc`
+mtimes. It now runs under `python3 -B` (`build/mkiso.sh:241`); the 2026-11-07 build has no `.pyc`
 under `/opt`. Nothing used them: each source's mtime in the initramfs is SOURCE_DATE_EPOCH, so each
 one failed its timestamp check at boot and was recompiled in memory.
 
@@ -138,21 +139,31 @@ order (`:125`). The host `sort` and `find` in stage 3d produce listings for `bui
 are not in the image. What maintainer scripts write under the host's locale inside mmdebstrap has not
 been looked at.
 
-### 6. Timezone — unknown
+### 6. Timezone — closed
 
-The one date the build formats uses `date -u` (`build/mkiso.sh:262`). Nothing else has been looked at.
+**Found by the guard's first run** (2026-11-07, run
+[42390592651](https://github.com/allisson/aobs/actions/runs/42390592651)): build B, under
+`TZ=Pacific/Chatham`, wrote an `efiboot.img` 56 bytes away from build A's under the runner's UTC, and
+every other file in the ISO tree matched. FAT has no timezone field and stores local time, so mtools
+turns SOURCE_DATE_EPOCH into the entry dates through `TZ`. Reproduced locally: one `bootx64.efi`, one
+SOURCE_DATE_EPOCH, `TZ=UTC` and `TZ=Pacific/Chatham` write different images, while the locale and the
+clock change nothing.
+
+The script now exports `TZ=UTC` before anything else (`build/mkiso.sh:28`), which covers every tool
+it runs rather than mtools alone. The one date the script formats itself already used `date -u`
+(`build/mkiso.sh:267`).
 
 ### 7. umask — closed
 
 The build is unprivileged, and an unprivileged `tar -x` applies the caller's umask to every mode it
 restores (`--no-same-permissions` is GNU tar's default for non-root). The rootfs is unpacked that way
-(`build/mkiso.sh:248`), the staged Python layer and app tree are created under it
-(`build/mkiso.sh:153-177`), and `mkinitramfs.py` writes each file's `st_mode` into its header. The
+(`build/mkiso.sh:253`), the staged Python layer and app tree are created under it
+(`build/mkiso.sh:158-182`), and `mkinitramfs.py` writes each file's `st_mode` into its header. The
 script now sets `umask 022` before anything else (`build/mkiso.sh:23`). Not varied.
 
 ### 8. CPU count — held, measured on zstd alone
 
-The one CPU-count-dependent flag in the build is `zstd -T0` (`build/mkiso.sh:410`), which sizes the
+The one CPU-count-dependent flag in the build is `zstd -T0` (`build/mkiso.sh:415`), which sizes the
 worker pool to the host. Measured 2026-11-07 on zstd 1.5.5, the host tool, against one initramfs
 (6068 members, 128 MiB): `-T0` on an 8-CPU host and `-T1`, `-T2`, `-T3`, `-T4`, `-T8` and `-T16`
 wrote the same bytes. Only `--single-thread`, which the build does not use, wrote different ones.
@@ -170,7 +181,7 @@ image.
 
 ### 10. Host architecture — refused
 
-Stage 0 stops on anything but `x86_64` (`build/mkiso.sh:67-72`). That refuses a native foreign host;
+Stage 0 stops on anything but `x86_64` (`build/mkiso.sh:72-77`). That refuses a native foreign host;
 it does not cover an amd64 container under emulation, which reports `x86_64` and is what
 `build/mkiso-docker.sh` uses on an arm64 machine. Whether emulation changes a byte is unmeasured.
 
@@ -178,8 +189,8 @@ it does not cover an amd64 container under emulation, which reports `x86_64` and
 
 Not in the roadmap's list, and found by reading stage 3c. The RAM floor was derived from `du -sk` of
 the unpacked rootfs, and `du` reports **allocated blocks**, which depend on the filesystem the build
-runs on; the derived `RAM_REQUIRED_MIB` is substituted into `/init` (`build/mkiso.sh:357-360`). The
-EFI image was sized the same way. Both now sum the files' own lengths (`build/mkiso.sh:351`, `:461`),
+runs on; the derived `RAM_REQUIRED_MIB` is substituted into `/init` (`build/mkiso.sh:362-365`). The
+EFI image was sized the same way. Both now sum the files' own lengths (`build/mkiso.sh:356`, `:466`),
 which no filesystem changes. Not varied.
 
 ## Not claimed
