@@ -994,6 +994,10 @@ run: one pair, one maintainer, and the tools matched by hand. It also shows inpu
 stock `ubuntu-24.04` setups (the runner image and `ubuntu:24.04` in Docker) do not ship the same
 zstd.
 
+*Met again with no tool matched by hand*, once zstd came from the pool (the row above): CI's
+pull-request build of `93f9667` and the Mac's build of the same commit both wrote
+`c6cd7ed1…b4d5`.
+
 ---
 
 ## M5 — Signed v0.1.0

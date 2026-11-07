@@ -51,6 +51,13 @@ CPU count differed is not known. One pair, both builds started by the maintainer
 corroboration of facts 9 and 10, not a guard run, so neither moves to *held*, and not the
 independent rebuild `docs/threat-model.md` claim (ix) asks for.
 
+**A second pair, with nothing swapped by hand**, once stage 4 took zstd from the pool (#56). CI's
+pull-request run [42409799659](https://github.com/allisson/aobs/actions/runs/42409799659) built the
+merge commit `93f9667` twice, `c6cd7ed1dc4f957ee44914d0dc356016880c7189e585f395e6a2c5bc9fefb4d5`.
+The same commit, built by `build/mkiso-docker.sh` on the same Mac from a host image with no `zstd`
+installed at all, wrote the same digest. The same limits as the first pair apply: one pair, both
+builds started by the maintainer.
+
 Before the guard, a pair of local `build/mkiso-docker.sh` builds varied only the clock and agreed
 (`824e0124…5f7d`); the pair before that, without `--set_all_file_dates`, differed in 114 bytes of ISO
 9660 and Rock Ridge record dates.
