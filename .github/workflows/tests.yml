@@ -247,3 +247,22 @@ jobs:
           diff /tmp/a.tree /tmp/b.tree || true
           sudo cmp -l "$a" "$b" | awk '{ print int(($1 - 1) / 2048) }' | uniq -c | head -40
           exit 1
+
+      # THE INPUT ARCHIVE'S GUARD (`docs/roadmap.md` M4). Packed once here and once from build B's
+      # copy, as `rebuilder`, under umask 077, another TZ and locale, and with every input's mtime
+      # moved, and the two tars must be one sha256. Then the way back: unpacked elsewhere, all of
+      # `build/inputs.sha256` must verify.
+      - name: The input archive, packed twice
+        run: |
+          set -eu
+          sh build/pack-inputs.sh
+          sudo find /mnt/rebuild/elsewhere/build/inputs -type f -exec touch -d @123456789 {} +
+          sudo -u rebuilder env -i PATH="$PATH" HOME=/home/rebuilder TZ=Pacific/Chatham LC_ALL=C \
+            sh -c 'umask 077 && cd /mnt/rebuild/elsewhere && sh build/pack-inputs.sh'
+          a=$(ls out/aobs-inputs-*.tar)
+          b=$(sudo sh -c 'ls /mnt/rebuild/elsewhere/out/aobs-inputs-*.tar')
+          sudo sha256sum "$a" "$b"
+          sudo cmp "$a" "$b" && echo "reproduced"
+          mkdir /tmp/roundtrip && tar -xf "$a" -C /tmp/roundtrip
+          (cd /tmp/roundtrip && sha256sum -c --quiet "$GITHUB_WORKSPACE/build/inputs.sha256")
+          echo "round trip: every file in build/inputs.sha256 verifies"

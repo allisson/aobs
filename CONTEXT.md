@@ -296,8 +296,9 @@ the same commit and gets a different hash has found a defect rather than a diffe
 
 ## Input archive
 
-Every byte the build consumes that the build did not write: the two `.deb` closures — appliance and
-harness — resolved at the pinned `snapshot.debian.org` timestamp, and the kernel package among them.
+Every byte the build consumes that the build did not write: the `.deb` closures — appliance, harness
+and kernel — resolved at the pinned `snapshot.debian.org` timestamp, and the wheel closures of the
+Python groups. Concretely, every file `build/inputs.sha256` names, packed by `build/pack-inputs.sh`.
 Named as one thing because it is fetched, verified and published as one thing — the archive is what
 makes a release rebuildable after the upstream that served those bytes has stopped serving them.
 
