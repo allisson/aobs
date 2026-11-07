@@ -309,10 +309,13 @@ holding it makes two fetches of the same package set produce two different archi
 
 ## Source archive
 
-The corresponding source for every copyleft-touched package the input archive redistributes: each
-Debian source package — `.dsc`, orig tarball and debian tarball — at the exact version that built the
-binary, taken from the same pinned snapshot. Published beside the input archive as its own release
-asset.
+The corresponding source for every package the input archive redistributes: each Debian source
+package — `.dsc`, orig tarball and debian tarball — at the exact version that built the binary,
+taken from the same pinned snapshot, and each wheel's sdist from PyPI. "Every package", not only the
+copyleft-touched ones, by decision (`docs/roadmap.md` M4): a licence filter can only fail by leaving
+one out. The Debian set is `Source:` plus `Built-Using:`, because the kernel's own `Source:` is its
+signing template and `linux` is named only in `Built-Using:`. Fetched by `build/fetch-sources.sh`,
+hashed in `build/sources.sha256`, and published beside the input archive as its own release asset.
 
 **It is an accompaniment, not an input.** No build reads a byte of it — which is why it is a second
 archive with a second list rather than a larger first one. What makes it the *corresponding* source is

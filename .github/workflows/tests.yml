@@ -266,3 +266,49 @@ jobs:
           mkdir /tmp/roundtrip && tar -xf "$a" -C /tmp/roundtrip
           (cd /tmp/roundtrip && sha256sum -c --quiet "$GITHUB_WORKSPACE/build/inputs.sha256")
           echo "round trip: every file in build/inputs.sha256 verifies"
+
+  # THE SOURCE ARCHIVE (`docs/roadmap.md` M4): the corresponding source for every binary the input
+  # archive carries. Fetched by `build/fetch-sources.sh` only on a cache miss — snapshot.debian.org
+  # rate-limits, as the inputs job above records — and judged on every run: the committed hashes and
+  # set equality, then `build/verify.py --sources`, which derives the required source packages from
+  # the `.deb`s' own `Source:` and `Built-Using:` fields and fails on any one without its `.dsc`,
+  # any `.dsc` file missing or altered, and any wheel without its sdist.
+  sources:
+    name: the source archive is complete
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache build/inputs
+        id: inputs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/inputs
+          key: inputs-${{ hashFiles('build/inputs.sha256', 'build/apt-versions.txt', 'build/requirements.appliance.txt', 'build/requirements.test.txt', 'build/snapshot.env') }}
+
+      - name: Fetch inputs
+        if: steps.inputs.outputs.cache-hit != 'true'
+        run: sh build/fetch-inputs.sh
+
+      - name: Cache build/sources
+        id: sources
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/sources
+          key: sources-${{ hashFiles('build/sources.sha256', 'build/inputs.sha256', 'build/snapshot.env') }}
+
+      - name: Fetch sources
+        if: steps.sources.outputs.cache-hit != 'true'
+        run: sh build/fetch-sources.sh
+
+      - name: Sources match build/sources.sha256 and cover every binary
+        run: |
+          set -eu
+          sha256sum -c --quiet build/sources.sha256
+          named=$(wc -l < build/sources.sha256)
+          present=$(find build/sources -type f | wc -l)
+          echo "sources: $named named, $present present"
+          test "$named" -eq "$present"
+          python3 build/verify.py --sources build/sources --pool build/inputs
+          sh build/pack-inputs.sh sources

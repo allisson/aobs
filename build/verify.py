@@ -12,11 +12,13 @@ anywhere in this file:
     python3 build/verify.py                      # the two pin files. No inputs, seconds.
     python3 build/verify.py --closure <pool>     # + the resolved appliance pool
     python3 build/verify.py --rootfs <dir> ...   # + the built image, called by build/mkiso.sh
+    python3 build/verify.py --sources build/sources --pool build/inputs   # + the source archive
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import posixpath
 import re
 import shlex
@@ -860,6 +862,111 @@ def compressor_from_the_pool(script: str) -> None:
         raise PinFileError("build/mkiso.sh compresses with the build host's zstd:\n  " + "\n  ".join(offending))
 
 
+def sources_of_a_binary(package: str, version: str, source: str, built_using: str) -> set[tuple[str, str]]:
+    """The `(source, version)` pairs one `.deb`'s control fields oblige the source archive to carry.
+
+    `Source:` — with its own version when a binNMU carries one, else the binary's — plus every
+    `Built-Using:` entry. The second half is the kernel: the shipped `linux-image-*` names
+    `linux-signed-amd64`, the signing template, as its source, and the GPL source it was compiled
+    from, `linux`, only in `Built-Using:` (`docs/roadmap.md` M4, the source-archive decision).
+    """
+    wanted: set[tuple[str, str]] = set()
+    name, _, rest = (source.strip() or package).partition(" ")
+    wanted.add((name, rest.strip().strip("()") or version))
+    for entry in filter(None, (e.strip() for e in built_using.split(","))):
+        match = re.fullmatch(r"(\S+) \(= (\S+)\)", entry)
+        if match is None:
+            raise PinFileError(f"{package}: Built-Using entry {entry!r} names no exact version")
+        wanted.add((match[1], match[2]))
+    return wanted
+
+
+def parse_dsc(text: str) -> tuple[str, str, dict[str, str]]:
+    """A `.dsc`'s source name, version, and `{file: sha256}` from `Checksums-Sha256`."""
+    fields: dict[str, str] = {}
+    files: dict[str, str] = {}
+    current = ""
+    for line in text.splitlines():
+        if line.startswith("-----BEGIN PGP SIGNATURE"):
+            break
+        if line[:1] in (" ", "\t"):
+            if current == "Checksums-Sha256" and line.split():
+                digest, _, name = line.split()
+                files[name] = digest
+            continue
+        key, sep, value = line.partition(":")
+        if sep:
+            current = key
+            fields[key] = value.strip()
+    if not fields.get("Source") or not fields.get("Version") or not files:
+        raise PinFileError("a .dsc without Source, Version or Checksums-Sha256 is not a .dsc")
+    return fields["Source"], fields["Version"], files
+
+
+def _sdist_key(filename: str) -> tuple[str, str]:
+    stem = re.sub(r"\.(tar\.gz|zip)$", "", filename)
+    name, _, version = stem.rpartition("-")
+    return _normalise(name), version
+
+
+def sources_are_complete(
+    wanted: set[tuple[str, str]],
+    dscs: list[tuple[str, str, dict[str, str]]],
+    present: dict[str, str],
+    wheels: set[tuple[str, str]],
+    sdists: set[str],
+) -> None:
+    """The source archive carries the corresponding source for every binary the input archive does.
+
+    Every wanted `(source, version)` has a `.dsc` at exactly that version; every file each `.dsc`
+    names is present with the sha256 it names; every wheel has its sdist at the same version.
+    `present` maps each file under `build/sources/deb/` to its sha256.
+    """
+    problems = []
+    have = {(name, version) for name, version, _ in dscs}
+    problems += [f"no .dsc for {name} {version}" for name, version in sorted(wanted - have)]
+    for name, version, files in dscs:
+        for file, digest in sorted(files.items()):
+            if file not in present:
+                problems.append(f"{name} {version}: {file} is missing")
+            elif present[file] != digest:
+                problems.append(f"{name} {version}: {file} does not match its .dsc")
+    have_sdists = {_sdist_key(s) for s in sdists}
+    problems += [
+        f"no sdist for wheel {name} {version}"
+        for name, version in sorted((_normalise(n), v) for n, v in wheels)
+        if (name, version) not in have_sdists
+    ]
+    if problems:
+        raise PinFileError("the source archive is incomplete:\n  " + "\n  ".join(problems))
+
+
+def _check_sources(sources: Path, pool: Path) -> None:
+    """The source-archive mode: reads, and leaves every judgment to the pure functions above."""
+    if not (sources / "deb").is_dir() or not (pool / "deb").is_dir():
+        raise PinFileError(f"--sources needs {sources}/deb and {pool}/deb")
+    wanted: set[tuple[str, str]] = set()
+    debs = sorted(pool.glob("deb/*/*.deb"))
+    for deb in debs:
+        field = lambda name: subprocess.run(  # noqa: E731
+            ["dpkg-deb", "-f", str(deb), name], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        wanted |= sources_of_a_binary(field("Package"), field("Version"), field("Source"), field("Built-Using"))
+    dscs = [parse_dsc(p.read_text(encoding="utf-8")) for p in sorted((sources / "deb").glob("*.dsc"))]
+    present = {
+        p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (sources / "deb").iterdir()
+    }
+    wheels = {tuple(p.name.split("-")[:2]) for p in pool.glob("wheels/*/*.whl")}
+    sdists = {p.name for p in (sources / "pypi").iterdir()}
+    if not debs or not wheels:
+        raise PinFileError(f"{pool} holds no .deb or no wheel; the pool is empty, not complete")
+    sources_are_complete(wanted, dscs, present, wheels, sdists)  # type: ignore[arg-type]
+    print(
+        f"source archive: {len(wanted)} source packages for {len(debs)} .debs, "
+        f"{len(sdists)} sdists for {len(wheels)} wheels"
+    )
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="build-time assertions")
     parser.add_argument("--closure", type=Path, help="the fetched appliance pool")
@@ -874,6 +981,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--kver", help="the kernel version directory under usr/lib/modules")
     parser.add_argument("--measured-mib", type=int, help="the measured unpacked rootfs, in MiB")
+    parser.add_argument("--sources", type=Path, help="build/sources, judged against --pool")
+    parser.add_argument("--pool", type=Path, help="build/inputs, whose binaries --sources must cover")
     return parser
 
 
@@ -919,6 +1028,11 @@ def main(argv: list[str] | None = None) -> int:
             raise PinFileError(f"{config} parsed to no symbols at all; that is not a kernel config")
         kernel_provides_console_and_input(symbols)
         print(f"kernel config: {len(symbols)} symbols, console and input compiled in")
+
+    if args.sources is not None:
+        if args.pool is None:
+            raise PinFileError("--sources needs --pool; a partial run is not a check")
+        _check_sources(args.sources, args.pool)
 
     if args.rootfs is not None:
         _check_rootfs(args, apt)

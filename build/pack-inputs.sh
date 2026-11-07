@@ -2,6 +2,7 @@
 # The input archive: every file `build/inputs.sha256` names, as one uncompressed tar.
 #
 #     sh build/pack-inputs.sh            # writes out/aobs-inputs-<sha256>.tar and prints its digest
+#     sh build/pack-inputs.sh sources    # the source archive: build/sources.sha256, aobs-sources-*.tar
 #     tar -xf aobs-inputs-<sha256>.tar   # at the repository root: the way back
 #
 # The archive is what keeps a release rebuildable after snapshot.debian.org and PyPI stop serving
@@ -17,6 +18,10 @@
 set -eu
 cd "$(dirname "$0")/.."
 
+# `inputs` or `sources`: the same packing, so the two published archives cannot differ in how.
+WHAT=${1:-inputs}
+case "$WHAT" in inputs|sources) ;; *) echo "pack-inputs: inputs or sources, not $WHAT" >&2; exit 1 ;; esac
+
 # GNU tar: the flags below are its. macOS's tar is bsdtar and has none of them.
 TAR=tar
 command -v gtar >/dev/null 2>&1 && TAR=gtar
@@ -26,25 +31,25 @@ command -v gtar >/dev/null 2>&1 && TAR=gtar
 }
 
 # The same judgment stage 0 makes, so a pool that would fail the build is never packed.
-sha256sum -c --quiet build/inputs.sha256
-named=$(wc -l < build/inputs.sha256)
-present=$(find build/inputs -type f | wc -l)
+sha256sum -c --quiet "build/$WHAT.sha256"
+named=$(wc -l < "build/$WHAT.sha256")
+present=$(find "build/$WHAT" -type f | wc -l)
 [ "$named" -eq "$present" ] || {
-    echo "pack-inputs: build/inputs has $present files and build/inputs.sha256 names $named." >&2
+    echo "pack-inputs: build/$WHAT has $present files and build/$WHAT.sha256 names $named." >&2
     exit 1
 }
 
 mkdir -p out
 list=$(mktemp)
-trap 'rm -f "$list" out/aobs-inputs.tar.partial' EXIT INT TERM
-cut -d' ' -f3- build/inputs.sha256 > "$list"
+trap 'rm -f "$list" "out/aobs-$WHAT.tar.partial"' EXIT INT TERM
+cut -d' ' -f3- "build/$WHAT.sha256" > "$list"
 
-LC_ALL=C TZ=UTC "$TAR" --create --file=out/aobs-inputs.tar.partial \
+LC_ALL=C TZ=UTC "$TAR" --create --file="out/aobs-$WHAT.tar.partial" \
     --format=gnu --no-recursion --verbatim-files-from --files-from="$list" \
     --owner=0 --group=0 --numeric-owner --mtime=@0 --mode='a=r,u+w'
 
-digest=$(sha256sum out/aobs-inputs.tar.partial | cut -d' ' -f1)
-rm -f out/aobs-inputs-*.tar
-mv out/aobs-inputs.tar.partial "out/aobs-inputs-$digest.tar"
-echo "out/aobs-inputs-$digest.tar"
+digest=$(sha256sum "out/aobs-$WHAT.tar.partial" | cut -d' ' -f1)
+rm -f "out/aobs-$WHAT"-*.tar
+mv "out/aobs-$WHAT.tar.partial" "out/aobs-$WHAT-$digest.tar"
+echo "out/aobs-$WHAT-$digest.tar"
 echo "sha256: $digest"
