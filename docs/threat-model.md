@@ -169,7 +169,8 @@ owns the model, `docs/review-screen.md` the screen, `tests/test_adversarial_corp
 you who to blame, the rebuild tells you whether to. Due in M4; `docs/reproducible-build.md` owns
 it, and states how much of it has been demonstrated — CI builds every commit twice on one host,
 varying uid, path, filesystem, hostname, umask, timezone, locale and clock, and fails on any
-differing byte; two *different* hosts have never been compared. Until an independent rebuild exists, see
+differing byte; one pair on two *different* hosts, both builds started by the maintainer, agreed once their
+arranging tools matched — corroboration, not an independent rebuild. Until an independent rebuild exists, see
 Tier 2's *pre-trust* entry — the mechanism being checkable is not the same as its having been
 checked.
 

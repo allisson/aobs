@@ -22,7 +22,7 @@ one Python program running as **PID 1**, in an image the dangerous parts were re
 | ✅ **Demonstrated** | The ISO builds unprivileged in CI, from packages pinned to a `snapshot.debian.org` timestamp, with every build-time assertion passing |
 | 🚧 **Not yet** | **No release.** No tag, no signed ISO, no manifest. There is nothing to download — you build it yourself or you don't run it |
 | ✅ **Published** | **A threat model**, with every claim at its stated strength and every adversary in a numbered tier: [`docs/threat-model.md`](docs/threat-model.md) |
-| 🚧 **Not yet** | **No reproducibility guard.** Byte-identical rebuild is the design intent; two builds on two hosts have never been compared |
+| 🚧 **Partly** | **Reproducibility.** CI builds every commit twice on one host under hostile variation and fails on any differing byte. One pair on two different hosts, both builds started by the maintainer, agreed once their tool versions matched. No independent rebuild yet: [`docs/reproducible-build.md`](docs/reproducible-build.md) |
 | 🚧 **Not yet** | **No boot-checklist run record.** The procedure is published — [`docs/boot-checklist.md`](docs/boot-checklist.md) — but the claims below have not been checked *on a booted appliance* and written down where a stranger can read them. The checklist is not the evidence |
 
 **Do not put mainnet funds behind this yet.** Mainnet is the appliance's default network and it
@@ -440,8 +440,10 @@ sudo dd if=out/bitcoin-signer-amd64.iso of=/dev/sdX bs=4M status=progress conv=f
 ```
 
 **On reproducibility:** byte-identical rebuild is the contract this project intends to rest on — the
-signature tells you who to blame, the rebuild tells you whether to. It is **not yet demonstrated**.
-Two builds on deliberately different hosts have never been compared, and there is no signed manifest
+signature tells you who to blame, the rebuild tells you whether to. It is **not yet demonstrated to
+a stranger**. CI rebuilds every commit on one host and fails on a differing byte, and one pair on
+two different hosts agreed — but the build's tool versions are an input
+(`docs/reproducible-build.md`), nobody independent has rebuilt it, and there is no signed manifest
 to compare against. That is M4 and M5.
 
 ---
