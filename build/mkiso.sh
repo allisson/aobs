@@ -77,13 +77,13 @@ arch=$(uname -m)
 }
 
 missing=
-for tool in mmdebstrap newuidmap dpkg-deb dpkg-scanpackages depmod zstd xorriso \
+for tool in mmdebstrap newuidmap dpkg-deb dpkg-scanpackages depmod xorriso \
             mformat mcopy grub-mkstandalone python3 readelf; do
     command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
 done
 [ -z "$missing" ] || {
     echo "mkiso: the build host is missing:$missing" >&2
-    echo "       Debian/Ubuntu: mmdebstrap uidmap dpkg-dev kmod zstd xorriso mtools" >&2
+    echo "       Debian/Ubuntu: mmdebstrap uidmap dpkg-dev kmod xorriso mtools" >&2
     echo "       grub-common binutils python3 python3-pip" >&2
     exit 1
 }
@@ -412,7 +412,25 @@ python3 "$ROOT/build/verify.py" \
 say "stage 4: newc | zstd"
 mkdir -p "$ISO_TREE/boot"
 python3 "$ROOT/build/mkinitramfs.py" --rootfs "$ROOTFS" --output "$WORK/initramfs.cpio"
-zstd -19 -T0 -q -f -o "$ISO_TREE/boot/initramfs.zst" "$WORK/initramfs.cpio"
+
+# THE COMPRESSOR COMES FROM THE PINNED POOL, extracted and never installed, like the boot chain in
+# stage 5. It was the host's, and the first cross-host pair found that two stock Ubuntu 24.04 hosts
+# ship zstd 1.5.5 and 1.5.7, which write different initramfs bytes (`docs/reproducible-build.md`).
+# `build/verify.py`'s `compressor_from_the_pool` fails the suite if a bare `zstd` compresses again.
+ZSTD_STAGE=$WORK/zstd
+mkdir -p "$ZSTD_STAGE"
+for package in zstd libzstd1; do
+    set -- "$INPUTS"/deb/harness/"${package}"_*.deb
+    [ "$#" -eq 1 ] && [ -f "$1" ] || {
+        echo "mkiso: expected one ${package} .deb in build/inputs/deb/harness, found: $*" >&2
+        exit 1
+    }
+    dpkg-deb -x "$1" "$ZSTD_STAGE"
+done
+pool_zstd() {
+    LD_LIBRARY_PATH="$ZSTD_STAGE/usr/lib/x86_64-linux-gnu" "$ZSTD_STAGE/usr/bin/zstd" "$@"
+}
+pool_zstd -19 -T0 -q -f -o "$ISO_TREE/boot/initramfs.zst" "$WORK/initramfs.cpio"
 rm -f "$WORK/initramfs.cpio"
 cp "$KERNEL_STAGE/boot/vmlinuz-$KVER" "$ISO_TREE/boot/vmlinuz"
 
@@ -524,7 +542,6 @@ tools=$( {
     mmdebstrap --version
     xorriso -version 2>&1 | head -1
     mformat --version | head -1
-    zstd --version
     grub-mkstandalone --version
     depmod --version | head -1
     python3 -m pip --version | cut -d' ' -f1-2
@@ -543,4 +560,6 @@ cat <<EOF
 
   arranged by (host tools, not pinned):
 $tools
+
+  compressed by (pinned pool): $(pool_zstd --version)
 EOF

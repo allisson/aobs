@@ -912,3 +912,29 @@ def test_the_pool_paths_and_comments_about_the_host_pass() -> None:
         'cp "$LOADERS/usr/lib/ISOLINUX/isolinux.bin" x\n'
         'grub-mkstandalone -O x86_64-efi \\\n    --directory "$LOADERS/usr/lib/grub/x86_64-efi" \\\n    -o y\n'
     )
+
+
+def test_mkiso_compresses_with_the_pool_zstd() -> None:
+    verify.compressor_from_the_pool((ROOT / "build" / "mkiso.sh").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'zstd -19 -T0 -q -f -o "$ISO_TREE/boot/initramfs.zst" "$WORK/initramfs.cpio"',
+        'cat x | zstd -19 > y',
+        'zstd \\\n    -19 -o y x',
+    ],
+)
+def test_a_host_zstd_fails(line: str) -> None:
+    """The rule bites: the form stage 4 used before, piped, and split across lines."""
+    with pytest.raises(verify.PinFileError, match="host's zstd"):
+        verify.compressor_from_the_pool(f"set -eu\n{line}\n")
+
+
+def test_the_pool_zstd_and_version_lines_pass() -> None:
+    verify.compressor_from_the_pool(
+        "# it used to run zstd -19 off the host\n"
+        'pool_zstd -19 -T0 -q -f -o y x\n'
+        "    zstd --version\n"
+    )

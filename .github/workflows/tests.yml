@@ -194,7 +194,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
-            mmdebstrap uidmap dpkg-dev kmod zstd xorriso mtools \
+            mmdebstrap uidmap dpkg-dev kmod xorriso mtools \
             grub-common binutils
           mmdebstrap --version
 
@@ -216,7 +216,7 @@ jobs:
       #
       # `sudo` sets the stage and nothing more: the build itself runs as `rebuilder`, unprivileged,
       # exactly as build A runs as `runner`. Not varied, because a runner cannot: the host kernel,
-      # the CPU count (fact 8 is answered by measuring zstd alone) and the arranging tools.
+      # the CPU count (fact 8 is answered by measuring the pool's zstd alone) and the arranging tools.
       - name: Build B, under hostile variation
         run: |
           set -eu

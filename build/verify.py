@@ -838,6 +838,28 @@ def no_loader_read_from_the_host(script: str) -> None:
         raise PinFileError("build/mkiso.sh takes boot-chain code from the build host:\n  " + "\n  ".join(offending))
 
 
+#: A `zstd` invocation that compresses: one that names a level. `--version` compresses nothing.
+_ZSTD_COMPRESSES = re.compile(r"(?:^|[\s;|&(])zstd\s+-\d")
+
+
+def compressor_from_the_pool(script: str) -> None:
+    """`build/mkiso.sh` compresses the initramfs with the pinned pool's zstd, not the host's.
+
+    Two stock Ubuntu 24.04 hosts ship zstd 1.5.5 and 1.5.7, and the two write different initramfs
+    bytes from the same cpio (`docs/reproducible-build.md`, the cross-host pair). A source check for
+    the reason `no_loader_read_from_the_host` gives: a host with the same version is silent. Stage 4
+    calls the extracted binary through `pool_zstd`, so a bare `zstd -<level>` is the host's.
+    """
+    code = re.sub(r"\\\n", " ", script)
+    offending = [
+        line.strip()
+        for line in code.splitlines()
+        if not line.lstrip().startswith("#") and _ZSTD_COMPRESSES.search(line)
+    ]
+    if offending:
+        raise PinFileError("build/mkiso.sh compresses with the build host's zstd:\n  " + "\n  ".join(offending))
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="build-time assertions")
     parser.add_argument("--closure", type=Path, help="the fetched appliance pool")

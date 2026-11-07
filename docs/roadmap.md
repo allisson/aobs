@@ -964,6 +964,16 @@ exit criterion. They stay in this milestone because their evidence is the same k
       comparison, 2 m 38 s against its 30-minute timeout (run 42391685056, warm `build/inputs`
       cache). A cold cache adds the snapshot fetch, which `tests.yml` records as once passing ten
       minutes.
+- [x] **Take zstd from the pinned pool.** *Added 2026-11-07, after the cross-host pair under the
+      exit below*: stock `ubuntu-24.04` (the runner image) and `ubuntu:24.04` (Docker) ship zstd
+      1.5.7 and 1.5.5, and the two wrote different ISOs from one commit. That narrows the decision
+      above — the arranging tools stay the host's — by one tool, and only by the one that has
+      differed between two real hosts. Stage 4 extracts `zstd` and `libzstd1` from the harness pool
+      with `dpkg-deb -x`, as stage 5 does the boot chain, and runs the extracted binary; the build
+      prints its version apart from the host tools'. `build/verify.py`'s `compressor_from_the_pool`
+      fails the suite if a bare `zstd` compresses again, fed three broken forms. Neither CI nor
+      `build/Dockerfile.isohost` installs zstd any more, and the preflight no longer asks for it.
+      Fact 8 is re-measured on the pool's 1.5.7 in `docs/reproducible-build.md`.
 - [ ] The **input archive**: every byte the build consumes that the build did not write, fetched,
       verified and published as one thing, so a release stays rebuildable after upstream stops serving
       those bytes. Every member must be a function of the package set, or two fetches of the same set
