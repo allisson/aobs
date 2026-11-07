@@ -926,6 +926,21 @@ exit criterion. They stay in this milestone because their evidence is the same k
 - [ ] CI builds twice under deliberately hostile variation and fails on any differing byte.
 - [ ] Fix every divergence source found. `SOURCE_DATE_EPOCH` throughout; deterministic `cpio` ordering,
       ownership and timestamps; deterministic `mmdebstrap` output; no build-host paths in the image.
+
+      *The sources the contract had already found are closed, ahead of the guard* — the guard would
+      otherwise start red on facts already observed, and a red guard cannot merge. SOURCE_DATE_EPOCH
+      is the commit's, exported, and the `date +%s` fallback is a refusal; `umask 022`; the signing
+      check runs under `python3 -B`, so no `.pyc` ships; xorriso writes `-uid 0 -gid 0` and
+      `--set_all_file_dates`; the FAT serial is fixed with `-N`; the RAM floor and the EFI image are
+      sized from file lengths, not `du`. `zstd -T0` is left for the guard to judge.
+      `docs/reproducible-build.md` marks each *closed* — not *held*, because no guard has varied it.
+      The row stays open for whatever the guard finds next.
+
+      *Evidence*: two `build/mkiso-docker.sh` builds of one tree, five minutes apart, produced the
+      same ISO, `824e0124…5f7d`. That pair varied only the clock. The pair before the
+      `--set_all_file_dates` fix differed in 114 bytes, all ISO 9660 and Rock Ridge record dates —
+      xorriso 1.5.6 under `-as mkisofs` takes the volume dates from SOURCE_DATE_EPOCH and not the
+      file dates, which the contract had assumed it would.
 - [ ] Runs on `build/**` pull requests. Record the measured wall-clock against the timeout, as the
       predecessor did (14 m 42 s against a 40-minute threshold — and it no longer carries a 249 s
       kernel compile).

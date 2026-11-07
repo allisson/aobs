@@ -167,8 +167,8 @@ owns the model, `docs/review-screen.md` the screen, `tests/test_adversarial_corp
 
 **Checkable by rebuilding**, and it is the claim the project actually rests on: the signature tells
 you who to blame, the rebuild tells you whether to. Due in M4; `docs/reproducible-build.md` owns
-it, and states that none of it has been demonstrated — no two builds have been compared, and three
-environment facts are already observed reaching the ISO. Until an independent rebuild exists, see
+it, and states how little of it has been demonstrated — the guard has never run, and the one pair of
+builds compared varied only the clock. Until an independent rebuild exists, see
 Tier 2's *pre-trust* entry — the mechanism being checkable is not the same as its having been
 checked.
 
