@@ -6,19 +6,36 @@ The reproducibility contract: which facts of a build environment must not reach 
 `docs/boot-pipeline.md` is how the image is built; this document is only about whether two builds
 agree.
 
-**Almost nothing in this document has been demonstrated.** The guard — two builds under deliberately
-hostile variation, compared byte for byte — has not run. What has run is one pair of local builds of
-one tree, below, which varied exactly one fact. Every other *held* and *closed* is a reading of the
-code, cited to the line, and is a claim the guard has not yet tested. The contract is written before
-the guard so that the guard knows what to vary and a failure knows what it broke.
+**The guard runs on every push and pull request**, as the last steps of the `image` job in
+`.github/workflows/tests.yml`: the commit is built twice on one `ubuntu-24.04` runner, the second
+build under deliberately hostile variation, and the job fails on any differing byte. On a difference
+it prints which files of the ISO tree and which 2 KiB sectors of the image differ.
 
-**One pair, identical.** 2026-11-07, `build/mkiso-docker.sh` twice in a row on one machine, the
-second build starting after the first had finished (about five minutes apart): both ISOs
-`824e01249914322a3e39172bf62b9a5295cd98643ebb2d0e7a090648a6e15f7d`. Same container, same uid, same
-umask, same CPU count, same filesystem, same path — so the one fact varied was the clock (fact 4),
-and the pair shows only that the wall clock no longer reaches the bytes. The pair before it, without
-`--set_all_file_dates`, differed in 114 bytes, every one of them a directory or file date in the ISO
-9660 and Rock Ridge records; the initramfs, kernel, EFI image and loaders already matched.
+| | Build A | Build B |
+|---|---|---|
+| User and uid | `runner` | `rebuilder`, created for the run |
+| Path | `$GITHUB_WORKSPACE` | `/mnt/rebuild/elsewhere` |
+| Filesystem | the runner's | tmpfs |
+| Hostname | the runner's | `rebuild-b`, kernel and `/etc/hostname` |
+| Caller's umask | the runner's | `077` |
+| Timezone | the runner's | `Pacific/Chatham` |
+| Locale | the runner's | `LC_ALL=C` |
+| `SOURCE_DATE_EPOCH` in the environment | unset | `1`, which the script must ignore |
+| Clock | — | a minute or more later |
+
+**First green run**: 2026-11-07, run
+[42391685056](https://github.com/allisson/aobs/actions/runs/42391685056) at `68bdd5a`, both builds
+`bc55a73f86bb0709c6571e38f42ff32f9a8f8343ff6903e0d21393673aa3fa37`. The run before it failed and
+found fact 6.
+
+**What that shows, and what it does not.** One runner, so one host kernel, one CPU count and one set
+of arranging tools — none of those was varied, and the roadmap's M4 exit, two builds on
+*deliberately different hosts*, is not met by it. What it shows is that, on one host, none of the
+facts in the table above it reaches the bytes.
+
+Before the guard, a pair of local `build/mkiso-docker.sh` builds varied only the clock and agreed
+(`824e0124…5f7d`); the pair before that, without `--set_all_file_dates`, differed in 114 bytes of ISO
+9660 and Rock Ridge record dates.
 
 ## What the contract is about
 
@@ -49,8 +66,7 @@ and the pair shows only that the wall clock no longer reaches the bytes. The pai
 
 Each fact carries one status:
 
-- **held** — a mechanism in the code keeps it out, and always did, cited. Unmeasured until the guard
-  runs.
+- **held** — it is kept out, cited where a mechanism does it, **and a green guard run varied it**.
 - **closed** — it leaked, and a change now keeps it out, cited. Stays *closed* rather than *held*
   until a guard run has varied it (*What changes this document*, below).
 - **leaks** — a mechanism carries it into the bytes, cited. *Observed* where a build was inspected;
@@ -59,23 +75,21 @@ Each fact carries one status:
 - **unknown** — nothing read so far either holds it out or lets it in.
 
 The original observations come from one local build of `9124dd9` (2026-09-12, via
-`build/mkiso-docker.sh`), inspected in `out/work/`; the closures were checked on a build of this
-change, 2026-11-07. One build can show that a value is present or absent; only two builds can show
-that it varies.
+`build/mkiso-docker.sh`), inspected in `out/work/`. Every *held* below rests on run 42391685056.
 
 | # | Fact | Status | Where |
 |---|---|---|---|
 | 1 | Build path | held | below |
 | 2 | Hostname | held | below |
-| 3 | User name and uid | closed | below |
-| 4 | Clock | closed, varied once locally | below |
-| 5 | Locale | unknown | below |
-| 6 | Timezone | closed — found by the guard | below |
-| 7 | umask | closed | below |
+| 3 | User name and uid | held | below |
+| 4 | Clock | held | below |
+| 5 | Locale | held | below |
+| 6 | Timezone | held — found by the guard | below |
+| 7 | umask | held | below |
 | 8 | CPU count | held, measured on zstd alone | below |
 | 9 | Host kernel | unknown | below |
 | 10 | Host architecture | refused | below |
-| 11 | Host filesystem | closed | below |
+| 11 | Host filesystem | held | below |
 
 ### 1. Build path — held
 
@@ -86,12 +100,15 @@ that it varies.
   (`build/mkiso.sh:321-332`), so the random name does not survive.
 - The signing check compiles nothing to disk (fact 4), so no bytecode records a source path.
 
+Varied by the guard: `$GITHUB_WORKSPACE` against `/mnt/rebuild/elsewhere`.
+
 ### 2. Hostname — held
 
 mmdebstrap copies the host's `etc/hostname` and `etc/resolv.conf` into the chroot; the first
-customize hook deletes both (`build/mkiso.sh:237`).
+customize hook deletes both (`build/mkiso.sh:237`). Varied by the guard: build B sets both the
+kernel's hostname and `/etc/hostname` to `rebuild-b`.
 
-### 3. User name and uid — closed
+### 3. User name and uid — held
 
 - **Held in the initramfs.** Every `newc` member is written `uid 0, gid 0` whoever built it
   (`build/mkinitramfs.py:96-97`).
@@ -99,9 +116,9 @@ customize hook deletes both (`build/mkiso.sh:237`).
   `$ISO_TREE` on the build host — observed `uid 1001 gid 1001` on the root directory, `BOOT` and
   `EFIBOOT.IMG`, the `builder` user of `build/Dockerfile.isohost`. `-uid 0 -gid 0`
   (`build/mkiso.sh:486`) now writes every record as root; observed on the root directory of the
-  2026-11-07 build. Not varied: both builds of the pair ran as uid 1001.
+  2026-11-07 build. Varied by the guard: `runner` against a fresh `rebuilder`.
 
-### 4. Clock — closed, varied once locally
+### 4. Clock — held
 
 `SOURCE_DATE_EPOCH` is the commit's timestamp and is exported (`build/mkiso.sh:116-122`), so every
 tool that reads it sees it. What it reaches:
@@ -128,18 +145,21 @@ one failed its timestamp check at boot and was recompiled in memory.
 
 **The fallback is gone.** With no git metadata the build used `date +%s`; it now refuses to start.
 
-What has not been looked at: whether the bytecode Debian's own maintainer scripts compile under
-`/usr/lib/python3*` during mmdebstrap is byte-stable. Its source mtimes come from the `.deb`s, not
-the clock, and the pair agreeing is consistent with that; the guard will say more.
+Varied by the guard: build B starts after build A has finished, and is handed
+`SOURCE_DATE_EPOCH=1`, which the script overrides with the commit's. Not looked at individually: the
+bytecode Debian's own maintainer scripts compile under `/usr/lib/python3*` during mmdebstrap. Its
+source mtimes come from the `.deb`s, and the guard agreeing says it did not vary across these two
+builds.
 
-### 5. Locale — unknown
+### 5. Locale — held
 
-The orderings that reach the image are locale-free: `mkinitramfs.py` sorts with Python's codepoint
-order (`:125`). The host `sort` and `find` in stage 3d produce listings for `build/verify.py`, which
-are not in the image. What maintainer scripts write under the host's locale inside mmdebstrap has not
-been looked at.
+No change was needed, and the guard varied it (`LC_ALL=C` against the runner's own environment). The
+orderings that reach the image are locale-free: `mkinitramfs.py` sorts with Python's codepoint order
+(`:125`). The host `sort` and `find` in stage 3d produce listings for `build/verify.py`, which are
+not in the image. What maintainer scripts write under the host's locale was not read; the guard is
+what says it does not reach the bytes.
 
-### 6. Timezone — closed
+### 6. Timezone — held
 
 **Found by the guard's first run** (2026-11-07, run
 [42390592651](https://github.com/allisson/aobs/actions/runs/42390592651)): build B, under
@@ -151,15 +171,16 @@ clock change nothing.
 
 The script now exports `TZ=UTC` before anything else (`build/mkiso.sh:28`), which covers every tool
 it runs rather than mtools alone. The one date the script formats itself already used `date -u`
-(`build/mkiso.sh:267`).
+(`build/mkiso.sh:267`). The next run, 42391685056, was green with the same variation.
 
-### 7. umask — closed
+### 7. umask — held
 
 The build is unprivileged, and an unprivileged `tar -x` applies the caller's umask to every mode it
 restores (`--no-same-permissions` is GNU tar's default for non-root). The rootfs is unpacked that way
 (`build/mkiso.sh:253`), the staged Python layer and app tree are created under it
 (`build/mkiso.sh:158-182`), and `mkinitramfs.py` writes each file's `st_mode` into its header. The
-script now sets `umask 022` before anything else (`build/mkiso.sh:23`). Not varied.
+script now sets `umask 022` before anything else (`build/mkiso.sh:23`). Varied by the guard: build
+B's caller runs under `umask 077`.
 
 ### 8. CPU count — held, measured on zstd alone
 
@@ -171,7 +192,8 @@ So a host with any number of CPUs writes the same initramfs.
 
 This is *held* without a guard run that varied it, the one exception in this table, because no guard
 can: every runner the guard has gets the same CPU count, and the measurement varies the one place the
-count is read. It is a property of zstd 1.5.5 — another version is input 4, not this fact.
+count is read. It is a property of zstd 1.5.5 — another version is input 4, not this fact. The
+guard's runner has zstd 1.5.7, on which this was not measured.
 
 ### 9. Host kernel — unknown
 
@@ -185,13 +207,13 @@ Stage 0 stops on anything but `x86_64` (`build/mkiso.sh:72-77`). That refuses a 
 it does not cover an amd64 container under emulation, which reports `x86_64` and is what
 `build/mkiso-docker.sh` uses on an arm64 machine. Whether emulation changes a byte is unmeasured.
 
-### 11. Host filesystem — closed
+### 11. Host filesystem — held
 
 Not in the roadmap's list, and found by reading stage 3c. The RAM floor was derived from `du -sk` of
 the unpacked rootfs, and `du` reports **allocated blocks**, which depend on the filesystem the build
 runs on; the derived `RAM_REQUIRED_MIB` is substituted into `/init` (`build/mkiso.sh:362-365`). The
 EFI image was sized the same way. Both now sum the files' own lengths (`build/mkiso.sh:356`, `:466`),
-which no filesystem changes. Not varied.
+which no filesystem changes. Varied by the guard: build B runs on tmpfs.
 
 ## Not claimed
 
