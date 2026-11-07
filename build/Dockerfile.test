@@ -36,7 +36,14 @@
 # failure is at least loud. The one worth pinning against is not: a host that silently produced an
 # arm64 tier would be judging the appliance's code against a different libc and a different
 # `libsecp256k1`, and reporting it green.
-FROM --platform=linux/amd64 debian:trixie-slim
+#
+# THE BASE IMAGE IS PINNED BY DIGEST, to the last dated `trixie-slim` before `DEBIAN_SNAPSHOT`.
+# The `.deb`s installed below are fixed at the snapshot; the floating `trixie-slim` tag is not, and
+# once a Debian point release moved it past the snapshot, `apt-get install` met 17 packages it would
+# have to downgrade and refused. A base newer than the snapshot cannot be installed over, so the two
+# pins move together: bump `build/snapshot.env`, then this line and `BASE_IMAGE` in
+# `build/fetch-inputs.sh` to the last dated tag before the new instant.
+FROM --platform=linux/amd64 debian:trixie-20260824-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
 
 SHELL ["/bin/sh", "-euxc"]
 
