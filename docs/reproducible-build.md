@@ -51,6 +51,13 @@ CPU count differed is not known. One pair, both builds started by the maintainer
 corroboration of facts 9 and 10, not a guard run, so neither moves to *held*, and not the
 independent rebuild `docs/threat-model.md` claim (ix) asks for.
 
+**A second pair, with nothing swapped by hand**, once stage 4 took zstd from the pool (#56). CI's
+pull-request run [42409799659](https://github.com/allisson/aobs/actions/runs/42409799659) built the
+merge commit `93f9667` twice, `c6cd7ed1dc4f957ee44914d0dc356016880c7189e585f395e6a2c5bc9fefb4d5`.
+The same commit, built by `build/mkiso-docker.sh` on the same Mac from a host image with no `zstd`
+installed at all, wrote the same digest. The same limits as the first pair apply: one pair, both
+builds started by the maintainer.
+
 Before the guard, a pair of local `build/mkiso-docker.sh` builds varied only the clock and agreed
 (`824e0124…5f7d`); the pair before that, without `--set_all_file_dates`, differed in 114 bytes of ISO
 9660 and Rock Ridge record dates.
@@ -69,9 +76,11 @@ Before the guard, a pair of local `build/mkiso-docker.sh` builds varied only the
    the commit's own timestamp, ignores any value in the caller's environment, refuses a checkout with
    no git metadata, and exports it.
 4. **The versions of the host's arranging tools**, by decision (`docs/roadmap.md` M4). mmdebstrap,
-   xorriso, mtools, zstd, `grub-mkstandalone`, the host's `depmod` and the host's pip supply no
+   xorriso, mtools, `grub-mkstandalone`, the host's `depmod` and the host's pip supply no
    bytes — every byte comes from the input archive — but they decide how those bytes are laid out,
-   and they are the host's and unpinned. The build prints each one's version beside the ISO's
+   and they are the host's and unpinned. zstd was one of them until the cross-host pair below showed
+   it differing between two stock Ubuntu 24.04 hosts; stage 4 now runs the pinned pool's
+   (`build/mkiso.sh`, `pool_zstd`), and the build prints its version on a line of its own. The build prints each one's version beside the ISO's
    digest. A rebuild that disagrees compares those lines first: if they differ, it has found this
    input, not a defect.
 
@@ -104,7 +113,7 @@ The original observations come from one local build of `9124dd9` (2026-09-12, vi
 | 5 | Locale | held | below |
 | 6 | Timezone | held — found by the guard | below |
 | 7 | umask | held | below |
-| 8 | CPU count | held, measured on zstd alone | below |
+| 8 | CPU count | held, measured on the pool's zstd alone | below |
 | 9 | Host kernel | unknown | below |
 | 10 | Host architecture | refused | below |
 | 11 | Host filesystem | held | below |
@@ -210,8 +219,14 @@ So a host with any number of CPUs writes the same initramfs.
 
 This is *held* without a guard run that varied it, the one exception in this table, because no guard
 can: every runner the guard has gets the same CPU count, and the measurement varies the one place the
-count is read. It is a property of zstd 1.5.5 — another version is input 4, not this fact. The
-guard's runner has zstd 1.5.7, on which this was not measured.
+count is read.
+
+The build now runs the pinned pool's zstd 1.5.7 (`zstd_1.5.7+dfsg-1`), not the host's, so the
+measurement was repeated on it, 2026-11-07, against the same initramfs (134,279,292 bytes
+uncompressed), on a host reporting 8 CPUs: `-T0`, `-T1`, `-T2`, `-T3`, `-T4`, `-T8` and `-T16` all
+wrote `63989a9c3f2a43dc770c9c288da07af063bbecea3c0f4c640021dbfa07e1f73e`; `--single-thread` wrote
+`fd195f30…99a8`. The 1.5.5 result above is history, kept because it is what the guard's first
+green run rested on.
 
 ### 9. Host kernel — unknown
 
@@ -239,18 +254,23 @@ which no filesystem changes. Varied by the guard: build B runs on tmpfs.
 ## Not claimed
 
 1. **That a host with different arranging tools reproduces the ISO.** Input 4 above, stated here
-   from the other side. xorriso lays out the ISO, `mformat`/`mcopy` the EFI partition, zstd the
-   initramfs compression, the host's `depmod` writes `modules.dep*` into the rootfs, the host's pip
+   from the other side. xorriso lays out the ISO, `mformat`/`mcopy` the EFI partition, the host's
+   `depmod` writes `modules.dep*` into the rootfs, the host's pip
    writes each wheel's install metadata, and `grub-mkstandalone` assembles `bootx64.efi` from the
    pool's modules. A different version of any of them may write different bytes from identical
    inputs, and the contract does not promise otherwise.
 
-   *Why the tools are not pinned too*: the harness group already pins mmdebstrap, xorriso and zstd
+   *Why the tools are not pinned too*: the harness group already pins mmdebstrap and xorriso
    at the snapshot, but using them means building inside an image made from that pool — a
    container — and on every host measured so far a container reaches stage 1 only `--privileged`
    (`build/mkiso-docker.sh`), while the build's unprivileged claim is measured on a bare
    `ubuntu-24.04` runner. Decided 2026-11-07, `docs/roadmap.md` M4; that ending stays available
    after v0.1 without reversing anything.
+
+   *zstd is the exception, taken out of this item by evidence*: it differed between two real hosts,
+   and it is one binary and one library that run extracted, with no install and no container. The
+   same extraction was not tried for the tools above; none of them has yet differed between two
+   hosts.
 
 2. **That the input archive is reproducible.** A separate M4 row. This contract takes
    `build/inputs/` as given, checked by hash.
