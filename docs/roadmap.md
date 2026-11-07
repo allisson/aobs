@@ -346,9 +346,11 @@ scanned back out, and the transaction broadcast on **testnet4** —
 Signet was the network written into the script below; testnet4 is a peer of it in
 `docs/network-selection.md` and the substitution changes nothing the run was checking.
 
-**The gate stays open.** The exit is two things joined by an *and*, and only the first is met: there
-is no run record, and none of the boxes below has been answered as evidence a stranger can read. One
-machine that boots is also not a hardware-compatibility claim, and the README does not make one.
+**The gate stayed open at this point.** The exit is two things joined by an *and*, and only the
+first was met: there was no run record, and none of the boxes below had been answered as evidence a
+stranger can read. The run record of 2026-09-11 is what closed it — see the exit line at the end of
+this milestone. One machine that boots is also not a hardware-compatibility claim, and the README
+does not make one.
 
 **The machine was then characterised, and characterising it found a fourth fault — this one in the
 vocabulary.** The target is an **Acer Chromebook 514 `CB514-1H-C0FF`** (Intel Apollo Lake,
@@ -834,9 +836,16 @@ them are claims the repository makes that this run did not support.
       *`docs/boot-runs/2026-09-11-cb514-1h.md` is left as written. It already states that its
       digest was attested after the fact, and that is the honest record of what happened.*
 
-**Exit**: one PSBT signed on real hardware and broadcast, and a run record with every row answered.
+**Exit**: ~~one PSBT signed on real hardware and broadcast, and a run record with every row
+answered.~~ **Met**, by `docs/boot-runs/2026-09-11-cb514-1h.md`: the PSBT half by the testnet4
+broadcasts `dcdfc90e…6b3a07` and `37cdd405…bdb44`, the record half by 24 `pass`, 2 `deviated` with
+written reasons and 0 `fail` — every row answered. One machine, a BIOS path, and nothing about any
+other host.
 
-Everything below this line waits.
+**The open rows above are post-gate and do not hold the gate.** #26 (first UEFI boot), #46 (Secure
+Boot) and #19 (the intermittent camera) each wait on hardware or on a recurrence, and none is in the
+exit criterion. They stay in this milestone because their evidence is the same kind — a run record
+— and M4 starts without them.
 
 ---
 
@@ -898,10 +907,11 @@ Everything below this line waits.
 
 Not in scope for the release, recorded so nobody has to rediscover that they were considered.
 
-- **Secure Boot**, via Debian's signed `shim` + `grub` + signed kernel. Genuinely achievable now that
-  the kernel is Debian's — pruning the modules tree does not break the kernel image's signature — but
-  it adds a second boot path to test and raises reproducibility questions about signed blobs. Best
-  candidate for the first post-v0.1 milestone.
+- **Secure Boot** is tracked in one place, the M3 post-gate row (#46), which carries the two endings
+  and why choosing between them is an ADR. It is listed here only to say it is **not a v0.1
+  requirement**: `docs/threat-model.md` states v0.1 supports Secure Boot on no host, and the row
+  sitting inside M3 does not change that. It also raises reproducibility questions about signed
+  blobs that M4's contract does not answer. Best candidate for the first post-v0.1 milestone.
 - **Witness build**: an independent rebuild published so a third party can see two hashes agree. It
   never ran in the predecessor and cannot run before a tag exists. Worth doing once there is a tag to
   test it against, with the limit stated: a key in GitHub's secret store corroborates the build, not
