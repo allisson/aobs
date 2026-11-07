@@ -17,6 +17,11 @@
 
 set -eu
 
+# THE CALLER'S UMASK IS NOT AN INPUT. The build is unprivileged, so every `tar -x` and every file it
+# creates takes its mode from the umask, and `build/mkinitramfs.py` writes each `st_mode` into the
+# archive. `docs/reproducible-build.md`, fact 7.
+umask 022
+
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 INPUTS=$ROOT/build/inputs
 OUT=$ROOT/out
@@ -97,6 +102,19 @@ present=$(find "$INPUTS" -type f | wc -l)
 # The pin-file and closure assertions, before a single package is unpacked. Both are cheap and
 # both fail for reasons that would otherwise only show up as a strange rootfs.
 python3 "$ROOT/build/verify.py" --closure "$INPUTS/deb/appliance"
+
+# THE ONE CLOCK THE BUILD HAS: the commit's own timestamp, never the caller's environment and never
+# `date`. EXPORTED, because mmdebstrap, xorriso and mtools read it from the environment — the volume
+# dates, the file dates in the ISO and the FAT entries are theirs, not this script's. A checkout with
+# no git metadata is refused rather than given the wall clock: that fallback was a build whose bytes
+# depended on when it ran. `docs/reproducible-build.md`, fact 4.
+SOURCE_DATE_EPOCH=$(cd "$ROOT" && git log -1 --pretty=%ct 2>/dev/null) || SOURCE_DATE_EPOCH=
+[ -n "$SOURCE_DATE_EPOCH" ] || {
+    echo "mkiso: no git metadata in $ROOT, so no SOURCE_DATE_EPOCH to build with." >&2
+    echo "       Build from a git checkout; the commit's timestamp is the build's only clock." >&2
+    exit 1
+}
+export SOURCE_DATE_EPOCH
 
 rm -rf "$WORK"
 mkdir -p "$WORK" "$OUT"
@@ -190,6 +208,11 @@ chmod 644 "$POOL"/*.deb
 # mmdebstrap already has all of it — it maps through setuid `newuidmap` and sets the chroot up for
 # maintainer scripts. Running the check inside its hook uses the one mechanism that demonstrably
 # works on this host, and deletes a helper rather than adding one.
+#
+# `-B`, because the check imports the whole app and would otherwise leave `__pycache__` behind it,
+# carrying the checkout's source mtimes into the image. Those files were never used: every source
+# mtime in the initramfs is SOURCE_DATE_EPOCH, so each one failed its timestamp check at boot and was
+# recompiled in memory under PID 1's `PYTHONDONTWRITEBYTECODE=1`. `docs/reproducible-build.md`, fact 4.
 includes="--include=?essential"
 for pin in $(awk '
     /^# @group / { g = $3; next }
@@ -210,7 +233,7 @@ mmdebstrap \
     --customize-hook="copy-in $STAGING/aobs-python /opt" \
     --customize-hook="copy-in $STAGING/aobs /opt" \
     --customize-hook="copy-in $ROOT/build/signcheck.py /" \
-    --customize-hook='chroot "$1" /usr/bin/python3 /signcheck.py' \
+    --customize-hook='chroot "$1" /usr/bin/python3 -B /signcheck.py' \
     --customize-hook='rm -f "$1"/signcheck.py' \
     "$DEBIAN_SUITE" "$WORK/rootfs.tar" "deb [trusted=yes] copy://$POOL ./"
 
@@ -236,7 +259,6 @@ tag=$(cd "$ROOT" && git describe --exact-match --tags 2>/dev/null || echo "")
 # A build that is not at a clean tag says `development` and NEVER a version-shaped string, so that
 # nobody signs with one months later believing it was a release.
 if [ -n "$tag" ] && [ "$dirty" = "no" ]; then release=$tag; else release=development; fi
-: "${SOURCE_DATE_EPOCH:=$(cd "$ROOT" && git log -1 --pretty=%ct 2>/dev/null || date +%s)}"
 released=$(date -u -d "@$SOURCE_DATE_EPOCH" +%Y-%m-%d 2>/dev/null || echo unknown)
 cat > "$ROOTFS/etc/aobs-release" <<EOF
 release: $release
@@ -323,7 +345,10 @@ rm -rf "$ROOTFS/usr/share/locale" "$ROOTFS/usr/share/doc" "$ROOTFS/usr/share/man
 # placeholders and `build/verify.py` fails the build if an unsubstituted one reaches the image.
 
 say "stage 3c: PID 1 and the derived RAM floor"
-unpacked_kib=$(du -sk "$ROOTFS" | awk '{print $1}')
+# The sum of the regular files' sizes, NOT `du`: `du` counts allocated blocks, which belong to the
+# filesystem the build runs on, and this number is written into `/init`. `docs/reproducible-build.md`,
+# fact 11.
+unpacked_kib=$(find "$ROOTFS" -type f -printf '%s\n' | awk '{ s += $1 } END { print int(s / 1024) }')
 unpacked_mib=$(( unpacked_kib / 1024 ))
 required_mib=$(( 2 * unpacked_mib + ARGON2_MIB + HEADROOM_MIB ))
 floor_mib=1
@@ -381,8 +406,7 @@ python3 "$ROOT/build/verify.py" \
 
 say "stage 4: newc | zstd"
 mkdir -p "$ISO_TREE/boot"
-SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH \
-    python3 "$ROOT/build/mkinitramfs.py" --rootfs "$ROOTFS" --output "$WORK/initramfs.cpio"
+python3 "$ROOT/build/mkinitramfs.py" --rootfs "$ROOTFS" --output "$WORK/initramfs.cpio"
 zstd -19 -T0 -q -f -o "$ISO_TREE/boot/initramfs.zst" "$WORK/initramfs.cpio"
 rm -f "$WORK/initramfs.cpio"
 cp "$KERNEL_STAGE/boot/vmlinuz-$KVER" "$ISO_TREE/boot/vmlinuz"
@@ -431,22 +455,31 @@ grub-mkstandalone -O x86_64-efi \
     -o "$WORK/efi/EFI/boot/bootx64.efi" \
     "boot/grub/grub.cfg=$ROOT/build/grub.cfg"
 
-# The EFI System Partition, as a FAT image El Torito can point at.
-efi_kib=$(( ( $(du -sk "$WORK/efi" | awk '{print $1}') + 1024 ) / 32 * 32 + 1024 ))
+# The EFI System Partition, as a FAT image El Torito can point at. Sized from the file's own length
+# and not `du`, for the reason stage 3c gives. `-N` fixes the volume serial, which mformat would
+# otherwise derive; the entry dates are SOURCE_DATE_EPOCH's, read by mtools from the environment.
+efi_kib=$(( ( $(stat -c %s "$WORK/efi/EFI/boot/bootx64.efi") / 1024 + 1024 ) / 32 * 32 + 1024 ))
 rm -f "$ISO_TREE/efiboot.img"
-mformat -i "$WORK/efiboot.img" -C -f "$efi_kib" -v AOBSEFI :: 2>/dev/null \
+mformat -i "$WORK/efiboot.img" -C -f "$efi_kib" -v AOBSEFI -N 414F4253 :: 2>/dev/null \
     || { dd if=/dev/zero of="$WORK/efiboot.img" bs=1024 count="$efi_kib" status=none
-         mformat -i "$WORK/efiboot.img" -v AOBSEFI :: ; }
+         mformat -i "$WORK/efiboot.img" -v AOBSEFI -N 414F4253 :: ; }
 mmd   -i "$WORK/efiboot.img" ::/EFI ::/EFI/boot
 mcopy -i "$WORK/efiboot.img" "$WORK/efi/EFI/boot/bootx64.efi" ::/EFI/boot/
 cp "$WORK/efiboot.img" "$ISO_TREE/efiboot.img"
 
 isohdpfx=$LOADERS/usr/lib/ISOLINUX/isohdpfx.bin
 
+# `-uid 0 -gid 0`: the Rock Ridge owner is otherwise whoever owns `$ISO_TREE` on the build host
+# (fact 3). The volume dates come from the exported SOURCE_DATE_EPOCH, which xorriso reads itself;
+# the FILE dates do not. Measured on xorriso 1.5.6 under `-as mkisofs`: with SOURCE_DATE_EPOCH set,
+# every directory and file record still carried its mtime on the build host, so two builds five
+# minutes apart differed in 114 bytes. `--set_all_file_dates` is what pins them.
 rm -f "$ISO"
 xorriso -as mkisofs \
     -iso-level 3 \
     -volid AOBS \
+    -uid 0 -gid 0 \
+    --set_all_file_dates "=$SOURCE_DATE_EPOCH" \
     -isohybrid-mbr "$isohdpfx" \
     -eltorito-boot isolinux/isolinux.bin \
     -eltorito-catalog isolinux/boot.cat \

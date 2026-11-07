@@ -693,6 +693,11 @@ Each term, and which are mechanism and which are headroom:
 - **`128 MiB` is headroom** for the Python heap and camera buffers. This is the one estimated term.
 - **Rounding to a power of two** is deliberate: the floor is a number a user checks against their
   machine, and a figure like 634 MiB would look measured to a precision nobody has.
+- **`unpacked_rootfs` is the sum of the regular files' lengths**, not `du`. `du` counts the blocks
+  the build host's filesystem allocated, and the derived requirement is written into `/init`, so a
+  `du` figure made the image depend on where it was built (`docs/reproducible-build.md`, fact 11).
+  The 155 MiB below was measured with `du`, and a figure measured after the change is not
+  comparable with it.
 
 **PID 1 compares against the unrounded requirement, not against the published floor, and the two
 numbers are in the script separately.** `MemTotal` on a machine with 512 MiB installed is always
