@@ -166,9 +166,11 @@ owns the model, `docs/review-screen.md` the screen, `tests/test_adversarial_corp
 ### (ix) Reproducibility
 
 **Checkable by rebuilding**, and it is the claim the project actually rests on: the signature tells
-you who to blame, the rebuild tells you whether to. Due in M4; `docs/reproducible-build.md` will own
-it. Until an independent rebuild exists, see Tier 2's *pre-trust* entry — the mechanism being
-checkable is not the same as its having been checked.
+you who to blame, the rebuild tells you whether to. Due in M4; `docs/reproducible-build.md` owns
+it, and states that none of it has been demonstrated — no two builds have been compared, and three
+environment facts are already observed reaching the ISO. Until an independent rebuild exists, see
+Tier 2's *pre-trust* entry — the mechanism being checkable is not the same as its having been
+checked.
 
 ### (x) Nothing verifies the boot medium before the kernel runs
 
@@ -275,8 +277,8 @@ to make room for this appliance, that adversary got cheaper, not more expensive.
   `docs/console-appearance.md` and `docs/scan-feedback.md` own what is drawn. This document owns what
   must be *true*, never what it looks like.
 - **The build's stages and PID 1.** `docs/boot-pipeline.md`.
-- **The reproducibility contract.** `docs/reproducible-build.md`, due in M4. Claim (ix) states the
-  promise; that document states the mechanism and the divergence sources it fixes.
+- **The reproducibility contract.** `docs/reproducible-build.md`. Claim (ix) states the promise;
+  that document states the mechanism, each environment fact's status, and what is not claimed.
 - **The checks only a booted appliance can answer.** `docs/boot-checklist.md` is the procedure and
   `docs/boot-runs/` holds the evidence. This document says which claims a boot can settle; it does
   not settle them.

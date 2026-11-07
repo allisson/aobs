@@ -397,7 +397,9 @@ say "stage 5: xorriso, hybrid BIOS + UEFI"
 
 # BIOS: isolinux, from the host's own syslinux files. These are loader bytes and not image content
 # — nothing here ends up in the running system, which is the whole reason the boot medium can be
-# pulled once the kernel and initramfs are in memory.
+# pulled once the kernel and initramfs are in memory. They ARE bytes of the ISO, though, and they
+# come from the host's unpinned packages rather than `build/inputs/`: `docs/reproducible-build.md`,
+# *Not claimed* item 1.
 mkdir -p "$ISO_TREE/isolinux"
 for f in isolinux.bin ldlinux.c32; do
     src=$(find /usr/lib/ISOLINUX /usr/lib/syslinux -name "$f" 2>/dev/null | head -1)
